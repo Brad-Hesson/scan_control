@@ -15,6 +15,22 @@
         packages = [
           pkgs.rustup
         ];
+        nativeBuildInputs = with pkgs; with pkgs.xorg; [
+          libxcb
+          libXcursor
+          libXrandr
+          libXi
+          pkg-config
+        ];
+        buildInputs = with pkgs; [
+          xorg.libX11
+          wayland
+          libxkbcommon
+        ];
+        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+          pkgs.libGL
+          pkgs.libxkbcommon
+        ];
       };
     }
   );
