@@ -11,26 +11,37 @@
       };
     in
     {
-      devShell = pkgs.mkShell {
+      devShell = pkgs.mkShell rec {
         packages = [
           pkgs.rustup
-        ];
-        nativeBuildInputs = with pkgs; with pkgs.xorg; [
-          libxcb
-          libXcursor
-          libXrandr
-          libXi
-          pkg-config
+          pkgs.renderdoc
         ];
         buildInputs = with pkgs; [
-          xorg.libX11
-          wayland
+          # necessary for building wgpu in 3rd party packages (in most cases)
           libxkbcommon
+          wayland
+          xorg.libX11
+          xorg.libXcursor
+          xorg.libXrandr
+          xorg.libXi
+          alsa-lib
+          fontconfig
+          freetype
+          shaderc
+          directx-shader-compiler
+          pkg-config
+          cmake
+          mold # could use any linker, needed for rustix (but mold is fast)
+
+          libGL
+          vulkan-headers
+          vulkan-loader
+          vulkan-tools
+          vulkan-tools-lunarg
+          vulkan-extension-layer
+          vulkan-validation-layers # don't need them *strictly* but immensely helpful
         ];
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-          pkgs.libGL
-          pkgs.libxkbcommon
-        ];
+        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
       };
     }
   );

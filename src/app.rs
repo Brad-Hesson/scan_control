@@ -1,23 +1,25 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
-use eframe::{egui_glow, glow};
-use egui::{mutex::Mutex, Vec2};
+use bytemuck::bytes_of;
+use eframe::{
+    egui_wgpu::{self, CallbackTrait, RenderState},
+    wgpu::{self, util::DeviceExt, BindGroup, Buffer, Device, Queue, RenderPipeline},
+};
+use egui::Vec2;
+use glam::Mat4;
 
 pub struct MyApp {
     /// Behind an `Arc<Mutex<…>>` so we can pass it to [`egui::PaintCallback`] and paint later.
-    rotating_triangle: Arc<Mutex<RotatingTriangle>>,
-    angle: f32,
+    world_transform: glam::Mat4,
+    triangle: ImageCallback,
 }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let gl = cc
-            .gl
-            .as_ref()
-            .expect("You need to run eframe with the glow backend");
+        let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         Self {
-            rotating_triangle: Arc::new(Mutex::new(RotatingTriangle::new(gl))),
-            angle: 0.0,
+            world_transform: glam::Affine3A::IDENTITY.into(),
+            triangle: ImageCallback::new(wgpu),
         }
     }
 }
@@ -38,12 +40,6 @@ impl eframe::App for MyApp {
             ui.label("Drag to rotate!");
         });
     }
-
-    fn on_exit(&mut self, gl: Option<&glow::Context>) {
-        if let Some(gl) = gl {
-            self.rotating_triangle.lock().destroy(gl);
-        }
-    }
 }
 
 impl MyApp {
@@ -52,135 +48,127 @@ impl MyApp {
             ui.available_size_before_wrap() - Vec2::Y * 20.,
             egui::Sense::drag(),
         );
-
-        self.angle += response.drag_motion().x * 0.01;
+        let del = Mat4::from_translation(
+            glam::Vec3::new(response.drag_motion().x, -response.drag_motion().y, 0.0) / 100.,
+        );
+        self.world_transform = del * self.world_transform;
 
         // Clone locals so we can move them into the paint callback:
-        let angle = self.angle;
-        let rotating_triangle = self.rotating_triangle.clone();
-
-        let callback = egui::PaintCallback {
-            rect,
-            callback: std::sync::Arc::new(egui_glow::CallbackFn::new(move |_info, painter| {
-                rotating_triangle.lock().paint(painter.gl(), angle);
-            })),
-        };
+        self.triangle.queue.write_buffer(
+            &self.triangle.uniform_buf,
+            0,
+            bytes_of(self.world_transform.as_ref()),
+        );
+        self.triangle.queue.submit([]);
+        let callback = egui_wgpu::Callback::new_paint_callback(rect, self.triangle.clone());
         ui.painter().add(callback);
     }
 }
 
-struct RotatingTriangle {
-    program: glow::Program,
-    vertex_array: glow::VertexArray,
+#[derive(Clone)]
+struct ImageCallback {
+    device: Arc<Device>,
+    pipeline: Arc<RenderPipeline>,
+    queue: Arc<Queue>,
+    bind_group: Arc<BindGroup>,
+    uniform_buf: Arc<Buffer>,
 }
+impl ImageCallback {
+    fn new(wgpu: &RenderState) -> Self {
+        let shader = wgpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("./image.wgsl"))),
+            });
 
-impl RotatingTriangle {
-    fn new(gl: &glow::Context) -> Self {
-        use glow::HasContext as _;
+        let bind_group_layout =
+            wgpu.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(64),
+                        },
+                        count: None,
+                    }],
+                });
 
-        let shader_version = if cfg!(target_arch = "wasm32") {
-            "#version 300 es"
-        } else {
-            "#version 330"
-        };
+        let pipeline_layout = wgpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-        unsafe {
-            let program = gl.create_program().expect("Cannot create program");
+        let pipeline = wgpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu.target_format.into())],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
 
-            let (vertex_shader_source, fragment_shader_source) = (
-                r#"
-                    const vec2 verts[3] = vec2[3](
-                        vec2(0.0, 1.0),
-                        vec2(-1.0, -1.0),
-                        vec2(1.0, -1.0)
-                    );
-                    const vec4 colors[3] = vec4[3](
-                        vec4(1.0, 0.0, 0.0, 1.0),
-                        vec4(0.0, 1.0, 0.0, 1.0),
-                        vec4(0.0, 0.0, 1.0, 1.0)
-                    );
-                    out vec4 v_color;
-                    uniform float u_angle;
-                    void main() {
-                        v_color = colors[gl_VertexID];
-                        gl_Position = vec4(verts[gl_VertexID], 0.0, 1.0);
-                        gl_Position.x *= cos(u_angle);
-                    }
-                "#,
-                r#"
-                    precision mediump float;
-                    in vec4 v_color;
-                    out vec4 out_color;
-                    void main() {
-                        out_color = v_color;
-                    }
-                "#,
-            );
+        let uniform_buf = wgpu
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Uniform Buffer"),
+                contents: bytemuck::bytes_of(Mat4::IDENTITY.as_ref()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
-            let shader_sources = [
-                (glow::VERTEX_SHADER, vertex_shader_source),
-                (glow::FRAGMENT_SHADER, fragment_shader_source),
-            ];
-
-            let shaders: Vec<_> = shader_sources
-                .iter()
-                .map(|(shader_type, shader_source)| {
-                    let shader = gl
-                        .create_shader(*shader_type)
-                        .expect("Cannot create shader");
-                    gl.shader_source(shader, &format!("{shader_version}\n{shader_source}"));
-                    gl.compile_shader(shader);
-                    assert!(
-                        gl.get_shader_compile_status(shader),
-                        "Failed to compile {shader_type}: {}",
-                        gl.get_shader_info_log(shader)
-                    );
-                    gl.attach_shader(program, shader);
-                    shader
-                })
-                .collect();
-
-            gl.link_program(program);
-            assert!(
-                gl.get_program_link_status(program),
-                "{}",
-                gl.get_program_info_log(program)
-            );
-
-            for shader in shaders {
-                gl.detach_shader(program, shader);
-                gl.delete_shader(shader);
-            }
-
-            let vertex_array = gl
-                .create_vertex_array()
-                .expect("Cannot create vertex array");
-
-            Self {
-                program,
-                vertex_array,
-            }
-        }
-    }
-
-    fn destroy(&self, gl: &glow::Context) {
-        use glow::HasContext as _;
-        unsafe {
-            gl.delete_program(self.program);
-            gl.delete_vertex_array(self.vertex_array);
-        }
-    }
-
-    fn paint(&self, gl: &glow::Context, angle: f32) {
-        use glow::HasContext as _;
-        unsafe {
-            gl.use_program(Some(self.program));
-            gl.uniform_1_f32(
-                gl.get_uniform_location(self.program, "u_angle").as_ref(),
-                angle,
-            );
-            gl.bind_vertex_array(Some(self.vertex_array));
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+        // Create bind group
+        let bind_group = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+            label: None,
+        });
+        Self {
+            device: wgpu.device.clone(),
+            pipeline: Arc::new(pipeline),
+            queue: wgpu.queue.clone(),
+            bind_group: Arc::new(bind_group),
+            uniform_buf: Arc::new(uniform_buf),
         }
     }
 }
+impl CallbackTrait for ImageCallback {
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut eframe::wgpu::RenderPass<'static>,
+        _callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.set_pipeline(&self.pipeline);
+        render_pass.draw(0..4, 0..1);
+    }
+}
+
