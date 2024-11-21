@@ -1,6 +1,7 @@
 const border_width: f32 = 0.02;
 const border_color: vec4<f32> = vec4(0.2, 1.0, 0.2, 1.0);
 
+// ------------ Vertex Shader ------------
 
 @group(0) @binding(0)
 var<uniform> world2screen: mat4x4<f32>;
@@ -31,11 +32,13 @@ fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     return result;
 }
 
-@group(1) @binding(1)
-var texture: texture_2d<f32>;
+// ------------ Fragment Shader ------------
 
 @group(0) @binding(1)
 var tex_sampler: sampler;
+
+@group(1) @binding(1)
+var texture: texture_2d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
@@ -49,6 +52,8 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     }
     return vec4(val, val, val, 1.0);
 }
+
+// ------------ Structs and Data ------------
 
 struct VertexOutput {
     @location(0) uv: vec2<f32>,
