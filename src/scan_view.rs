@@ -240,13 +240,13 @@ pub struct ScanImage {
 }
 impl ScanImage {
     pub fn new(
-        scan_view_program: &ScanView,
+        scan_view: &ScanView,
         data: &[f32],
         width: u32,
         transform: Affine2,
     ) -> ScanImage {
         let quad2world_buf =
-            scan_view_program
+            scan_view
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("quad2world uniform"),
@@ -257,8 +257,8 @@ impl ScanImage {
         for (i, v) in data.iter().enumerate() {
             data_buffer[i] = half::f16::from_f32(*v);
         }
-        let texture = scan_view_program.device.create_texture_with_data(
-            &scan_view_program.queue,
+        let texture = scan_view.device.create_texture_with_data(
+            &scan_view.queue,
             &TextureDescriptor {
                 label: None,
                 size: Extent3d {
@@ -278,10 +278,10 @@ impl ScanImage {
         );
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let local_bind_group =
-            scan_view_program
+            scan_view
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &scan_view_program.image_bgl,
+                    layout: &scan_view.image_bgl,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -296,8 +296,8 @@ impl ScanImage {
                 });
         ScanImage {
             texture: Arc::new(texture),
-            global_bind_group: scan_view_program.global_bg.clone(),
-            pipeline: scan_view_program.pipeline.clone(),
+            global_bind_group: scan_view.global_bg.clone(),
+            pipeline: scan_view.pipeline.clone(),
             transform,
             local_bind_group: Arc::new(local_bind_group),
             quad2world_buf: Arc::new(quad2world_buf),

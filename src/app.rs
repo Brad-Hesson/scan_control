@@ -19,10 +19,9 @@ impl MyApp {
         let scale = 10.;
         for (x, y) in iproduct!(-10..=10, -10..=10) {
             let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
-            dbg!(color);
             let mut data = vec![color; 5 * 5];
             data[6] = NAN;
-            data[6+5*2+2] = 1.;
+            data[6 + 5 * 2 + 2] = 1.;
             let image = ScanImage::new(
                 &scan_view,
                 &data,
