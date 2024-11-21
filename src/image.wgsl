@@ -21,10 +21,14 @@ var<private> colors: array<vec3<f32>, 4> = array(
 @binding(0)
 var<uniform> world2screen: mat4x4<f32>;
 
+@group(0)
+@binding(1)
+var<uniform> quad2world: mat4x4<f32>;
+
 @vertex
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     var result: VertexOutput;
-    result.position = world2screen * vec4(verts[vert_index], 0.0, 1.0);
+    result.position = world2screen * quad2world * vec4(verts[vert_index], 0.0, 1.0);
     result.color = colors[vert_index];
     return result;
 }
