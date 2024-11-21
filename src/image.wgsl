@@ -21,8 +21,8 @@ var<private> colors: array<vec3<f32>, 4> = array(
 @binding(0)
 var<uniform> world2screen: mat4x4<f32>;
 
-@group(0)
-@binding(1)
+@group(1)
+@binding(0)
 var<uniform> quad2world: mat4x4<f32>;
 
 @vertex

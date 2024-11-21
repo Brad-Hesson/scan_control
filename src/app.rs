@@ -3,26 +3,42 @@ use std::{borrow::Cow, sync::Arc};
 use bytemuck::bytes_of;
 use eframe::{
     egui_wgpu::{self, CallbackTrait, RenderState},
-    wgpu::{self, util::DeviceExt, BindGroup, Buffer, Queue, RenderPipeline},
+    wgpu::{
+        self, util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, Queue, RenderPipeline,
+    },
 };
 use glam::{Affine2, Mat3, Mat4, Vec2, Vec4};
+use itertools::iproduct;
 
 pub struct MyApp {
     /// Behind an `Arc<Mutex<…>>` so we can pass it to [`egui::PaintCallback`] and paint later.
     world_transform: Affine2,
     rotate_center: Option<Vec2>,
-    image_callback: ImageCallback,
+    scan_view_program: ScanViewProgram,
     images: Vec<Image>,
 }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
-        let images = vec![Image::new(Vec2::ONE * 100., 1., Vec2::ZERO)];
+        let scan_view_program = ScanViewProgram::new(wgpu);
+        let mut images = vec![];
+        let scale = 10.;
+        for (x, y) in iproduct!(-10..=10, -10..=10) {
+            let image = Image::new(
+                &scan_view_program,
+                Affine2::from_scale_angle_translation(
+                    Vec2::ONE * scale / 2.,
+                    0.03 * x as f32 * y as f32,
+                    Vec2::new(scale * x as f32, scale * y as f32),
+                ),
+            );
+            images.push(image);
+        }
         Self {
             world_transform: Affine2::IDENTITY,
             rotate_center: None,
-            image_callback: ImageCallback::new(wgpu, images[0].to_owned()),
+            scan_view_program,
             images,
         }
     }
@@ -43,6 +59,7 @@ impl eframe::App for MyApp {
             });
             ui.label("Drag to rotate!");
         });
+        ctx.request_repaint();
     }
 }
 
@@ -90,13 +107,19 @@ impl MyApp {
 
         let mat4 = affine2_to_mat4(screen_transform * self.world_transform);
 
-        self.image_callback.queue.write_buffer(
-            &self.image_callback.world2screen_buf,
+        self.scan_view_program.queue.write_buffer(
+            &self.scan_view_program.world2screen_buf,
             0,
             bytes_of(mat4.as_ref()),
         );
-        let callback = egui_wgpu::Callback::new_paint_callback(rect, self.image_callback.clone());
-        ui.painter().add(callback);
+        let dt = ui.input(|is| is.stable_dt);
+        for image in &mut self.images {
+            let trans = Affine2::from_translation(image.transform.translation);
+            let rot = trans * Affine2::from_angle(0.5 * dt) * trans.inverse();
+            image.transform = rot * image.transform;
+            let callback = egui_wgpu::Callback::new_paint_callback(rect, image.clone());
+            ui.painter().add(callback);
+        }
     }
 }
 
@@ -121,16 +144,16 @@ fn affine2_to_mat4(af: Affine2) -> Mat4 {
 //     image: Image,
 // }
 #[derive(Clone)]
-struct ImageCallback {
+struct ScanViewProgram {
     pipeline: Arc<RenderPipeline>,
     queue: Arc<Queue>,
-    bind_group: Arc<BindGroup>,
+    global_bg: Arc<BindGroup>,
+    image_bgl: Arc<BindGroupLayout>,
     world2screen_buf: Arc<Buffer>,
-    quad2world_buf: Arc<Buffer>,
-    image: Image,
+    device: Arc<Device>,
 }
-impl ImageCallback {
-    fn new(wgpu: &RenderState, image: Image) -> Self {
+impl ScanViewProgram {
+    fn new(wgpu: &RenderState) -> Self {
         let shader = wgpu
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -138,39 +161,43 @@ impl ImageCallback {
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("./image.wgsl"))),
             });
 
-        let bind_group_layout =
-            wgpu.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: None,
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: wgpu::BufferSize::new(64),
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: wgpu::BufferSize::new(64),
-                            },
-                            count: None,
-                        },
-                    ],
-                });
+        let global_bgl = wgpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
+                }],
+            });
+
+        let image_bgl = wgpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
+                }],
+            });
 
         let pipeline_layout = wgpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[&bind_group_layout],
+                bind_group_layouts: &[&global_bgl, &image_bgl],
                 push_constant_ranges: &[],
             });
 
@@ -209,40 +236,65 @@ impl ImageCallback {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-        let quad2world_buf = wgpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quad2world uniform"),
-                contents: bytemuck::bytes_of(Mat4::IDENTITY.as_ref()),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-
         // Create bind group
-        let bind_group = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: world2screen_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: quad2world_buf.as_entire_binding(),
-                },
-            ],
+        let global_bg = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &global_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: world2screen_buf.as_entire_binding(),
+            }],
             label: None,
         });
         Self {
             pipeline: Arc::new(pipeline),
             queue: wgpu.queue.clone(),
-            bind_group: Arc::new(bind_group),
+            global_bg: Arc::new(global_bg),
+            image_bgl: Arc::new(image_bgl),
             world2screen_buf: Arc::new(world2screen_buf),
-            quad2world_buf: Arc::new(quad2world_buf),
-            image,
+            device: wgpu.device.clone(),
         }
     }
 }
-impl CallbackTrait for ImageCallback {
+
+#[derive(Clone)]
+struct Image {
+    transform: Affine2,
+    quad2world_buf: Arc<Buffer>,
+    local_bind_group: Arc<BindGroup>,
+    global_bind_group: Arc<BindGroup>,
+    pipeline: Arc<RenderPipeline>,
+}
+impl Image {
+    fn new(scan_view_program: &ScanViewProgram, transform: Affine2) -> Image {
+        let quad2world_buf =
+            scan_view_program
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("quad2world uniform"),
+                    contents: bytemuck::bytes_of(affine2_to_mat4(transform).as_ref()),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+        let local_bind_group =
+            scan_view_program
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &scan_view_program.image_bgl,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: quad2world_buf.as_entire_binding(),
+                    }],
+                    label: None,
+                });
+        Image {
+            global_bind_group: scan_view_program.global_bg.clone(),
+            pipeline: scan_view_program.pipeline.clone(),
+            transform,
+            local_bind_group: Arc::new(local_bind_group),
+            quad2world_buf: Arc::new(quad2world_buf),
+        }
+    }
+}
+impl CallbackTrait for Image {
     fn prepare(
         &self,
         _device: &wgpu::Device,
@@ -251,10 +303,14 @@ impl CallbackTrait for ImageCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         _callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let mat4 = affine2_to_mat4(self.image.transform);
-        queue.write_buffer(&self.quad2world_buf, 0, bytes_of(mat4.as_ref()));
+        queue.write_buffer(
+            &self.quad2world_buf,
+            0,
+            bytes_of(affine2_to_mat4(self.transform).as_ref()),
+        );
         Vec::new()
     }
+
     fn paint(
         &self,
         _info: egui::PaintCallbackInfo,
@@ -262,19 +318,8 @@ impl CallbackTrait for ImageCallback {
         _callback_resources: &egui_wgpu::CallbackResources,
     ) {
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.set_bind_group(0, &self.global_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.local_bind_group, &[]);
         render_pass.draw(0..4, 0..1);
-    }
-}
-
-#[derive(Clone)]
-struct Image {
-    transform: Affine2,
-}
-impl Image {
-    fn new(scale: Vec2, angle: f32, translation: Vec2) -> Self {
-        Self {
-            transform: Affine2::from_scale_angle_translation(scale, angle, translation),
-        }
     }
 }
