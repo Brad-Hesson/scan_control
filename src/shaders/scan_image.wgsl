@@ -41,10 +41,9 @@ var tex_sampler: sampler;
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let val = textureSample(texture, tex_sampler, vertex.uv).r;
     if (isNan(val)){
-        return vec4(1.0, 0.0, 0.0, 0.0);
-    } else {
-        return vec4(val, val, val, 1.0);
+        discard;
     }
+    return vec4(val, val, val, 1.0);
 }
 
 fn isNan(value: f32) -> bool{
