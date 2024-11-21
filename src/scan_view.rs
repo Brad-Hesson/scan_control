@@ -4,7 +4,7 @@ use bytemuck::bytes_of;
 use eframe::{
     egui_wgpu::{self, CallbackTrait, RenderState},
     wgpu::{
-        self, util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, Queue, RenderPipeline,
+        self, util::DeviceExt, BindGroup, BindGroupEntry, BindGroupLayout, Buffer, Device, Extent3d, FilterMode, Queue, RenderPipeline, Sampler, Texture, TextureDescriptor, TextureUsages
     },
 };
 use egui::InnerResponse;
@@ -101,32 +101,52 @@ impl ScanView {
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(64),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(64),
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
             });
 
         let image_bgl = wgpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(64),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(64),
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
             });
 
         let pipeline_layout = wgpu
@@ -171,14 +191,24 @@ impl ScanView {
                 contents: bytemuck::bytes_of(affine2_to_mat4(world_transform).as_ref()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-
-        // Create bind group
+        let mut sampler_desc = wgpu::SamplerDescriptor::default();
+        sampler_desc.mag_filter = FilterMode::Linear;
+        sampler_desc.min_filter = FilterMode::Linear;
+        let sampler = wgpu
+            .device
+            .create_sampler(&sampler_desc);
         let global_bg = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &global_bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: world2screen_buf.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: world2screen_buf.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
             label: None,
         });
         Self {
@@ -203,12 +233,18 @@ pub struct ScanViewCtx<'a> {
 pub struct ScanImage {
     pub transform: Affine2,
     quad2world_buf: Arc<Buffer>,
+    texture: Arc<Texture>,
     local_bind_group: Arc<BindGroup>,
     global_bind_group: Arc<BindGroup>,
     pipeline: Arc<RenderPipeline>,
 }
 impl ScanImage {
-    pub fn new(scan_view_program: &ScanView, transform: Affine2) -> ScanImage {
+    pub fn new(
+        scan_view_program: &ScanView,
+        data: &[f32],
+        width: u32,
+        transform: Affine2,
+    ) -> ScanImage {
         let quad2world_buf =
             scan_view_program
                 .device
@@ -217,18 +253,49 @@ impl ScanImage {
                     contents: bytemuck::bytes_of(affine2_to_mat4(transform).as_ref()),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
+        let mut data_buffer = vec![half::f16::ZERO; data.len()];
+        for (i, v) in data.iter().enumerate() {
+            data_buffer[i] = half::f16::from_f32(*v);
+        }
+        let texture = scan_view_program.device.create_texture_with_data(
+            &scan_view_program.queue,
+            &TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width,
+                    height: data.len() as u32 / width,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[wgpu::TextureFormat::R16Float],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            bytemuck::cast_slice(data_buffer.as_slice()),
+        );
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let local_bind_group =
             scan_view_program
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &scan_view_program.image_bgl,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: quad2world_buf.as_entire_binding(),
-                    }],
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: quad2world_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&texture_view),
+                        },
+                    ],
                     label: None,
                 });
         ScanImage {
+            texture: Arc::new(texture),
             global_bind_group: scan_view_program.global_bg.clone(),
             pipeline: scan_view_program.pipeline.clone(),
             transform,

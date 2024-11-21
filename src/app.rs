@@ -1,4 +1,6 @@
-use glam::{Affine2, Vec2};
+use std::f32::NAN;
+
+use glam::{Affine2, Mat2, Vec2};
 use itertools::iproduct;
 
 use crate::scan_view::{ScanImage, ScanView};
@@ -16,8 +18,15 @@ impl MyApp {
         let mut images = vec![];
         let scale = 10.;
         for (x, y) in iproduct!(-10..=10, -10..=10) {
+            let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
+            dbg!(color);
+            let mut data = vec![color; 5 * 5];
+            data[6] = NAN;
+            data[6+5*2+2] = 1.;
             let image = ScanImage::new(
                 &scan_view,
+                &data,
+                3,
                 Affine2::from_scale_angle_translation(
                     Vec2::ONE * scale / 2.,
                     0.03 * x as f32 * y as f32,
@@ -43,9 +52,7 @@ impl eframe::App for MyApp {
             self.scan_view.show(ui, |ctx| {
                 let dt = ctx.ui.input(|is| is.stable_dt);
                 for image in &mut self.images {
-                    let trans = Affine2::from_translation(image.transform.translation);
-                    let rot = trans * Affine2::from_angle(0.5 * dt) * trans.inverse();
-                    image.transform = rot * image.transform;
+                    image.transform.matrix2 = Mat2::from_angle(0.5 * dt) * image.transform.matrix2;
                     image.show(ctx);
                 }
             });
