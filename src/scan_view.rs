@@ -4,7 +4,8 @@ use bytemuck::bytes_of;
 use eframe::{
     egui_wgpu::{self, CallbackTrait, RenderState},
     wgpu::{
-        self, util::DeviceExt, BindGroup, BindGroupEntry, BindGroupLayout, Buffer, Device, Extent3d, FilterMode, Queue, RenderPipeline, Sampler, Texture, TextureDescriptor, TextureUsages
+        self, util::DeviceExt, BindGroup, BindGroupEntry, BindGroupLayout, Buffer, Device,
+        Extent3d, FilterMode, Queue, RenderPipeline, Texture, TextureDescriptor, TextureUsages,
     },
 };
 use egui::InnerResponse;
@@ -39,13 +40,29 @@ impl ScanView {
         add_contents: impl FnOnce(&mut ScanViewCtx) -> R,
     ) -> InnerResponse<R> {
         egui::Frame::canvas(ui.style()).show(ui, |ui| {
-            let (rect, response) =
-                ui.allocate_at_least(ui.available_size_before_wrap(), egui::Sense::drag());
+            let (rect, response) = ui.allocate_at_least(
+                ui.available_size_before_wrap(),
+                egui::Sense {
+                    click: true,
+                    drag: true,
+                    focusable: true,
+                },
+            );
+            self.handle_inputs(ui, response);
+            let mut ctx = ScanViewCtx { ui, rect };
+            add_contents(&mut ctx)
+        })
+    }
+    fn handle_inputs(&mut self, ui: &mut egui::Ui, response: egui::Response) {
+        let rect = response.rect;
+
+        // Calculate the dragging transform
             let drag = if response.dragged_by(egui::PointerButton::Primary) {
                 Affine2::from_translation(v2(response.drag_delta()))
             } else {
                 Affine2::IDENTITY
             };
+        // Calculate the rotation transform
             let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
                 let pos = v2(response.interact_pointer_pos().unwrap() - rect.center());
                 if self.rotate_center.is_none() {
@@ -66,6 +83,8 @@ impl ScanView {
                 self.rotate_center = None;
                 Affine2::IDENTITY
             };
+
+        // Calculate the Zooming transform
             let zoom = if let Some(window_pos) = response.hover_pos() {
                 let scalar = (ui.input(|is| is.raw_scroll_delta).y / 100.).exp();
                 let scale = Affine2::from_scale(Vec2::splat(scalar));
@@ -74,18 +93,20 @@ impl ScanView {
             } else {
                 Affine2::IDENTITY
             };
+
+        // update the world transform using the calculated transforms
             self.world_transform = rotate * zoom * drag * self.world_transform;
 
+        // calculate the screen transform
             let screen_transform =
                 Affine2::from_scale(v2(rect.size()) * Vec2::new(0.5, -0.5)).inverse();
 
-            let mat4 = affine2_to_mat4(screen_transform * self.world_transform);
-
-            self.queue
-                .write_buffer(&self.world2screen_buf, 0, bytes_of(mat4.as_ref()));
-            let mut ctx = ScanViewCtx { ui, rect };
-            add_contents(&mut ctx)
-        })
+        // write the new transform to the GPU
+        self.queue.write_buffer(
+            &self.world2screen_buf,
+            0,
+            bytes_of(affine2_to_mat4(screen_transform * self.world_transform).as_ref()),
+        );
     }
     pub fn new(wgpu: &RenderState) -> Self {
         let shader = wgpu
@@ -191,12 +212,11 @@ impl ScanView {
                 contents: bytemuck::bytes_of(affine2_to_mat4(world_transform).as_ref()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-        let mut sampler_desc = wgpu::SamplerDescriptor::default();
-        sampler_desc.mag_filter = FilterMode::Linear;
-        sampler_desc.min_filter = FilterMode::Linear;
-        let sampler = wgpu
-            .device
-            .create_sampler(&sampler_desc);
+        let sampler = wgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            ..Default::default()
+        });
         let global_bg = wgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &global_bgl,
             entries: &[
