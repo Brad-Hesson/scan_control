@@ -9,6 +9,7 @@ pub struct MyApp {
     /// Behind an `Arc<Mutex<…>>` so we can pass it to [`egui::PaintCallback`] and paint later.
     scan_view: ScanView,
     images: Vec<ScanImage>,
+    time: f32,
 }
 
 impl MyApp {
@@ -21,7 +22,7 @@ impl MyApp {
             let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
             let mut data = vec![color; 5 * 5];
             data[6] = NAN;
-            data[5*4 + 4] = 1.;
+            data[5 * 4 + 4] = 1.;
             let image = ScanImage::new(
                 5,
                 data.into_boxed_slice(),
@@ -33,7 +34,11 @@ impl MyApp {
             );
             images.push(image);
         }
-        Self { scan_view, images }
+        Self {
+            scan_view,
+            images,
+            time: 0.,
+        }
     }
 }
 
@@ -49,8 +54,10 @@ impl eframe::App for MyApp {
 
             self.scan_view.show(ui, |ctx| {
                 let dt = ctx.ui.input(|is| is.stable_dt);
+                self.time += dt;
                 for image in &mut self.images {
                     image.transform.matrix2 = Mat2::from_angle(0.5 * dt) * image.transform.matrix2;
+                    image.set_image_data(0, Box::new([self.time % 1.0]));
                     image.show(ctx);
                 }
             });
