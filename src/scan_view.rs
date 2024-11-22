@@ -259,12 +259,7 @@ pub struct ScanImage {
     pipeline: Arc<RenderPipeline>,
 }
 impl ScanImage {
-    pub fn new(
-        scan_view: &ScanView,
-        data: &[f32],
-        width: u32,
-        transform: Affine2,
-    ) -> ScanImage {
+    pub fn new(scan_view: &ScanView, data: &[f32], width: u32, transform: Affine2) -> ScanImage {
         let quad2world_buf =
             scan_view
                 .device
@@ -273,10 +268,6 @@ impl ScanImage {
                     contents: bytemuck::bytes_of(affine2_to_mat4(transform).as_ref()),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
-        let mut data_buffer = vec![half::f16::ZERO; data.len()];
-        for (i, v) in data.iter().enumerate() {
-            data_buffer[i] = half::f16::from_f32(*v);
-        }
         let texture = scan_view.device.create_texture_with_data(
             &scan_view.queue,
             &TextureDescriptor {
@@ -289,16 +280,15 @@ impl ScanImage {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R16Float,
+                format: wgpu::TextureFormat::R32Float,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[wgpu::TextureFormat::R16Float],
+                view_formats: &[wgpu::TextureFormat::R32Float],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            bytemuck::cast_slice(data_buffer.as_slice()),
+            bytemuck::cast_slice(data),
         );
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let local_bind_group =
-            scan_view
+        let local_bind_group = scan_view
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &scan_view.image_bgl,
