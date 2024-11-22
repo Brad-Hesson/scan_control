@@ -21,11 +21,10 @@ impl MyApp {
             let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
             let mut data = vec![color; 5 * 5];
             data[6] = NAN;
-            data[5*4 + 3] = 1.;
+            data[5*4 + 4] = 1.;
             let image = ScanImage::new(
-                &scan_view,
-                &data,
                 5,
+                data.into_boxed_slice(),
                 Affine2::from_scale_angle_translation(
                     Vec2::ONE * scale / 2.,
                     0.03 * x as f32 * y as f32,
