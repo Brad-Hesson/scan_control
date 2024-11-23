@@ -13,10 +13,10 @@ var<uniform> quad2world: mat4x4<f32>;
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     var position = vec4(verts[vert_index], 0.0, 1.0);
     var uv = uvs[vert_index];
-    let is_vertical = dot(quad2world * vec4(1.,0.,0.,0.), vec4(1.,0.,0.,0.)) > 1.;
+    let is_vertical = dot(quad2world * vec4(1., 0., 0., 0.), vec4(1., 0., 0., 0.)) > 1.;
 
     // if border is enabled, grow the quad and extend the uvs by 2*border width
-    if (is_vertical) {
+    if is_vertical {
         position.x *= 1.0 + border_width * 2.;
         position.y *= 1.0 + border_width * 2.;
         uv *= 1.0 + border_width * 2.;
@@ -43,11 +43,11 @@ var texture: texture_2d<f32>;
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // if the uv goes outside of the standard coords, it means we want to draw a border
-    if (vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0) {
+    if vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0 {
         return vec4(0.0, 1.0, 0.0, 1.0);
     }
     let val = textureSample(texture, tex_sampler, vertex.uv).r;
-    if (isNan(val)) {
+    if isNan(val) {
         discard;
     }
     return vec4(val, val, val, 1.0);
@@ -74,6 +74,6 @@ var<private> uvs: array<vec2<f32>, 4> = array(
     vec2(1.0, 1.0),
 );
 
-fn isNan(value: f32) -> bool{
+fn isNan(value: f32) -> bool {
     return extractBits(bitcast<u32>(value), 23u, 8u) == 0xFF;
 }
