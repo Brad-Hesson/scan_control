@@ -1,5 +1,6 @@
 use std::f32::NAN;
 
+use egui::Response;
 use glam::{Affine2, Mat2, Vec2};
 use itertools::iproduct;
 
@@ -21,8 +22,7 @@ impl MyApp {
         for (x, y) in iproduct!(-10..=10, -10..=10) {
             let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
             let mut data = vec![color; 5 * 5];
-            data[6] = NAN;
-            data[5 * 4 + 4] = 1.;
+            *data.last_mut().unwrap() = NAN;
             let image = ScanImage::new(
                 5,
                 data.into_boxed_slice(),

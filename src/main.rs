@@ -21,16 +21,17 @@ fn main() -> eframe::Result {
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             present_mode: PresentMode::Immediate,
             device_descriptor: Arc::new(|_adapter| DeviceDescriptor {
-                label: None,
+                label: Some("Scan Control Device Descriptor"),
                 required_features: Features::FLOAT32_FILTERABLE,
                 ..Default::default()
             }),
             ..Default::default()
         },
+        multisampling: 1,
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "Scan Control",
         native_options,
         Box::new(|cc| Ok(Box::new(app::MyApp::new(cc)))),
     )

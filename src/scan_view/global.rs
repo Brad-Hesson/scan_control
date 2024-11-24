@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::image::ImageResources;
+use super::{copy_texture::CopyTextureResources, image::ImageResources};
 use bytemuck::bytes_of;
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
@@ -49,6 +49,7 @@ pub(super) struct GlobalResources {
     pub image_bgl: BindGroupLayout,
     pub world2screen_buf: Buffer,
     pub images: HashMap<Uuid, ImageResources>,
+    pub copy_texture: CopyTextureResources,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
@@ -170,6 +171,7 @@ impl GlobalResources {
             image_bgl,
             world2screen_buf,
             images: HashMap::new(),
+            copy_texture: CopyTextureResources::new(device),
         }
     }
     fn set_screen_transform(&self, queue: &Queue, transform: Affine2) {

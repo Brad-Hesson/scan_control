@@ -13,7 +13,7 @@ var<uniform> quad2world: mat4x4<f32>;
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     var position = vec4(verts[vert_index], 0.0, 1.0);
     var uv = uvs[vert_index];
-    let is_vertical = dot(quad2world * vec4(1., 0., 0., 0.), vec4(1., 0., 0., 0.)) > 1.;
+    let is_vertical = dot(quad2world * vec4(1., 0., 0., 0.), vec4(1., 0., 0., 0.)) > 0.;
 
     // if border is enabled, grow the quad and extend the uvs by 2*border width
     if is_vertical {
@@ -50,7 +50,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     if isNan(val) {
         discard;
     }
-    return vec4(val, val, val, 1.0);
+    return vec4(val, val, val, 0.5);
 }
 
 // ------------ Structs and Data ------------

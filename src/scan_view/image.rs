@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::scan_view::global::GlobalResources;
 
-use super::affine2_to_mat4;
+use super::{affine2_to_mat4, copy_texture::CopyTextureBindGroup};
 
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
@@ -33,11 +33,21 @@ impl CallbackTrait for ImageCallback {
         let global_res = callback_resources
             .get_mut::<GlobalResources>()
             .expect("GlobalResources not initialized");
-        let image_res = global_res
-            .images
-            .entry(self.uuid)
-            .or_insert_with(|| ImageResources::new(device, &global_res.image_bgl, self.size));
+        let image_res = global_res.images.entry(self.uuid).or_insert_with(|| {
+            ImageResources::new(
+                device,
+                &global_res.image_bgl,
+                &global_res.copy_texture.bind_group_layout,
+                self.size,
+            )
+        });
         image_res.set_transform(queue, self.transform);
+        image_res.copy_texture.set_metadata(
+            queue,
+            0.,
+            1.,
+            calc_aligned_width(self.size.width, ROW_ALIGN),
+        );
         for (offset, data) in &self.changes {
             image_res.set_texture_data(queue, *offset, &data);
         }
@@ -58,21 +68,13 @@ impl CallbackTrait for ImageCallback {
             .get(&self.uuid)
             .expect("ImageResources not initialized");
         if !self.changes.is_empty() {
-            egui_encoder.copy_buffer_to_texture(
-                ImageCopyBuffer {
-                    buffer: &image_res.texture_staging_buffer,
-                    layout: ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(
-                            calc_aligned_width(self.size.width, ROW_ALIGN)
-                                * std::mem::size_of::<f32>() as u32,
-                        ),
-                        rows_per_image: Some(self.size.height),
-                    },
-                },
-                image_res.texture.as_image_copy(),
-                self.size,
-            );
+            let mut cpass = egui_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&global_res.copy_texture.pipeline);
+            cpass.set_bind_group(0, &image_res.copy_texture.bind_group, &[]);
+            cpass.dispatch_workgroups(self.size.width as u32, self.size.height, 1);
         }
         Vec::new()
     }
@@ -103,9 +105,15 @@ pub(super) struct ImageResources {
     local_bind_group: BindGroup,
     width: usize,
     aligned_width: usize,
+    copy_texture: CopyTextureBindGroup,
 }
 impl ImageResources {
-    pub fn new(device: &Device, image_bgl: &BindGroupLayout, size: Extent3d) -> Self {
+    pub fn new(
+        device: &Device,
+        image_bgl: &BindGroupLayout,
+        meta_bgl: &BindGroupLayout,
+        size: Extent3d,
+    ) -> Self {
         let quad2world_buf = device.create_buffer(&BufferDescriptor {
             label: Some("quad2world uniform"),
             size: std::mem::size_of::<Mat4>() as u64,
@@ -117,7 +125,7 @@ impl ImageResources {
             size: calc_aligned_width(size.width, ROW_ALIGN) as u64
                 * size.height as u64
                 * std::mem::size_of::<f32>() as u64,
-            usage: BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            usage: BufferUsages::COPY_DST | BufferUsages::COPY_SRC | BufferUsages::STORAGE,
             mapped_at_creation: true,
         });
         cast_slice_mut(
@@ -135,7 +143,9 @@ impl ImageResources {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
             view_formats: &[wgpu::TextureFormat::R32Float],
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -154,6 +164,12 @@ impl ImageResources {
             label: None,
         });
         Self {
+            copy_texture: CopyTextureBindGroup::new(
+                device,
+                meta_bgl,
+                &texture,
+                &texture_staging_buffer,
+            ),
             texture_staging_buffer,
             texture,
             local_bind_group,

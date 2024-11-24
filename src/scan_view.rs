@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 mod global;
 mod image;
+mod copy_texture;
 
 #[derive(Clone)]
 pub struct ScanView {
