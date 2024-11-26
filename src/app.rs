@@ -58,8 +58,3 @@ impl eframe::App for MyApp {
         ctx.request_repaint_after_secs(0.040);
     }
 }
-
-#[test]
-fn feature() {
-    dbg!(unsafe{std::mem::transmute::<u32, f32>(0x3dcccccd)});
-}
