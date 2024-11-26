@@ -10,9 +10,10 @@ use global::GlobalCallback;
 use image::ImageCallback;
 use uuid::Uuid;
 
+mod copy_texture;
 mod global;
 mod image;
-mod copy_texture;
+mod shaders;
 
 #[derive(Clone)]
 pub struct ScanView {
@@ -94,7 +95,7 @@ impl ScanView {
         // calculate the screen transform
         let screen_transform =
             Affine2::from_scale(v2(rect.size()) * Vec2::new(0.5, -0.5)).inverse();
-        
+
         screen_transform * self.world_transform
     }
     pub fn new(wgpu: &RenderState) -> Self {
@@ -150,12 +151,4 @@ impl ScanImage {
 
 fn v2(v: impl Into<mint::Vector2<f32>>) -> glam::Vec2 {
     v.into().into()
-}
-
-fn affine2_to_mat4(af: Affine2) -> Mat4 {
-    let mut mat4 = Mat4::from_mat3(Mat3::from_mat2(af.matrix2));
-    let trans = af.translation;
-    // mat4.z_axis.as_mut()[2] = 1.;
-    mat4.w_axis = Vec4::new(trans.x, trans.y, 0., 1.);
-    mat4
 }
