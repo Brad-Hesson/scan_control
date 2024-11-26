@@ -1,6 +1,6 @@
 use std::{env, fmt::Write, path::PathBuf};
 
-use wgsl_to_wgpu::{create_shader_module, create_shader_module_embedded, MatrixVectorTypes, WriteOptions};
+use wgsl_to_wgpu::{create_shader_module_embedded, MatrixVectorTypes, WriteOptions};
 
 fn main() {
     let mut text = String::new();

@@ -24,7 +24,3 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let out = (v - met.min) / met.max;
     textureStore(texture, global_id.xy, vec4(out, 0.0, 0.0, 0.0));
 }
-
-fn isNan(value: f32) -> bool {
-    return extractBits(bitcast<u32>(value), 23u, 8u) == 0xFF;
-}

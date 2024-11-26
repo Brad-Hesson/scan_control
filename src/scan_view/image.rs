@@ -2,14 +2,14 @@ use core::f32;
 
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, Device, Extent3d, Queue},
+    wgpu::{self, Device, Extent3d},
 };
 use glam::Affine2;
 use uuid::Uuid;
 
 use crate::scan_view::{global::GlobalResources, shaders::copy_texture};
 
-use super::shaders::{image_view, ImageBuffer, ImageTexture, MetadataBuffer, TransformBuffer};
+use super::shaders::{scan_image, ImageBuffer, ImageTexture, MetadataBuffer, TransformBuffer};
 
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
@@ -33,17 +33,20 @@ impl CallbackTrait for ImageCallback {
             .images
             .entry(self.uuid)
             .or_insert_with(|| ImageResources::new(device, self.size));
-        image_res.set_transform(queue, self.transform);
-        image_res.metadata_buffer.set(
-            queue,
-            &copy_texture::Metadata {
-                width: calc_aligned_width(self.size.width, ROW_ALIGN),
-                max: 1.,
-                min: 0.1,
-            },
-        );
+
+        image_res.world_transform_buf.set(queue, self.transform);
+        if !self.changes.is_empty() {
+            image_res.metadata_buffer.set(
+                queue,
+                &copy_texture::Metadata {
+                    width: self.size.width,
+                    max: 1.,
+                    min: 0.1,
+                },
+            );
+        }
         for (offset, data) in &self.changes {
-            image_res.set_texture_data(queue, *offset, &data);
+            image_res.image_buffer.set(queue, *offset, &data);
         }
         vec![]
     }
@@ -61,14 +64,15 @@ impl CallbackTrait for ImageCallback {
             .images
             .get(&self.uuid)
             .expect("ImageResources not initialized");
+
         if !self.changes.is_empty() {
             let mut cpass = egui_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
             });
-            cpass.set_pipeline(&global_res.copy_texture_pipeline);
-            copy_texture::set_bind_groups(&mut cpass, &image_res.copy_texture_bind_group);
-            cpass.dispatch_workgroups(self.size.width as u32, self.size.height, 1);
+            cpass.set_pipeline(&global_res.image_copy_pipeline);
+            copy_texture::set_bind_groups(&mut cpass, &image_res.image_copy_bind_group);
+            cpass.dispatch_workgroups(self.size.width, self.size.height, 1);
         }
         Vec::new()
     }
@@ -85,10 +89,11 @@ impl CallbackTrait for ImageCallback {
             .images
             .get(&self.uuid)
             .expect("ImageResources not initialized");
-        render_pass.set_pipeline(&global_res.pipeline);
-        image_view::set_bind_groups(
+
+        render_pass.set_pipeline(&global_res.scan_image_pipeline);
+        scan_image::set_bind_groups(
             render_pass,
-            &global_res.global_bg,
+            &global_res.global_bind_group,
             &image_res.local_bind_group,
         );
         render_pass.draw(0..4, 0..1);
@@ -98,9 +103,9 @@ impl CallbackTrait for ImageCallback {
 pub(super) struct ImageResources {
     world_transform_buf: TransformBuffer,
     image_buffer: ImageBuffer,
-    local_bind_group: image_view::LocalBindGroup,
+    local_bind_group: scan_image::LocalBindGroup,
     metadata_buffer: MetadataBuffer,
-    copy_texture_bind_group: copy_texture::BindGroup,
+    image_copy_bind_group: copy_texture::BindGroup,
 }
 impl ImageResources {
     pub fn new(device: &Device, size: Extent3d) -> Self {
@@ -108,28 +113,16 @@ impl ImageResources {
         let image_buffer = ImageBuffer::new(device, size);
         let image_texture = ImageTexture::new(device, size);
         let local_bind_group =
-            image_view::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
+            scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
         let metadata_buffer = MetadataBuffer::new(device);
-        let copy_texture_bind_group =
+        let image_copy_bind_group =
             copy_texture::BindGroup::new(device, &metadata_buffer, &image_buffer, &image_texture);
         Self {
             image_buffer,
             local_bind_group,
             world_transform_buf,
             metadata_buffer,
-            copy_texture_bind_group,
+            image_copy_bind_group,
         }
     }
-    fn set_texture_data(&self, queue: &Queue, offset: usize, data: &[f32]) {
-        self.image_buffer.set(queue, offset, data);
-    }
-    fn set_transform(&self, queue: &Queue, transform: Affine2) {
-        self.world_transform_buf.set(queue, transform);
-    }
-}
-
-const ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / std::mem::size_of::<f32>() as u32;
-
-fn calc_aligned_width(width: u32, alignment: u32) -> u32 {
-    ((width + alignment - 1) / alignment) * alignment
 }

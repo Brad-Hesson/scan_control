@@ -1,10 +1,10 @@
 use super::{
     image::ImageResources,
-    shaders::{self, copy_texture, image_view, TransformBuffer},
+    shaders::{self, copy_texture, scan_image, TransformBuffer},
 };
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, ComputePipeline, Device, Queue, RenderPipeline, TextureFormat},
+    wgpu::{self, ComputePipeline, Device, RenderPipeline, TextureFormat},
 };
 use egui::ahash::{HashMap, HashMapExt};
 use glam::Affine2;
@@ -26,7 +26,9 @@ impl CallbackTrait for GlobalCallback {
         let global_res = callback_resources
             .entry::<GlobalResources>()
             .or_insert_with(|| GlobalResources::new(device, self.target_format));
-        global_res.set_screen_transform(queue, self.screen_transform);
+        global_res
+            .screen_transform_buf
+            .set(queue, self.screen_transform);
         Vec::new()
     }
     fn paint(
@@ -39,26 +41,24 @@ impl CallbackTrait for GlobalCallback {
 }
 
 pub(super) struct GlobalResources {
-    pub pipeline: RenderPipeline,
-    pub copy_texture_pipeline: ComputePipeline,
-    pub global_bg: image_view::GlobalBindGroup,
+    pub scan_image_pipeline: RenderPipeline,
+    pub image_copy_pipeline: ComputePipeline,
+    pub global_bind_group: scan_image::GlobalBindGroup,
     pub screen_transform_buf: TransformBuffer,
     pub images: HashMap<Uuid, ImageResources>,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
-        let pipeline = shaders::image_view::create_main_pipeline(device, target_format);
+        let scan_image_pipeline = shaders::scan_image::create_main_pipeline(device, target_format);
+        let image_copy_pipeline = copy_texture::create_main_pipeline(device);
         let screen_transform_buf = TransformBuffer::new(device);
-        let global_bg = image_view::GlobalBindGroup::new(device, &screen_transform_buf);
+        let global_bind_group = scan_image::GlobalBindGroup::new(device, &screen_transform_buf);
         Self {
-            pipeline,
-            global_bg,
+            scan_image_pipeline,
+            global_bind_group,
             screen_transform_buf,
+            image_copy_pipeline,
             images: HashMap::new(),
-            copy_texture_pipeline: copy_texture::create_main_pipeline(device),
         }
-    }
-    fn set_screen_transform(&self, queue: &Queue, transform: Affine2) {
-        self.screen_transform_buf.set(queue, transform);
     }
 }

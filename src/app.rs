@@ -1,6 +1,5 @@
 use std::f32::NAN;
 
-use egui::Response;
 use glam::{Affine2, Mat2, Vec2};
 use itertools::iproduct;
 

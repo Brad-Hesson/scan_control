@@ -4,14 +4,14 @@ use eframe::wgpu::{
     Extent3d, FilterMode, MultisampleState, PrimitiveState, PrimitiveTopology, Queue,
     RenderPipeline, RenderPipelineDescriptor, SamplerDescriptor, Texture, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
-    COPY_BYTES_PER_ROW_ALIGNMENT,
 };
-use glam::{Affine2, Mat3, Mat4, Vec4};
+use glam::{Affine2, Mat3, Mat4};
 
 mod bindings {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
     #![allow(non_snake_case)]
+    #![allow(dead_code)]
 
     include!(concat!(env!("OUT_DIR"), "/shader_bindings.rs"));
 }
@@ -33,7 +33,7 @@ pub mod copy_texture {
         ) -> Self {
             let bindings = bindings::copy_texture::bind_groups::BindGroupLayout0 {
                 met: metadata.0.as_entire_buffer_binding(),
-                data: image_buffer.buffer.as_entire_buffer_binding(),
+                data: image_buffer.0.as_entire_buffer_binding(),
                 texture: &image_texture
                     .0
                     .create_view(&TextureViewDescriptor::default()),
@@ -43,7 +43,7 @@ pub mod copy_texture {
     }
 }
 
-pub mod image_view {
+pub mod scan_image {
     use super::*;
 
     pub use bindings::scan_image::bind_groups::BindGroup0 as GlobalBindGroup;
@@ -124,11 +124,10 @@ impl TransformBuffer {
         Self(buffer)
     }
     pub fn set(&self, queue: &Queue, transform: Affine2) {
-        queue.write_buffer(
-            &self.0,
-            0,
-            bytemuck::bytes_of(affine2_to_mat4(transform).as_ref()),
-        );
+        let mut mat4 = Mat4::from_mat3(Mat3::from_mat2(transform.matrix2));
+        mat4.w_axis.x = transform.translation.x;
+        mat4.w_axis.y = transform.translation.y;
+        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
     }
 }
 pub struct ImageTexture(Texture);
@@ -141,9 +140,7 @@ impl ImageTexture {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
             view_formats: &[TextureFormat::R32Float],
         });
         Self(texture)
@@ -164,85 +161,24 @@ impl MetadataBuffer {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(data));
     }
 }
-pub struct ImageBuffer {
-    buffer: Buffer,
-    width: u32,
-    aligned_width: u32,
-}
+pub struct ImageBuffer(Buffer);
 impl ImageBuffer {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: calc_aligned_width(size.width, ROW_ALIGN) as u64
-                * size.height as u64
-                * std::mem::size_of::<f32>() as u64,
-            usage: BufferUsages::COPY_DST | BufferUsages::COPY_SRC | BufferUsages::STORAGE,
+            size: size.width as u64 * size.height as u64 * std::mem::size_of::<f32>() as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             mapped_at_creation: true,
         });
         bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut()).fill(f32::NAN);
         buffer.unmap();
-        Self {
-            buffer,
-            width: size.width,
-            aligned_width: calc_aligned_width(size.width, ROW_ALIGN),
-        }
+        Self(buffer)
     }
     pub fn set(&self, queue: &Queue, offset: usize, data: &[f32]) {
-        if self.width == self.aligned_width {
-            queue.write_buffer(
-                &self.buffer,
-                offset as u64 * size_of::<f32>() as u64,
-                bytemuck::cast_slice(data),
-            );
-        } else {
-            aligned_write(
-                data,
-                offset,
-                self.width as usize,
-                self.aligned_width as usize,
-                |buf, off| {
-                    queue.write_buffer(
-                        &self.buffer,
-                        off as u64 * size_of::<f32>() as u64,
-                        bytemuck::cast_slice(buf),
-                    );
-                },
-            );
-        }
+        queue.write_buffer(
+            &self.0,
+            offset as u64 * size_of::<f32>() as u64,
+            bytemuck::cast_slice(data),
+        );
     }
-}
-
-const ROW_ALIGN: u32 = COPY_BYTES_PER_ROW_ALIGNMENT / std::mem::size_of::<f32>() as u32;
-
-fn calc_aligned_width(width: u32, alignment: u32) -> u32 {
-    ((width + alignment - 1) / alignment) * alignment
-}
-
-fn aligned_write(
-    mut data: &[f32],
-    offset: usize,
-    width: usize,
-    aligned_width: usize,
-    mut write: impl FnMut(&[f32], usize),
-) {
-    let mut aligned_offset = offset / width * aligned_width + offset % width;
-    let (buf, rest) = data
-        .split_at_checked(width - offset % width)
-        .unwrap_or((data, &[]));
-    data = rest;
-    write(buf, aligned_offset);
-    aligned_offset += aligned_width - offset % width;
-    while !data.is_empty() {
-        let (buf, rest) = data.split_at_checked(width).unwrap_or((data, &[]));
-        data = rest;
-        write(buf, aligned_offset);
-        aligned_offset += aligned_width;
-    }
-}
-
-fn affine2_to_mat4(af: Affine2) -> Mat4 {
-    let mut mat4 = Mat4::from_mat3(Mat3::from_mat2(af.matrix2));
-    let trans = af.translation;
-    mat4.w_axis = Vec4::new(trans.x, trans.y, 0., 1.);
-    mat4
 }
