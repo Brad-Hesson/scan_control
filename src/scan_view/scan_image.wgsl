@@ -1,5 +1,8 @@
 const border_width: f32 = 0.02;
-const border_color: vec4<f32> = vec4(0.2, 1.0, 0.2, 1.0);
+const border_color: vec4<f32> = vec4(0.0, 1.0, 0.0, 1.0);
+const low_color: vec3<f32> = vec3(0.0, 0.0, 1.0);
+const high_color: vec3<f32> = vec3(1.0, 0.0, 0.0);
+const image_alpha: f32 = 1.;
 
 // ------------ Vertex Shader ------------
 
@@ -38,19 +41,35 @@ fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
 var tex_sampler: sampler;
 
 @group(1) @binding(1)
-var texture: texture_2d<f32>;
+var height_map: texture_2d<f32>;
+
+@group(0) @binding(2)
+var color_map: texture_1d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // if the uv goes outside of the standard coords, it means we want to draw a border
     if vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0 {
-        return vec4(0.0, 1.0, 0.0, 1.0);
+        return border_color;
     }
-    let val = textureSample(texture, tex_sampler, vertex.uv).r;
-    if isNan(val) {
+    // sample the height of this pixel from the height-map texture
+    let height = textureSample(height_map, tex_sampler, vertex.uv).r;
+
+    // if the datapoint doesn't exist, discard the fragment
+    if isNan(height) {
         discard;
     }
-    return vec4(val, val, val, 0.5);
+
+    // if the hight is out of range, draw the high or low overflow color
+    if height < 0.0 {
+        return vec4(low_color, image_alpha);
+    }
+    if height > 1.0 {
+        return vec4(high_color, image_alpha);
+    }
+
+    // sample the color from the color-map and return it
+    return vec4(textureSample(color_map, tex_sampler, height).rgb, image_alpha);
 }
 
 // ------------ Structs and Data ------------

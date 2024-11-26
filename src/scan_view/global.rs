@@ -1,6 +1,6 @@
 use super::{
     image::ImageResources,
-    shaders::{self, copy_texture, scan_image, TransformBuffer},
+    shaders::{self, copy_texture, scan_image, ColorMapTexture, TransformBuffer},
 };
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub(super) struct GlobalCallback {
     pub target_format: TextureFormat,
     pub screen_transform: Affine2,
+    pub change_color_map: Option<Box<[f32; ColorMapTexture::SIZE * 4]>>,
 }
 impl CallbackTrait for GlobalCallback {
     fn prepare(
@@ -26,9 +27,16 @@ impl CallbackTrait for GlobalCallback {
         let global_res = callback_resources
             .entry::<GlobalResources>()
             .or_insert_with(|| GlobalResources::new(device, self.target_format));
+
+        // Set the new screen transform
         global_res
             .screen_transform_buf
             .set(queue, self.screen_transform);
+
+        // If there is a new color scale, write it to the texture
+        if let Some(color_map) = &self.change_color_map {
+            global_res.color_map_texture.set(queue, color_map);
+        }
         Vec::new()
     }
     fn paint(
@@ -45,6 +53,7 @@ pub(super) struct GlobalResources {
     pub image_copy_pipeline: ComputePipeline,
     pub global_bind_group: scan_image::GlobalBindGroup,
     pub screen_transform_buf: TransformBuffer,
+    pub color_map_texture: ColorMapTexture,
     pub images: HashMap<Uuid, ImageResources>,
 }
 impl GlobalResources {
@@ -52,12 +61,15 @@ impl GlobalResources {
         let scan_image_pipeline = shaders::scan_image::create_main_pipeline(device, target_format);
         let image_copy_pipeline = copy_texture::create_main_pipeline(device);
         let screen_transform_buf = TransformBuffer::new(device);
-        let global_bind_group = scan_image::GlobalBindGroup::new(device, &screen_transform_buf);
+        let color_map_texture = ColorMapTexture::new(device);
+        let global_bind_group =
+            scan_image::GlobalBindGroup::new(device, &screen_transform_buf, &color_map_texture);
         Self {
             scan_image_pipeline,
             global_bind_group,
             screen_transform_buf,
             image_copy_pipeline,
+            color_map_texture,
             images: HashMap::new(),
         }
     }

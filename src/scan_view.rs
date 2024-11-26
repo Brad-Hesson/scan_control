@@ -1,4 +1,5 @@
 use core::f32;
+use std::mem::MaybeUninit;
 
 use eframe::{
     egui_wgpu::{self, Callback, RenderState},
@@ -8,6 +9,7 @@ use egui::InnerResponse;
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
+use shaders::ColorMapTexture;
 use uuid::Uuid;
 
 mod global;
@@ -19,6 +21,7 @@ pub struct ScanView {
     world_transform: Affine2,
     rotate_center: Option<Vec2>,
     target_format: TextureFormat,
+    new_color_map: Option<Box<[f32; ColorMapTexture::SIZE * 4]>>,
 }
 impl ScanView {
     pub fn show<R>(
@@ -41,6 +44,7 @@ impl ScanView {
                 GlobalCallback {
                     target_format: self.target_format,
                     screen_transform,
+                    change_color_map: std::mem::take(&mut self.new_color_map),
                 },
             ));
             let mut ctx = ScanViewCtx { ui, rect };
@@ -98,7 +102,18 @@ impl ScanView {
         screen_transform * self.world_transform
     }
     pub fn new(wgpu: &RenderState) -> Self {
+        let mut color_map: Box<MaybeUninit<[f32; ColorMapTexture::SIZE * 4]>> = Box::new_uninit();
+        for i in 0..ColorMapTexture::SIZE {
+            let color = i as f32 / (ColorMapTexture::SIZE - 1) as f32;
+            unsafe {
+                color_map.assume_init_mut()[i * 4 + 0] = color;
+                color_map.assume_init_mut()[i * 4 + 1] = color;
+                color_map.assume_init_mut()[i * 4 + 2] = 0.;
+                color_map.assume_init_mut()[i * 4 + 3] = 0.5;
+            }
+        }
         Self {
+            new_color_map: Some(unsafe { color_map.assume_init() }),
             world_transform: Affine2::IDENTITY,
             rotate_center: None,
             target_format: wgpu.target_format,

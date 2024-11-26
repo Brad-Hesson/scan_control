@@ -34,19 +34,25 @@ impl CallbackTrait for ImageCallback {
             .entry(self.uuid)
             .or_insert_with(|| ImageResources::new(device, self.size));
 
+        // Set the new world transform
         image_res.world_transform_buf.set(queue, self.transform);
+
+        // Write all image changes to the image data buffer
+        for (offset, data) in &self.changes {
+            image_res.image_buffer.set(queue, *offset, &data);
+        }
+
+        // If there are changes to the image data, write the image
+        // normalization data to the buffer
         if !self.changes.is_empty() {
             image_res.metadata_buffer.set(
                 queue,
                 &copy_texture::Metadata {
                     width: self.size.width,
                     max: 1.,
-                    min: 0.1,
+                    min: 0.0,
                 },
             );
-        }
-        for (offset, data) in &self.changes {
-            image_res.image_buffer.set(queue, *offset, &data);
         }
         vec![]
     }
@@ -65,6 +71,8 @@ impl CallbackTrait for ImageCallback {
             .get(&self.uuid)
             .expect("ImageResources not initialized");
 
+        // if there are changes to the image, normalize the image and
+        // copy it to the texture
         if !self.changes.is_empty() {
             let mut cpass = egui_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
@@ -90,6 +98,7 @@ impl CallbackTrait for ImageCallback {
             .get(&self.uuid)
             .expect("ImageResources not initialized");
 
+        // Draw the image to the screen
         render_pass.set_pipeline(&global_res.scan_image_pipeline);
         scan_image::set_bind_groups(
             render_pass,

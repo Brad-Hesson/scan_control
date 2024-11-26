@@ -78,7 +78,11 @@ pub mod scan_image {
         })
     }
     impl GlobalBindGroup {
-        pub fn new(device: &Device, screen_transform_buf: &TransformBuffer) -> Self {
+        pub fn new(
+            device: &Device,
+            screen_transform_buf: &TransformBuffer,
+            color_map_texture: &ColorMapTexture,
+        ) -> Self {
             let sampler = device.create_sampler(&SamplerDescriptor {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
@@ -89,6 +93,9 @@ pub mod scan_image {
                 bindings::scan_image::bind_groups::BindGroupLayout0 {
                     world2screen: screen_transform_buf.0.as_entire_buffer_binding(),
                     tex_sampler: &sampler,
+                    color_map: &color_map_texture
+                        .0
+                        .create_view(&TextureViewDescriptor::default()),
                 },
             )
         }
@@ -103,7 +110,7 @@ pub mod scan_image {
                 device,
                 bindings::scan_image::bind_groups::BindGroupLayout1 {
                     quad2world: world_transform_buf.0.as_entire_buffer_binding(),
-                    texture: &image_texture
+                    height_map: &image_texture
                         .0
                         .create_view(&TextureViewDescriptor::default()),
                 },
@@ -144,6 +151,44 @@ impl ImageTexture {
             view_formats: &[TextureFormat::R32Float],
         });
         Self(texture)
+    }
+}
+
+pub struct ColorMapTexture(Texture);
+impl ColorMapTexture {
+    pub const SIZE: usize = 1024;
+    pub fn new(device: &Device) -> Self {
+        let texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: Self::SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D1,
+            format: TextureFormat::Rgba32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[TextureFormat::Rgba32Float],
+        });
+        Self(texture)
+    }
+    pub fn set(&self, queue: &Queue, color_map: &[f32; Self::SIZE * 4]) {
+        queue.write_texture(
+            self.0.as_image_copy(),
+            bytemuck::cast_slice(color_map),
+            eframe::wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(Self::SIZE as u32 * std::mem::size_of::<f32>() as u32 * 4),
+                rows_per_image: Some(1),
+            },
+            Extent3d {
+                width: Self::SIZE as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 }
 pub struct MetadataBuffer(Buffer);

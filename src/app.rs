@@ -1,4 +1,4 @@
-use std::f32::NAN;
+use std::{f32::NAN, time::Duration};
 
 use glam::{Affine2, Mat2, Vec2};
 use itertools::iproduct;
@@ -17,22 +17,16 @@ impl MyApp {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let scan_view = ScanView::new(wgpu);
         let mut images = vec![];
-        let scale = 10.;
-        for (x, y) in iproduct!(-10..=10, -10..=10) {
-            let color = ((x + 10) as f32 + (y + 10) as f32) / 40.;
-            let mut data = vec![color; 5 * 5];
-            *data.last_mut().unwrap() = NAN;
-            let image = ScanImage::new(
-                5,
-                data.into_boxed_slice(),
-                Affine2::from_scale_angle_translation(
-                    Vec2::ONE * scale / 2.,
-                    0.03 * x as f32 * y as f32,
-                    Vec2::new(scale * x as f32, scale * y as f32),
-                ),
-            );
-            images.push(image);
-        }
+        let scale = 100.;
+        let height = 0.5;
+        let mut data = vec![height; 5 * 5];
+        data[0] = NAN;
+        let image = ScanImage::new(
+            5,
+            data.into_boxed_slice(),
+            Affine2::from_scale_angle_translation(Vec2::ONE * scale / 2., 0., Vec2::ZERO),
+        );
+        images.push(image);
         Self {
             scan_view,
             images,
@@ -52,15 +46,20 @@ impl eframe::App for MyApp {
             });
 
             self.scan_view.show(ui, |ctx| {
-                let dt = ctx.ui.input(|is| is.stable_dt);
+                let dt = ctx.ui.input(|is| is.unstable_dt);
                 self.time += dt;
                 for image in &mut self.images {
                     image.transform.matrix2 = Mat2::from_angle(0.5 * dt) * image.transform.matrix2;
-                    image.set_image_data(0, Box::new([self.time % 1.0]));
+                    image.set_image_data(4, Box::new([self.time % 3. - 1.]));
                     image.show(ctx);
                 }
             });
         });
-        ctx.request_repaint();
+        ctx.request_repaint_after_secs(0.040);
     }
+}
+
+#[test]
+fn feature() {
+    dbg!(unsafe{std::mem::transmute::<u32, f32>(0x3dcccccd)});
 }
