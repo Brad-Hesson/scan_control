@@ -1,11 +1,10 @@
 use super::{
-    copy_texture::CopyTextureResources,
     image::ImageResources,
-    shaders::{self, image_view, TransformBuffer},
+    shaders::{self, copy_texture, image_view, TransformBuffer},
 };
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, Device, Queue, RenderPipeline, TextureFormat},
+    wgpu::{self, ComputePipeline, Device, Queue, RenderPipeline, TextureFormat},
 };
 use egui::ahash::{HashMap, HashMapExt};
 use glam::Affine2;
@@ -41,10 +40,10 @@ impl CallbackTrait for GlobalCallback {
 
 pub(super) struct GlobalResources {
     pub pipeline: RenderPipeline,
+    pub copy_texture_pipeline: ComputePipeline,
     pub global_bg: image_view::GlobalBindGroup,
     pub screen_transform_buf: TransformBuffer,
     pub images: HashMap<Uuid, ImageResources>,
-    pub copy_texture: CopyTextureResources,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
@@ -56,7 +55,7 @@ impl GlobalResources {
             global_bg,
             screen_transform_buf,
             images: HashMap::new(),
-            copy_texture: CopyTextureResources::new(device),
+            copy_texture_pipeline: copy_texture::create_main_pipeline(device),
         }
     }
     fn set_screen_transform(&self, queue: &Queue, transform: Affine2) {

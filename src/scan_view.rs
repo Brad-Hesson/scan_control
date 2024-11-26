@@ -5,12 +5,11 @@ use eframe::{
     wgpu::{Extent3d, TextureFormat},
 };
 use egui::InnerResponse;
-use glam::{Affine2, Mat3, Mat4, Vec2, Vec4};
+use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
 use uuid::Uuid;
 
-mod copy_texture;
 mod global;
 mod image;
 mod shaders;

@@ -9,10 +9,7 @@ use uuid::Uuid;
 
 use crate::scan_view::{global::GlobalResources, shaders::copy_texture};
 
-use super::{
-    copy_texture::CopyTextureBindGroup,
-    shaders::{image_view, ImageBuffer, ImageTexture, TransformBuffer},
-};
+use super::shaders::{image_view, ImageBuffer, ImageTexture, MetadataBuffer, TransformBuffer};
 
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
@@ -37,7 +34,7 @@ impl CallbackTrait for ImageCallback {
             .entry(self.uuid)
             .or_insert_with(|| ImageResources::new(device, self.size));
         image_res.set_transform(queue, self.transform);
-        image_res.copy_texture.metadata_buffer.set(
+        image_res.metadata_buffer.set(
             queue,
             &copy_texture::Metadata {
                 width: calc_aligned_width(self.size.width, ROW_ALIGN),
@@ -69,8 +66,8 @@ impl CallbackTrait for ImageCallback {
                 label: None,
                 timestamp_writes: None,
             });
-            cpass.set_pipeline(&global_res.copy_texture.pipeline);
-            copy_texture::set_bind_groups(&mut cpass, &image_res.copy_texture.bind_group);
+            cpass.set_pipeline(&global_res.copy_texture_pipeline);
+            copy_texture::set_bind_groups(&mut cpass, &image_res.copy_texture_bind_group);
             cpass.dispatch_workgroups(self.size.width as u32, self.size.height, 1);
         }
         Vec::new()
@@ -102,24 +99,25 @@ pub(super) struct ImageResources {
     world_transform_buf: TransformBuffer,
     image_buffer: ImageBuffer,
     local_bind_group: image_view::LocalBindGroup,
-    copy_texture: CopyTextureBindGroup,
+    metadata_buffer: MetadataBuffer,
+    copy_texture_bind_group: copy_texture::BindGroup,
 }
 impl ImageResources {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
-        let texture_staging_buffer = ImageBuffer::new(device, size);
+        let image_buffer = ImageBuffer::new(device, size);
         let image_texture = ImageTexture::new(device, size);
         let local_bind_group =
             image_view::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
+        let metadata_buffer = MetadataBuffer::new(device);
+        let copy_texture_bind_group =
+            copy_texture::BindGroup::new(device, &metadata_buffer, &image_buffer, &image_texture);
         Self {
-            copy_texture: CopyTextureBindGroup::new(
-                device,
-                &image_texture,
-                &texture_staging_buffer,
-            ),
-            image_buffer: texture_staging_buffer,
+            image_buffer,
             local_bind_group,
             world_transform_buf,
+            metadata_buffer,
+            copy_texture_bind_group,
         }
     }
     fn set_texture_data(&self, queue: &Queue, offset: usize, data: &[f32]) {
