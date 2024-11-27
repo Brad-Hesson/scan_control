@@ -168,19 +168,19 @@ impl ColorMapTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D1,
-            format: TextureFormat::Rgba32Float,
+            format: TextureFormat::Rgba8UnormSrgb,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[TextureFormat::Rgba32Float],
+            view_formats: &[TextureFormat::Rgba8UnormSrgb],
         });
         Self(texture)
     }
-    pub fn set(&self, queue: &Queue, color_map: &[f32; Self::SIZE * 4]) {
+    pub fn set(&self, queue: &Queue, color_map: &[egui::Color32; Self::SIZE]) {
         queue.write_texture(
             self.0.as_image_copy(),
             bytemuck::cast_slice(color_map),
             eframe::wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(Self::SIZE as u32 * std::mem::size_of::<f32>() as u32 * 4),
+                bytes_per_row: Some(Self::SIZE as u32 * std::mem::size_of::<u8>() as u32 * 4),
                 rows_per_image: Some(1),
             },
             Extent3d {

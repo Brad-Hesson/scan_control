@@ -5,7 +5,7 @@ use eframe::{
     egui_wgpu::{self, Callback, RenderState},
     wgpu::{Extent3d, TextureFormat},
 };
-use egui::InnerResponse;
+use egui::{Color32, InnerResponse};
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
@@ -21,7 +21,7 @@ pub struct ScanView {
     world_transform: Affine2,
     rotate_center: Option<Vec2>,
     target_format: TextureFormat,
-    new_color_map: Option<Box<[f32; ColorMapTexture::SIZE * 4]>>,
+    new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
 }
 impl ScanView {
     pub fn show<R>(
@@ -102,14 +102,11 @@ impl ScanView {
         screen_transform * self.world_transform
     }
     pub fn new(wgpu: &RenderState) -> Self {
-        let mut color_map: Box<MaybeUninit<[f32; ColorMapTexture::SIZE * 4]>> = Box::new_uninit();
+        let mut color_map: Box<MaybeUninit<[egui::Color32; ColorMapTexture::SIZE]>> = Box::new_uninit();
         for i in 0..ColorMapTexture::SIZE {
             let color = i as f32 / (ColorMapTexture::SIZE - 1) as f32;
             unsafe {
-                color_map.assume_init_mut()[i * 4 + 0] = color;
-                color_map.assume_init_mut()[i * 4 + 1] = color;
-                color_map.assume_init_mut()[i * 4 + 2] = 0.;
-                color_map.assume_init_mut()[i * 4 + 3] = 0.5;
+                color_map.assume_init_mut()[i] = Color32::from_gray((color * 255.) as u8);
             }
         }
         Self {
@@ -118,6 +115,10 @@ impl ScanView {
             rotate_center: None,
             target_format: wgpu.target_format,
         }
+    }
+    pub const COLOR_MAP_SIZE: usize = ColorMapTexture::SIZE;
+    pub fn set_color_map(&mut self, color_map: Box<[egui::Color32; Self::COLOR_MAP_SIZE]>) {
+        self.new_color_map = Some(color_map);
     }
 }
 

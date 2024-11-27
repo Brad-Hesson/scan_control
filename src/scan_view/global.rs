@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub(super) struct GlobalCallback {
     pub target_format: TextureFormat,
     pub screen_transform: Affine2,
-    pub change_color_map: Option<Box<[f32; ColorMapTexture::SIZE * 4]>>,
+    pub change_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
 }
 impl CallbackTrait for GlobalCallback {
     fn prepare(
