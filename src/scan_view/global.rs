@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub(super) struct GlobalCallback {
     pub target_format: TextureFormat,
     pub screen_transform: Affine2,
-    pub change_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
+    pub new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
 }
 impl CallbackTrait for GlobalCallback {
     fn prepare(
@@ -33,8 +33,8 @@ impl CallbackTrait for GlobalCallback {
             .screen_transform_buf
             .set(queue, self.screen_transform);
 
-        // If there is a new color scale, write it to the texture
-        if let Some(color_map) = &self.change_color_map {
+        // If there is a new color map, write it to the texture
+        if let Some(color_map) = &self.new_color_map {
             global_res.color_map_texture.set(queue, color_map);
         }
         Vec::new()

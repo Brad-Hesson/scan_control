@@ -51,6 +51,18 @@ impl MyApp {
             gradient,
         }
     }
+    fn update_gradient(&mut self) {
+        if self.gradient != self.last_gradient {
+            self.last_gradient = self.gradient.clone();
+            self.scan_view.set_color_map(
+                self.gradient
+                    .linear_eval(ScanView::COLOR_MAP_SIZE, true)
+                    .into_boxed_slice()
+                    .try_into()
+                    .unwrap(),
+            );
+        }
+    }
 }
 
 impl eframe::App for MyApp {
@@ -63,16 +75,7 @@ impl eframe::App for MyApp {
                 ui.label(" (OpenGL).");
             });
             egui_colorgradient::gradient_editor(ui, &mut self.gradient);
-            if self.gradient != self.last_gradient {
-                self.last_gradient = self.gradient.clone();
-                self.scan_view.set_color_map(
-                    self.gradient
-                        .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-                        .into_boxed_slice()
-                        .try_into()
-                        .unwrap(),
-                );
-            }
+            self.update_gradient();
             self.scan_view.show(ui, |ctx| {
                 let dt = ctx.ui.input(|is| is.unstable_dt);
                 self.time += dt;

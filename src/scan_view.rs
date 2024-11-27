@@ -44,7 +44,7 @@ impl ScanView {
                 GlobalCallback {
                     target_format: self.target_format,
                     screen_transform,
-                    change_color_map: std::mem::take(&mut self.new_color_map),
+                    new_color_map: std::mem::take(&mut self.new_color_map),
                 },
             ));
             let mut ctx = ScanViewCtx { ui, rect };
