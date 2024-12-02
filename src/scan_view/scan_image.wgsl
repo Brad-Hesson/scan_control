@@ -80,17 +80,17 @@ struct VertexOutput {
 };
 
 var<private> verts: array<vec2<f32>, 4> = array(
-    vec2(-1.0, -1.0),
-    vec2(1.0, -1.0),
-    vec2(-1.0, 1.0),
-    vec2(1.0, 1.0),
+    vec2(-1.0, -1.0), // TL
+    vec2(1.0, -1.0),  // TR
+    vec2(-1.0, 1.0),  // BL
+    vec2(1.0, 1.0),   // BR
 );
 
 var<private> uvs: array<vec2<f32>, 4> = array(
-    vec2(0.0, 0.0),
-    vec2(1.0, 0.0),
-    vec2(0.0, 1.0),
-    vec2(1.0, 1.0),
+    vec2(0.0, 1.0), // TL
+    vec2(1.0, 1.0), // TR
+    vec2(0.0, 0.0), // BL
+    vec2(1.0, 0.0), // BR
 );
 
 fn isNan(value: f32) -> bool {
