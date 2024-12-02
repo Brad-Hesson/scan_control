@@ -20,10 +20,13 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             present_mode: PresentMode::Immediate,
-            device_descriptor: Arc::new(|_adapter| DeviceDescriptor {
-                label: Some("Scan Control Device Descriptor"),
-                required_features: Features::FLOAT32_FILTERABLE,
-                ..Default::default()
+            device_descriptor: Arc::new(|adapter| {
+                dbg!(adapter.get_info().name);
+                DeviceDescriptor {
+                    label: Some("Scan Control Device Descriptor"),
+                    required_features: Features::FLOAT32_FILTERABLE,
+                    ..Default::default()
+                }
             }),
             ..Default::default()
         },
