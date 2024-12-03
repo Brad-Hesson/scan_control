@@ -122,6 +122,30 @@ pub mod scan_image {
     }
 }
 
+pub mod transform {
+    use super::*;
+
+    pub use bindings::transform::bind_groups::BindGroup0 as BindGroup;
+    pub use bindings::transform::compute::create_sum_pipeline;
+    pub use bindings::transform::compute::create_col_sum_pipeline;
+    pub use bindings::transform::compute::create_row_sum_pipeline;
+    pub use bindings::transform::set_bind_groups;
+
+    impl BindGroup {
+        pub fn new(
+            device: &Device,
+            size: &StorageBuffer<u32>,
+            data_buffer: &StorageBuffer<f32>,
+        ) -> Self {
+            let bindings = bindings::transform::bind_groups::BindGroupLayout0 {
+                size: size.0.as_entire_buffer_binding(),
+                data: data_buffer.0.as_entire_buffer_binding(),
+            };
+            Self::from_bindings(device, bindings)
+        }
+    }
+}
+
 pub struct TransformBuffer(Buffer);
 impl TransformBuffer {
     pub fn new(device: &Device) -> Self {
@@ -249,5 +273,71 @@ impl<T: Clone + bytemuck::NoUninit + AnyBitPattern> StorageBuffer<T> {
             offset as u64 * size_of::<T>() as u64,
             bytemuck::cast_slice(data),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use eframe::wgpu::{
+        self, CommandEncoderDescriptor, DeviceDescriptor, RequestAdapterOptionsBase,
+    };
+
+    use super::*;
+
+    #[test]
+    fn sum_shader() {
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&RequestAdapterOptionsBase::default()))
+                .unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&DeviceDescriptor::default(), None)).unwrap();
+        let pipeline = transform::create_col_sum_pipeline(&device);
+        let width = 5;
+        let height = 7;
+        let buf_size = width * height;
+        let data_buf = StorageBuffer::new_with(
+            &device,
+            buf_size,
+            1.,
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+        );
+        let staging_buf = Arc::new(StorageBuffer::<f32>::new(
+            &device,
+            buf_size,
+            BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        ));
+        let size_buf = StorageBuffer::new_as(&device, &[width as u32, height as u32], BufferUsages::UNIFORM);
+        let bind_group = transform::BindGroup::new(&device, &size_buf, &data_buf);
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&pipeline);
+            transform::set_bind_groups(&mut pass, &bind_group);
+            pass.dispatch_workgroups(width as u32, height as u32, 1);
+        }
+        encoder.copy_buffer_to_buffer(
+            &data_buf.0,
+            0,
+            &staging_buf.0,
+            0,
+            (buf_size * std::mem::size_of::<f32>()) as u64,
+        );
+        queue.submit([encoder.finish()]);
+        while !device.poll(wgpu::MaintainBase::Wait).is_queue_empty() {}
+        let data_buf_clone = staging_buf.clone();
+        staging_buf
+            .0
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |_a| {
+                let raw = data_buf_clone.0.slice(..).get_mapped_range();
+                let data = bytemuck::cast_slice::<_, f32>(&raw);
+                for i in 0..height{
+                    println!("{:?}", &data[i*width..][..width])
+                }
+            });
+        while !device.poll(wgpu::MaintainBase::Wait).is_queue_empty() {}
     }
 }

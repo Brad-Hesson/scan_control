@@ -17,3 +17,6 @@ uuid = { version = "1.11.0", features = ["v4"] }
 
 [build-dependencies]
 wgsl_to_wgpu = "^0.11"
+
+[dev-dependencies]
+pollster = "0.4.0"
