@@ -1,8 +1,8 @@
-use std::{f32::NAN, time::Duration};
+use std::time::Duration;
 
 use egui_colorgradient::Gradient;
-use glam::{Affine2, Mat2, Vec2};
-use itertools::{iproduct, izip, Itertools};
+use glam::{Affine2, Vec2};
+use itertools::iproduct;
 
 use crate::scan_view::{ScanImage, ScanView};
 
@@ -20,26 +20,29 @@ impl MyApp {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let mut scan_view = ScanView::new(wgpu);
         let mut images = vec![];
-        let scale = 100.;
-        let height = 0.5;
-        let mut data = vec![height; 256 * 256];
-        for (x, y) in iproduct!(0..256, 0..256) {
-            let i = y * 256 + x;
-            let x = x as f32 / 255. * 50.;
-            let y = y as f32 / 255. * 50.;
-            data[i] = (x.sin() + y.sin()) / 4. + 0.5;
+        let width = 512;
+        let height = 512;
+        let mut data = vec![0.; width * height];
+        let mut row_sums = vec![0.; height];
+        for (x, y) in iproduct!(0..width, 0..height) {
+            let i = y * width + x;
+            let row = y;
+            let x = x as f32 / (width - 1) as f32 * 50.;
+            let y = y as f32 / (height - 1) as f32 * 50.;
+            let v = (x.sin() + y.sin()) / 4. + 0.5;
+            data[i] = v;
+            row_sums[row] += v / width as f32;
         }
         let image = ScanImage::new(
-            256,
+            width,
             data.into_boxed_slice(),
-            Affine2::from_scale_angle_translation(Vec2::ONE * scale / 2., 0., Vec2::ZERO),
+            Affine2::from_scale_angle_translation(Vec2::ONE / 2., 0., Vec2::ZERO),
         );
         images.push(image);
         let gradient = Gradient::default();
         scan_view.set_color_map(
             gradient
                 .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-                .into_boxed_slice()
                 .try_into()
                 .unwrap(),
         );
