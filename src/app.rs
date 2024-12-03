@@ -10,7 +10,6 @@ pub struct MyApp {
     /// Behind an `Arc<Mutex<…>>` so we can pass it to [`egui::PaintCallback`] and paint later.
     scan_view: ScanView,
     images: Vec<ScanImage>,
-    time: f32,
     gradient: egui_colorgradient::Gradient,
     last_gradient: egui_colorgradient::Gradient,
 }
@@ -36,7 +35,7 @@ impl MyApp {
         let image = ScanImage::new(
             width,
             data.into_boxed_slice(),
-            Affine2::from_scale_angle_translation(Vec2::ONE / 2., 0., Vec2::ZERO),
+            Affine2::from_scale_angle_translation(Vec2::ONE * 100. / 2., 0., Vec2::ZERO),
         );
         images.push(image);
         let gradient = Gradient::default();
@@ -44,12 +43,11 @@ impl MyApp {
             gradient
                 .linear_eval(ScanView::COLOR_MAP_SIZE, true)
                 .try_into()
-                .unwrap(),
+                .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
         );
         Self {
             scan_view,
             images,
-            time: 0.,
             last_gradient: gradient.clone(),
             gradient,
         }
@@ -60,9 +58,8 @@ impl MyApp {
             self.scan_view.set_color_map(
                 self.gradient
                     .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-                    .into_boxed_slice()
                     .try_into()
-                    .unwrap(),
+                    .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
             );
         }
     }
@@ -80,11 +77,7 @@ impl eframe::App for MyApp {
             egui_colorgradient::gradient_editor(ui, &mut self.gradient);
             self.update_gradient();
             self.scan_view.show(ui, |ctx| {
-                let dt = ctx.ui.input(|is| is.unstable_dt);
-                self.time += dt;
                 for image in &mut self.images {
-                    // image.transform.matrix2 = Mat2::from_angle(0.5 * dt) * image.transform.matrix2;
-                    // image.set_image_data(4, Box::new([self.time % 3. - 1.]));
                     image.show(ctx);
                 }
             });
