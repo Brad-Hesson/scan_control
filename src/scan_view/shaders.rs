@@ -211,15 +211,36 @@ impl MetadataBuffer {
 }
 pub struct StorageBuffer<T: Clone + bytemuck::NoUninit + AnyBitPattern>(Buffer, PhantomData<T>);
 impl<T: Clone + bytemuck::NoUninit + AnyBitPattern> StorageBuffer<T> {
-    pub fn new_with(device: &Device, size: usize, fill: T) -> Self {
+    pub fn new_with(device: &Device, size: usize, fill: T, usage: BufferUsages) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: None,
             size: (size * std::mem::size_of::<T>()) as u64,
-            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            usage,
             mapped_at_creation: true,
         });
         bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut()).fill(fill);
         buffer.unmap();
+        Self(buffer, PhantomData)
+    }
+    pub fn new_as(device: &Device, data: &[T], usage: BufferUsages) -> Self {
+        let buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: (data.len() * std::mem::size_of::<T>()) as u64,
+            usage,
+            mapped_at_creation: true,
+        });
+        bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut())
+            .copy_from_slice(data);
+        buffer.unmap();
+        Self(buffer, PhantomData)
+    }
+    pub fn new(device: &Device, size: usize, usage: BufferUsages) -> Self {
+        let buffer = device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: (size * std::mem::size_of::<T>()) as u64,
+            usage,
+            mapped_at_creation: false,
+        });
         Self(buffer, PhantomData)
     }
     pub fn set(&self, queue: &Queue, offset: usize, data: &[T]) {

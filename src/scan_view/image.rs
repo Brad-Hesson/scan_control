@@ -2,7 +2,7 @@ use core::f32;
 
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, Device, Extent3d},
+    wgpu::{self, BufferUsages, Device, Extent3d},
 };
 use glam::Affine2;
 use uuid::Uuid;
@@ -119,8 +119,12 @@ pub(super) struct ImageResources {
 impl ImageResources {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
-        let image_buffer =
-            StorageBuffer::new_with(device, (size.width * size.height) as usize, f32::NAN);
+        let image_buffer = StorageBuffer::new_with(
+            device,
+            (size.width * size.height) as usize,
+            f32::NAN,
+            BufferUsages::COPY_DST | BufferUsages::STORAGE,
+        );
         let image_texture = ImageTexture::new(device, size);
         let local_bind_group =
             scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
