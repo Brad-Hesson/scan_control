@@ -18,9 +18,10 @@ var<storage> data: array<f32>;
 @group(0) @binding(2)
 var texture: texture_storage_2d<r32float, write>;
 
-@compute @workgroup_size(1)
+@compute @workgroup_size(256, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let v = data[global_id.y * met.width + global_id.x];
-    let out = (v - met.min) / met.max;
-    textureStore(texture, global_id.xy, vec4(out, 0.0, 0.0, 0.0));
+    var v = data[global_id.y * met.width + global_id.x];
+    v -= met.min;
+    v /= (met.max - met.min);
+    textureStore(texture, global_id.xy, vec4(v, 0.0, 0.0, 0.0));
 }
