@@ -49,8 +49,8 @@ impl CallbackTrait for ImageCallback {
                 queue,
                 &copy_texture::Metadata {
                     width: self.size.width,
-                    max: 1.,
-                    min: 0.0,
+                    max: 0.5,
+                    min: -0.5,
                 },
             );
         }
