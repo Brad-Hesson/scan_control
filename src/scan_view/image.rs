@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::scan_view::{global::GlobalResources, shaders::copy_texture};
 
-use super::shaders::{scan_image, ImageBuffer, ImageTexture, MetadataBuffer, TransformBuffer};
+use super::shaders::{scan_image, ImageTexture, MetadataBuffer, StorageBuffer, TransformBuffer};
 
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
@@ -111,7 +111,7 @@ impl CallbackTrait for ImageCallback {
 
 pub(super) struct ImageResources {
     world_transform_buf: TransformBuffer,
-    image_buffer: ImageBuffer,
+    image_buffer: StorageBuffer<f32>,
     local_bind_group: scan_image::LocalBindGroup,
     metadata_buffer: MetadataBuffer,
     image_copy_bind_group: copy_texture::BindGroup,
@@ -119,7 +119,8 @@ pub(super) struct ImageResources {
 impl ImageResources {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
-        let image_buffer = ImageBuffer::new(device, size);
+        let image_buffer =
+            StorageBuffer::new_with(device, (size.width * size.height) as usize, f32::NAN);
         let image_texture = ImageTexture::new(device, size);
         let local_bind_group =
             scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);

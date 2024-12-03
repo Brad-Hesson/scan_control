@@ -1,3 +1,6 @@
+use std::marker::PhantomData;
+
+use bytemuck::AnyBitPattern;
 use copy_texture::Metadata;
 use eframe::wgpu::{
     BlendState, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
@@ -28,7 +31,7 @@ pub mod copy_texture {
         pub fn new(
             device: &Device,
             metadata: &MetadataBuffer,
-            image_buffer: &ImageBuffer,
+            image_buffer: &StorageBuffer<f32>,
             image_texture: &ImageTexture,
         ) -> Self {
             let bindings = bindings::copy_texture::bind_groups::BindGroupLayout0 {
@@ -206,23 +209,23 @@ impl MetadataBuffer {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(data));
     }
 }
-pub struct ImageBuffer(Buffer);
-impl ImageBuffer {
-    pub fn new(device: &Device, size: Extent3d) -> Self {
+pub struct StorageBuffer<T: Clone + bytemuck::NoUninit + AnyBitPattern>(Buffer, PhantomData<T>);
+impl<T: Clone + bytemuck::NoUninit + AnyBitPattern> StorageBuffer<T> {
+    pub fn new_with(device: &Device, size: usize, fill: T) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: None,
-            size: size.width as u64 * size.height as u64 * std::mem::size_of::<f32>() as u64,
+            size: (size * std::mem::size_of::<T>()) as u64,
             usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             mapped_at_creation: true,
         });
-        bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut()).fill(f32::NAN);
+        bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut()).fill(fill);
         buffer.unmap();
-        Self(buffer)
+        Self(buffer, PhantomData)
     }
-    pub fn set(&self, queue: &Queue, offset: usize, data: &[f32]) {
+    pub fn set(&self, queue: &Queue, offset: usize, data: &[T]) {
         queue.write_buffer(
             &self.0,
-            offset as u64 * size_of::<f32>() as u64,
+            offset as u64 * size_of::<T>() as u64,
             bytemuck::cast_slice(data),
         );
     }
