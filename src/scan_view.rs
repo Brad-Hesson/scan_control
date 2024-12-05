@@ -15,6 +15,7 @@ use uuid::Uuid;
 mod global;
 mod image;
 mod shaders;
+mod transform;
 
 #[derive(Clone)]
 pub struct ScanView {
