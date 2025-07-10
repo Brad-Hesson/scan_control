@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use egui_colorgradient::Gradient;
+// use egui_colorgradient::Gradient;
 use glam::{Affine2, Vec2};
 use itertools::iproduct;
 
@@ -10,8 +10,8 @@ pub struct MyApp {
     /// Behind an `Arc<Mutex<…>>` so we can pass it to [`egui::PaintCallback`] and paint later.
     scan_view: ScanView,
     images: Vec<ScanImage>,
-    gradient: egui_colorgradient::Gradient,
-    last_gradient: egui_colorgradient::Gradient,
+    // gradient: egui_colorgradient::Gradient,
+    // last_gradient: egui_colorgradient::Gradient,
 }
 
 impl MyApp {
@@ -38,31 +38,31 @@ impl MyApp {
             Affine2::from_scale_angle_translation(Vec2::ONE * 100. / 2., 0., Vec2::ZERO),
         );
         images.push(image);
-        let gradient = Gradient::default();
-        scan_view.set_color_map(
-            gradient
-                .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-                .try_into()
-                .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
-        );
+        // let gradient = Gradient::default();
+        // scan_view.set_color_map(
+        //     gradient
+        //         .linear_eval(ScanView::COLOR_MAP_SIZE, true)
+        //         .try_into()
+        //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
+        // );
         Self {
             scan_view,
             images,
-            last_gradient: gradient.clone(),
-            gradient,
+            // last_gradient: gradient.clone(),
+            // gradient,
         }
     }
-    fn update_gradient(&mut self) {
-        if self.gradient != self.last_gradient {
-            self.last_gradient = self.gradient.clone();
-            self.scan_view.set_color_map(
-                self.gradient
-                    .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-                    .try_into()
-                    .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
-            );
-        }
-    }
+    // fn update_gradient(&mut self) {
+    //     if self.gradient != self.last_gradient {
+    //         self.last_gradient = self.gradient.clone();
+    //         self.scan_view.set_color_map(
+    //             self.gradient
+    //                 .linear_eval(ScanView::COLOR_MAP_SIZE, true)
+    //                 .try_into()
+    //                 .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
+    //         );
+    //     }
+    // }
 }
 
 impl eframe::App for MyApp {
@@ -74,8 +74,8 @@ impl eframe::App for MyApp {
                 ui.hyperlink_to("glow", "https://github.com/grovesNL/glow");
                 ui.label(" (OpenGL).");
             });
-            egui_colorgradient::gradient_editor(ui, &mut self.gradient);
-            self.update_gradient();
+            // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
+            // self.update_gradient();
             self.scan_view.show(ui, |ctx| {
                 for image in &mut self.images {
                     image.show(ctx);

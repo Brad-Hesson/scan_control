@@ -57,6 +57,8 @@
         ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
         shellHook = ''
+          mkdir .vscode
+          touch .vscode/settings.json
           sed -i '/wgsl-analyzer\.server\.path/c\    \"wgsl-analyzer\.server\.path\": \"${wgsl-analyzer}/bin/wgsl_analyzer",' .vscode/settings.json
         '';
       };
