@@ -1,8 +1,25 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    brad-utils = {
+      url = "github:Brad-Hesson/brad-utils";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.crane.follows = "crane";
+      inputs.fenix.follows = "fenix";
+    };
+    wgsl-analyzer = {
+      url = "github:wgsl-analyzer/wgsl-analyzer/nightly";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.crane.follows = "crane";
+    };
   };
   outputs = flakes: flakes.flake-utils.lib.eachDefaultSystem (system:
     let
@@ -10,57 +27,53 @@
         inherit system;
         config.allowUnfree = true;
       };
-      craneLib = flakes.crane.mkLib pkgs;
-      wgsl-analyzer = craneLib.buildPackage {
-        pname = "wgsl_analyzer";
-        version = "0.0.0";
-        src = pkgs.fetchFromGitHub {
-          owner = "wgsl-analyzer";
-          repo = "wgsl-analyzer";
-          rev = "v0.8.1";
-          hash = "sha256-bhosTihbW89vkqp1ua0C1HGLJJdCNfRde98z4+IjkOc=";
-        };
-        doCheck = false;
+      brad-utils = flakes.brad-utils.lib.${system};
+      fenix = flakes.fenix.packages.${system};
+      crane = (flakes.crane.mkLib pkgs).overrideToolchain (fenix.combine [
+        fenix.stable.defaultToolchain
+        fenix.stable.rust-src
+      ]);
+      runtimeDeps = with pkgs; [
+        libxkbcommon
+        wayland
+        xorg.libX11
+        xorg.libXcursor
+        xorg.libXrandr
+        xorg.libXi
+        alsa-lib
+        vulkan-loader
+        libGL
+        libGLU
+      ];
+      crateArgs = {
+        src = ./.;
+        strictDeps = true;
       };
+      cargoArtifacts = crane.buildDepsOnly crateArgs;
+      crate = crane.buildPackage (crateArgs // {
+        inherit cargoArtifacts;
+        doCheck = false;
+        nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+        postFixup = ''
+          wrapProgram $out/bin/scan_control \
+          --set LD_LIBRARY_PATH ${pkgs.lib.makeLibraryPath runtimeDeps}
+        '';
+      });
+      #wgsl-analyzer = flakes.wgsl-analyzer.packages.${system}.default;
     in
     {
-      devShell = pkgs.mkShell rec {
-        packages = [
-          pkgs.rustup
-          pkgs.renderdoc
-          wgsl-analyzer
-        ];
-        buildInputs = with pkgs; [
-          # necessary for building wgpu in 3rd party packages (in most cases)
-          libxkbcommon
-          wayland
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXrandr
-          xorg.libXi
-          alsa-lib
-          fontconfig
-          freetype
-          shaderc
-          directx-shader-compiler
-          pkg-config
-          cmake
-          mold # could use any linker, needed for rustix (but mold is fast)
-
-          libGL
-          vulkan-headers
-          vulkan-loader
-          vulkan-tools
-          vulkan-tools-lunarg
-          vulkan-extension-layer
-          vulkan-validation-layers # don't need them *strictly* but immensely helpful
-        ];
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+      packages.default = crate;
+      apps.default = (flakes.flake-utils.lib.mkApp { drv = crate; }) // {
+        meta.description = "Control software for atomic stm lithography";
+      };
+      devShell = crane.devShell rec {
+        inputsFrom = [ crate ];
+        packages = [ pkgs.renderdoc ];
+        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
         shellHook = ''
-          mkdir .vscode
-          touch .vscode/settings.json
-          sed -i '/wgsl-analyzer\.server\.path/c\    \"wgsl-analyzer\.server\.path\": \"${wgsl-analyzer}/bin/wgsl_analyzer",' .vscode/settings.json
+          ${brad-utils.vscodeDefaultHook}
         '';
+        # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
       };
     }
   );
