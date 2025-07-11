@@ -129,11 +129,13 @@ pub mod transform {
 
     pub use bindings::transform::bind_groups::BindGroup3 as IterationBindGroup;
     pub use bindings::transform::compute::create_add_pipeline;
-    pub use bindings::transform::compute::create_col_sum_pipeline;
     pub use bindings::transform::compute::create_copy_pipeline;
     pub use bindings::transform::compute::create_div_pipeline;
     pub use bindings::transform::compute::create_mul_pipeline;
+    pub use bindings::transform::compute::create_row_broadcast_pipeline;
+    pub use bindings::transform::compute::create_col_broadcast_pipeline;
     pub use bindings::transform::compute::create_row_sum_pipeline;
+    pub use bindings::transform::compute::create_col_sum_pipeline;
     pub use bindings::transform::set_bind_groups;
     pub use bindings::transform::workgroup_size;
     use eframe::wgpu::BindGroup;

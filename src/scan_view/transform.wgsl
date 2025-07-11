@@ -41,6 +41,32 @@ fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
     write_cell_out(pos, read_cell_a(pos));
 }
 
+var<workgroup> broadcast_val: f32;
+
+@compute @workgroup_size(8, 1)
+fn row_broadcast(
+    @builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_index) local_index: u32,
+) {
+    let pos = global_id.xy;
+    if local_index == 0u {
+        broadcast_val = read_cell_a(vec2(0u, pos.y));
+    }
+    workgroupBarrier();
+    write_cell_out(pos, broadcast_val);
+}
+
+@compute @workgroup_size(1, 8)
+fn col_broadcast(
+    @builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_index) local_index: u32,
+) {
+    let pos = global_id.xy;
+    if local_index == 0u {
+        broadcast_val = read_cell_a(vec2(pos.x, 0u));
+    }
+    workgroupBarrier();
+    write_cell_out(pos, broadcast_val);
+}
+
 @compute @workgroup_size(workgroup_size, 1)
 fn row_sum(
     @builtin(global_invocation_id) global_id: vec3<u32>,
@@ -107,14 +133,8 @@ fn pow2_floor(n: u32) -> u32 {
     return u32(1u << (31u - countLeadingZeros(n - 1u)));
 }
 
-fn write_cell_a(pos: vec2<u32>, val: f32) {
-    data_a[pos.x + size_a.x * pos.y] = val;
-}
 fn read_cell_a(pos: vec2<u32>) -> f32 {
     return data_a[pos.x + size_a.x * pos.y];
-}
-fn write_cell_b(pos: vec2<u32>, val: f32) {
-    data_b[pos.x + size_b.x * pos.y] = val;
 }
 fn read_cell_b(pos: vec2<u32>) -> f32 {
     return data_b[pos.x + size_b.x * pos.y];

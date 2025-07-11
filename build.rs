@@ -29,12 +29,26 @@ fn main() {
         )
         .unwrap()
         .replace("wgpu::", "eframe::wgpu::")
-        .replace("pub struct BindGroup0(eframe::wgpu::BindGroup)", "pub struct BindGroup0(pub eframe::wgpu::BindGroup)")
+        .replace(
+            "pub struct BindGroup0(eframe::wgpu::BindGroup)",
+            "pub struct BindGroup0(pub eframe::wgpu::BindGroup)",
+        )
         .replace(
             "entry_point: Some(entry.entry_point)",
             "entry_point: entry.entry_point",
         );
-        for entry in ["main", "sum", "row_sum", "col_sum", "add", "mul", "div", "copy"] {
+        for entry in [
+            "main",
+            "sum",
+            "row_sum",
+            "col_sum",
+            "add",
+            "mul",
+            "div",
+            "copy",
+            "row_broadcast",
+            "col_broadcast",
+        ] {
             src = src.replace(
                 &format!("entry_point: Some(\"{entry}\")"),
                 &format!("entry_point: \"{entry}\""),
