@@ -14,9 +14,14 @@ itertools = "0.13.0"
 mint = "0.5.9"
 serde = { version = "1.0.215", features = ["derive"] }
 uuid = { version = "1.11.0", features = ["v4"] }
+image-compute = { path = "crates/image-compute" }
 
 [build-dependencies]
 wgsl_to_wgpu = "^0.11"
 
 [dev-dependencies]
 pollster = "0.4.0"
+
+
+[workspace]
+members = [ "crates/image-compute" ]
