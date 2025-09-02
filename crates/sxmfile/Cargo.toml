@@ -1,0 +1,8 @@
+[package]
+name = "sxmfile"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+itertools = { workspace = true }
+bytemuck = { workspace = true }

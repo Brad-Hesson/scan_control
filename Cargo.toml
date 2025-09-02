@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytemuck = "1.20.0"
-eframe = { version = "^0.29", features = ["wgpu"] }
+bytemuck = { workspace = true }
+eframe = { version = "0.32", features = ["wgpu"] }
 egui = { version = "^0.29", features = ["mint"] }
 # egui-colorgradient = { path = "../egui-colorgradient/egui-colorgradient" }
 env_logger = "0.11.5"
 glam = { version = "0.29.2", features = ["mint"] }
-itertools = "0.13.0"
 mint = "0.5.9"
+itertools.workspace = true
 serde = { version = "1.0.215", features = ["derive"] }
 uuid = { version = "1.11.0", features = ["v4"] }
 image-compute = { path = "crates/image-compute" }
@@ -24,4 +24,8 @@ pollster = "0.4.0"
 
 
 [workspace]
-members = [ "crates/image-compute" ]
+members = ["crates/sxmfile", "crates/image-compute"]
+
+[workspace.dependencies]
+bytemuck = "1.20"
+itertools = "0.14.0"
