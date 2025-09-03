@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 itertools = { workspace = true }
 bytemuck = { workspace = true }
+eyre = "0.6"

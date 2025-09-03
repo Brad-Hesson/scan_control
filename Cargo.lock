@@ -3111,6 +3111,7 @@ name = "sxmfile"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "eyre",
  "itertools",
 ]
 
