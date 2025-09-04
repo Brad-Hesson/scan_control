@@ -1,10 +1,12 @@
+use std::path::Path;
+
 use crate::components::file_dialog::ViewportFileDialog;
+use crate::scan_view::{ScanImage, ScanView};
 use egui::{emath::OrderedFloat, Button, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
+use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
 use tracing::{error, info};
-
-use crate::scan_view::{ScanImage, ScanView};
 
 pub struct MyApp {
     scan_view: ScanView,
@@ -47,55 +49,21 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(path) = self.file_dialog.take_picked() {
+            if let Err(e) = load_file(self, path).context("file load failed") {
+                error!("{e:#}");
+            }
+        }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
             });
         });
-        if let Some(path) = self.file_dialog.take_picked() {
-            'load_file: {
-                info!("Trying to load image `{}`", path.display());
-                let Ok(file) = sxmfile::SXM::parse_file(&path).inspect_err(|e| error!("{e}"))
-                else {
-                    break 'load_file;
-                };
-                info!("Loaded image `{}`", path.display());
-                let Ok([width, _]) = file.get_image_size().inspect_err(|e| error!("{e}")) else {
-                    break 'load_file;
-                };
-                let mut data = file.data[0][0].clone();
-                let max = data
-                    .iter()
-                    .copied()
-                    .map(OrderedFloat)
-                    .max()
-                    .unwrap()
-                    .into_inner();
-                let min = data
-                    .iter()
-                    .copied()
-                    .map(OrderedFloat)
-                    .min()
-                    .unwrap()
-                    .into_inner();
-                for d in &mut data {
-                    *d = (*d - min) / (max - min);
-                }
-                let Ok(scale) = file.get_scan_range().inspect_err(|e| error!("{e}")) else {
-                    break 'load_file;
-                };
-                let Ok(translation) = file.get_scan_center().inspect_err(|e| error!("{e}")) else {
-                    break 'load_file;
-                };
-                let transform = Affine2::from_scale_angle_translation(
-                    Vec2::from(scale) * 1e9,
-                    0.,
-                    Vec2::from(translation) * 1e9,
-                );
-                let new_image = ScanImage::new(width, data, transform);
-                self.images.push(new_image);
-            }
-        }
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            let tr = self.scan_view.world_transform.inverse();
+            let (scale, _, translation) = tr.to_scale_angle_translation();
+            ui.label(format!("scale: {scale}, translation: {translation}"));
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
             // self.update_gradient();
@@ -104,11 +72,6 @@ impl eframe::App for MyApp {
                     image.show(ctx);
                 }
             });
-        });
-        egui::TopBottomPanel::bottom("menu_bar").show(ctx, |ui| {
-            let tr = self.scan_view.world_transform.inverse();
-            let (scale, _, translation) = tr.to_scale_angle_translation();
-            ui.label(format!("scale: {scale}, translation: {translation}"));
         });
     }
 }
@@ -120,4 +83,40 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
         }
     });
     app.file_dialog.update(ctx);
+}
+
+fn load_file(app: &mut MyApp, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    info!("Trying to load image `{}`", path.display());
+    let file = sxmfile::SXM::parse_file(&path)?;
+    info!("Loaded image `{}`", path.display());
+    let [width, _] = file.get_image_size()?;
+    let mut data = file.data[0][0].clone();
+    let max = data
+        .iter()
+        .copied()
+        .map(OrderedFloat)
+        .max()
+        .unwrap()
+        .into_inner();
+    let min = data
+        .iter()
+        .copied()
+        .map(OrderedFloat)
+        .min()
+        .unwrap()
+        .into_inner();
+    for d in &mut data {
+        *d = (*d - min) / (max - min);
+    }
+    let scale = file.get_scan_range()?;
+    let translation = file.get_scan_center()?;
+    let transform = Affine2::from_scale_angle_translation(
+        Vec2::from(scale) * 1e9,
+        0.,
+        Vec2::from(translation) * 1e9,
+    );
+    let new_image = ScanImage::new(width, data, transform);
+    app.images.push(new_image);
+    Ok(())
 }

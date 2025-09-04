@@ -1,6 +1,6 @@
 use eframe::wgpu::{DeviceDescriptor, PresentMode};
 use eyre::Context as _;
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use wgpu::{
     Adapter, Device, FeaturesWGPU, FeaturesWebGPU, Instance, PowerPreference, Queue,
@@ -12,7 +12,6 @@ mod components;
 mod scan_view;
 
 fn main() -> eframe::Result {
-    // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
