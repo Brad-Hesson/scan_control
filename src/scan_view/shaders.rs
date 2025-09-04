@@ -5,10 +5,9 @@ use bytemuck::AnyBitPattern;
 use copy_texture::Metadata;
 use eframe::wgpu::{
     BlendState, Buffer, BufferAddress, BufferDescriptor, BufferSlice, BufferUsages,
-    ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, Id, MultisampleState,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor,
-    SamplerDescriptor, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    TextureViewDescriptor,
+    ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, MultisampleState, PrimitiveState,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, SamplerDescriptor, Texture,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use glam::{Affine2, Mat3, Mat4};
 
@@ -124,50 +123,6 @@ pub mod scan_image {
     }
 }
 
-pub mod transform {
-    use super::*;
-
-    pub use bindings::transform::bind_groups::BindGroup3 as IterationBindGroup;
-    pub use bindings::transform::compute::create_add_pipeline;
-    pub use bindings::transform::compute::create_copy_pipeline;
-    pub use bindings::transform::compute::create_div_pipeline;
-    pub use bindings::transform::compute::create_mul_pipeline;
-    pub use bindings::transform::compute::create_row_broadcast_pipeline;
-    pub use bindings::transform::compute::create_col_broadcast_pipeline;
-    pub use bindings::transform::compute::create_row_sum_pipeline;
-    pub use bindings::transform::compute::create_col_sum_pipeline;
-    pub use bindings::transform::set_bind_groups;
-    pub use bindings::transform::workgroup_size;
-    use eframe::wgpu::BindGroup;
-    use eframe::wgpu::ComputePass;
-
-    pub struct DataBindGroup(BindGroup);
-    impl DataBindGroup {
-        pub fn new(
-            device: &Device,
-            size: &StorageBuffer<u32>,
-            data_buffer: &StorageBuffer<f32>,
-        ) -> Self {
-            let bindings = bindings::transform::bind_groups::BindGroupLayout0 {
-                size_out: size.0.as_entire_buffer_binding(),
-                data_out: data_buffer.0.as_entire_buffer_binding(),
-            };
-            Self(bindings::transform::bind_groups::BindGroup0::from_bindings(device, bindings).0)
-        }
-        pub fn set(&self, pass: &mut ComputePass, index: u32) {
-            pass.set_bind_group(index, &self.0, &[]);
-        }
-    }
-    impl IterationBindGroup {
-        pub fn new(device: &Device, iteration_buf: &StorageBuffer<u32>) -> Self {
-            let bindings = bindings::transform::bind_groups::BindGroupLayout3 {
-                iteration: iteration_buf.0.as_entire_buffer_binding(),
-            };
-            Self::from_bindings(device, bindings)
-        }
-    }
-}
-
 pub struct TransformBuffer(Buffer);
 impl TransformBuffer {
     pub fn new(device: &Device) -> Self {
@@ -227,7 +182,7 @@ impl ColorMapTexture {
         queue.write_texture(
             self.0.as_image_copy(),
             bytemuck::cast_slice(color_map),
-            eframe::wgpu::ImageDataLayout {
+            eframe::wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(Self::SIZE as u32 * std::mem::size_of::<u8>() as u32 * 4),
                 rows_per_image: Some(1),
@@ -295,9 +250,6 @@ impl<T: Clone + bytemuck::NoUninit + AnyBitPattern> StorageBuffer<T> {
             offset as u64 * size_of::<T>() as u64,
             bytemuck::cast_slice(data),
         );
-    }
-    pub fn global_id(&self) -> Id<Buffer> {
-        self.0.global_id()
     }
     pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> BufferSlice {
         self.0.slice(bounds)

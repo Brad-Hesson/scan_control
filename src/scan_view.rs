@@ -15,11 +15,10 @@ use uuid::Uuid;
 mod global;
 mod image;
 mod shaders;
-mod transform;
 
 #[derive(Clone)]
 pub struct ScanView {
-    world_transform: Affine2,
+    pub world_transform: Affine2,
     rotate_center: Option<Vec2>,
     target_format: TextureFormat,
     new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
@@ -31,14 +30,8 @@ impl ScanView {
         add_contents: impl FnOnce(&mut ScanViewCtx) -> R,
     ) -> InnerResponse<R> {
         egui::Frame::canvas(ui.style()).show(ui, |ui| {
-            let (rect, response) = ui.allocate_at_least(
-                ui.available_size_before_wrap(),
-                egui::Sense {
-                    click: true,
-                    drag: true,
-                    focusable: true,
-                },
-            );
+            let (rect, response) =
+                ui.allocate_at_least(ui.available_size_before_wrap(), egui::Sense::all());
             let screen_transform = self.handle_inputs(ui, response);
             ui.painter().add(Callback::new_paint_callback(
                 rect,
@@ -103,7 +96,8 @@ impl ScanView {
         screen_transform * self.world_transform
     }
     pub fn new(wgpu: &RenderState) -> Self {
-        let mut color_map: Box<MaybeUninit<[egui::Color32; ColorMapTexture::SIZE]>> = Box::new_uninit();
+        let mut color_map: Box<MaybeUninit<[egui::Color32; ColorMapTexture::SIZE]>> =
+            Box::new_uninit();
         for i in 0..ColorMapTexture::SIZE {
             let color = i as f32 / (ColorMapTexture::SIZE - 1) as f32;
             unsafe {

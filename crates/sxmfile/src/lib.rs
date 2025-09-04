@@ -86,6 +86,34 @@ impl SXM {
         }
         Ok(out)
     }
+    pub fn get_scan_range(&self) -> Result<[f32;2]>{
+        let mut ranges = self
+            .get_metadata("SCAN_RANGE")?
+            .split_ascii_whitespace()
+            .map(str::parse);
+        Ok([
+            ranges.next()
+                .wrap_err("SCAN_RANGE x value missing")?
+                .context("SCAN_RANGE x value parse error")?,
+            ranges.next()
+                .wrap_err("SCAN_RANGE y value missing")?
+                .context("SCAN_RANGE y value parse error")?,
+        ])
+    }
+    pub fn get_scan_center(&self) -> Result<[f32;2]>{
+        let mut pos = self
+            .get_metadata("SCAN_OFFSET")?
+            .split_ascii_whitespace()
+            .map(str::parse);
+        Ok([
+            pos.next()
+                .wrap_err("SCAN_OFFSET x value missing")?
+                .context("SCAN_OFFSET x value parse error")?,
+            pos.next()
+                .wrap_err("SCAN_OFFSET y value missing")?
+                .context("SCAN_OFFSET y value parse error")?,
+        ])
+    }
     #[inline]
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self> {
         Self::parse(BufReader::new(std::fs::File::open(path)?))
