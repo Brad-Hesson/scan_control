@@ -21,7 +21,7 @@ fn main() {
         ).unwrap();
 
         // Generate the Rust bindings and write to a file.
-        let mut src = create_shader_module(
+        let src = create_shader_module(
             &wgsl_source,
         &format!("{}/{name}.wgsl", env::var("OUT_DIR").unwrap()),
             WriteOptions {
@@ -34,11 +34,11 @@ fn main() {
                 validate: Some(Default::default()),
             },
         )
-        .unwrap()
-        .replace(
-            "pub struct BindGroup0(eframe::wgpu::BindGroup)",
-            "pub struct BindGroup0(pub eframe::wgpu::BindGroup)",
-        );
+        .unwrap();
+        // .replace(
+        //     "pub struct BindGroup0(eframe::wgpu::BindGroup)",
+        //     "pub struct BindGroup0(pub eframe::wgpu::BindGroup)",
+        // );
         text += &src;
 
         writeln!(&mut text, "}}").unwrap();
