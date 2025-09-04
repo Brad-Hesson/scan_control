@@ -41,7 +41,7 @@ fn main() -> eframe::Result {
             ),
             ..Default::default()
         },
-        multisampling: 1,
+        multisampling: 4,
         ..Default::default()
     };
     eframe::run_native(

@@ -76,7 +76,7 @@ pub mod scan_image {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: MultisampleState::default(),
+            multisample: MultisampleState { count: 4, mask: !0, alpha_to_coverage_enabled: true },
             multiview: None,
             cache: None,
         })
