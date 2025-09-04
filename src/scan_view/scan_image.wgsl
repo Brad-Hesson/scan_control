@@ -1,4 +1,4 @@
-const border_width: f32 = 0.02;
+const border_width: f32 = 0.00004;
 const border_color: vec4<f32> = vec4(0.0, 1.0, 0.0, 1.0);
 const low_color: vec3<f32> = vec3(0.0, 0.0, 1.0);
 const high_color: vec3<f32> = vec3(1.0, 0.0, 0.0);
@@ -18,12 +18,14 @@ fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     var uv = uvs[vert_index];
     let is_vertical = dot(quad2world * vec4(1., 0., 0., 0.), vec4(1., 0., 0., 0.)) > 0.;
 
+    let border_modifier = world2screen * vec4(vec3(1.0), 0.0);
+    let my_border_width = border_width / length(border_modifier.xy);
     // if border is enabled, grow the quad and extend the uvs by 2*border width
     if is_vertical {
-        position.x *= 1.0 + border_width * 2.;
-        position.y *= 1.0 + border_width * 2.;
-        uv *= 1.0 + border_width * 2.;
-        uv -= border_width;
+        position.x *= 1.0 + my_border_width * 2.;
+        position.y *= 1.0 + my_border_width * 2.;
+        uv *= 1.0 + my_border_width * 2.;
+        uv -= my_border_width;
     }
 
     // apply the transforms
