@@ -122,12 +122,6 @@ impl eframe::App for MyApp {
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("The triangle is being painted using ");
-                ui.hyperlink_to("glow", "https://github.com/grovesNL/glow");
-                ui.label(" (OpenGL).");
-            });
             // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
             // self.update_gradient();
             self.scan_view.show(ui, |ctx| {
