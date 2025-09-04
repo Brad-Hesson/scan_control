@@ -3,6 +3,10 @@ name = "scan_control"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+incremental = true        # default, but set explicitly
+codegen-units = 256       # faster recompile, slower runtime
+
 [dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 env_logger = "0.11"
