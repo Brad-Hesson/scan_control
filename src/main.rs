@@ -8,6 +8,7 @@ use wgpu::{
 };
 
 mod app;
+mod components;
 mod scan_view;
 
 fn main() -> eframe::Result {
