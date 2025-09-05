@@ -54,6 +54,10 @@ impl eframe::App for MyApp {
                 error!("{e:#}");
             }
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
+            let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
+        }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
@@ -64,15 +68,17 @@ impl eframe::App for MyApp {
             let (scale, _, translation) = tr.to_scale_angle_translation();
             ui.label(format!("scale: {scale}, translation: {translation}"));
         });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
-            // self.update_gradient();
-            self.scan_view.show(ui, |ctx| {
-                for image in &mut self.images {
-                    image.show(ctx);
-                }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
+                // self.update_gradient();
+                self.scan_view.show(ui, |ctx| {
+                    for image in &mut self.images {
+                        image.show(ctx);
+                    }
+                });
             });
-        });
     }
 }
 
