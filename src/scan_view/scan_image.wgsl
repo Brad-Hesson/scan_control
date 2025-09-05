@@ -42,17 +42,20 @@ fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
 @group(0) @binding(1)
 var tex_sampler: sampler;
 
+@group(0) @binding(2)
+var color_map: texture_1d<f32>;
+
 @group(1) @binding(1)
 var height_map: texture_2d<f32>;
 
-@group(0) @binding(2)
-var color_map: texture_1d<f32>;
+@group(1) @binding(2)
+var<uniform> border_data: BorderData;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // if the uv goes outside of the standard coords, it means we want to draw a border
-    if vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0 {
-        return border_color;
+    if (vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0) && border_data.show != 0{
+        return vec4(border_data.color, 1.);
     }
     // sample the height of this pixel from the height-map texture
     let height = textureSample(height_map, tex_sampler, vertex.uv).r;
@@ -75,6 +78,11 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 // ------------ Structs and Data ------------
+
+struct BorderData{
+    color: vec3<f32>,
+    show: u32,
+};
 
 struct VertexOutput {
     @location(0) uv: vec2<f32>,

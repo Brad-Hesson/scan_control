@@ -5,8 +5,8 @@ use eframe::{
     egui_wgpu::{self, Callback, RenderState},
     wgpu::{Extent3d, TextureFormat},
 };
-use egui::{Color32, InnerResponse};
-use glam::{Affine2, Vec2};
+use egui::{emath::Rot2, Color32, InnerResponse, Pos2, Rect, Response, Sense, Stroke};
+use glam::{Affine2, Vec2, Vec3};
 use global::GlobalCallback;
 use image::ImageCallback;
 use shaders::ColorMapTexture;
@@ -41,7 +41,11 @@ impl ScanView {
                     new_color_map: std::mem::take(&mut self.new_color_map),
                 },
             ));
-            let mut ctx = ScanViewCtx { ui, rect };
+            let mut ctx = ScanViewCtx {
+                ui,
+                rect,
+                world_transform: self.world_transform,
+            };
             add_contents(&mut ctx)
         })
     }
@@ -120,6 +124,7 @@ impl ScanView {
 pub struct ScanViewCtx<'a> {
     pub ui: &'a mut egui::Ui,
     pub rect: egui::Rect,
+    pub world_transform: Affine2,
 }
 
 #[derive(Clone)]
@@ -139,6 +144,30 @@ impl ScanImage {
         }
     }
     pub fn show(&mut self, ctx: &mut ScanViewCtx) {
+        let resp = ctx
+            .ui
+            .input(|i| i.pointer.latest_pos())
+            .map(|pos| {
+                let [x, y] =
+                    (Affine2::from_translation(<[f32; 2]>::from(ctx.rect.center()).into())
+                        * ctx.world_transform
+                        * self.transform)
+                        .inverse()
+                        .transform_point2(<[f32; 2]>::from(pos).into())
+                        .abs()
+                        .into();
+                (x < 1. && y < 1.).then(|| {
+                    ctx.ui
+                        .interact(ctx.rect, egui::Id::new(self.uuid), Sense::all())
+                })
+            })
+            .flatten()
+            .unwrap_or_else(|| neutral_response(ctx.ui, egui::Id::new(self.uuid)));
+        let border_color = if resp.hovered() {
+            Some(Color32::LIGHT_BLUE)
+        } else {
+            None
+        };
         let callback = egui_wgpu::Callback::new_paint_callback(
             ctx.rect,
             ImageCallback {
@@ -150,6 +179,7 @@ impl ScanImage {
                     depth_or_array_layers: 1,
                 },
                 changes: std::mem::take(&mut self.changes),
+                border_color,
             },
         );
         ctx.ui.painter().add(callback);
@@ -161,4 +191,12 @@ impl ScanImage {
 
 fn v2(v: impl Into<mint::Vector2<f32>>) -> glam::Vec2 {
     v.into().into()
+}
+
+fn neutral_response(ui: &egui::Ui, id: egui::Id) -> Response {
+    ui.interact(
+        Rect::from_center_size(Pos2::ZERO, egui::Vec2::ZERO),
+        id,
+        Sense::empty(),
+    )
 }

@@ -4,10 +4,15 @@ use eframe::{
     egui_wgpu::{self, CallbackTrait},
     wgpu::{self, BufferUsages, Device, Extent3d},
 };
-use glam::Affine2;
+use egui::Color32;
+use glam::{Affine2, Vec3};
 use uuid::Uuid;
+use wgpu::{Buffer, Color};
 
-use crate::scan_view::{global::GlobalResources, shaders::copy_texture};
+use crate::scan_view::{
+    global::GlobalResources,
+    shaders::copy_texture::{self, BorderData},
+};
 
 use super::shaders::{scan_image, ImageTexture, MetadataBuffer, StorageBuffer, TransformBuffer};
 
@@ -16,6 +21,7 @@ pub(super) struct ImageCallback {
     pub transform: Affine2,
     pub size: Extent3d,
     pub changes: Vec<(usize, Box<[f32]>)>,
+    pub border_color: Option<Color32>,
 }
 impl CallbackTrait for ImageCallback {
     fn prepare(
@@ -36,6 +42,23 @@ impl CallbackTrait for ImageCallback {
 
         // Set the new world transform
         image_res.world_transform_buf.set(queue, self.transform);
+        let color = if let Some(c) = self.border_color {
+            Vec3::new(
+                c.r() as f32 / 255.,
+                c.g() as f32 / 255.,
+                c.b() as f32 / 255.,
+            )
+        } else {
+            Vec3::splat(1.)
+        };
+        image_res.border_data_buffer.set(
+            queue,
+            0,
+            &[BorderData {
+                color,
+                show: self.border_color.is_some().into(),
+            }],
+        );
 
         // Write all image changes to the image data buffer
         for (offset, data) in &self.changes {
@@ -115,10 +138,19 @@ pub(super) struct ImageResources {
     local_bind_group: scan_image::LocalBindGroup,
     metadata_buffer: MetadataBuffer,
     image_copy_bind_group: copy_texture::BindGroup,
+    border_data_buffer: StorageBuffer<BorderData>,
 }
 impl ImageResources {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
+        let border_data_buffer = StorageBuffer::new_as(
+            device,
+            &[BorderData {
+                color: Vec3::splat(1.),
+                show: 0,
+            }],
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        );
         let image_buffer = StorageBuffer::new_with(
             device,
             (size.width * size.height) as usize,
@@ -126,8 +158,12 @@ impl ImageResources {
             BufferUsages::COPY_DST | BufferUsages::STORAGE,
         );
         let image_texture = ImageTexture::new(device, size);
-        let local_bind_group =
-            scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
+        let local_bind_group = scan_image::LocalBindGroup::new(
+            device,
+            &world_transform_buf,
+            &image_texture,
+            &border_data_buffer,
+        );
         let metadata_buffer = MetadataBuffer::new(device);
         let image_copy_bind_group =
             copy_texture::BindGroup::new(device, &metadata_buffer, &image_buffer, &image_texture);
@@ -137,6 +173,7 @@ impl ImageResources {
             world_transform_buf,
             metadata_buffer,
             image_copy_bind_group,
+            border_data_buffer,
         }
     }
 }
