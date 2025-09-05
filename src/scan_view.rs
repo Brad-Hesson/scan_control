@@ -19,7 +19,6 @@ mod shaders;
 #[derive(Clone)]
 pub struct ScanView {
     pub world_transform: Affine2,
-    rotate_center: Option<Vec2>,
     target_format: TextureFormat,
     new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
 }
@@ -60,23 +59,11 @@ impl ScanView {
         };
         // Calculate the rotation transform
         let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
-            let pos = v2(response.interact_pointer_pos().unwrap() - rect.center());
-            if self.rotate_center.is_none() {
-                self.rotate_center = Some(pos);
-            }
-            let center = self.rotate_center.unwrap();
-            let drag = v2(response.drag_delta());
-            let rad = pos - center;
-            let angle = rad.perp_dot(drag) / rad.length_squared();
-            if rad.length_squared() > 10. {
-                let rot = Affine2::from_angle(angle);
-                let trans = Affine2::from_translation(center);
-                trans * rot * trans.inverse()
-            } else {
-                Affine2::IDENTITY
-            }
+            let cursor_pos = v2(response.interact_pointer_pos().unwrap() - rect.center());
+            let drag_vec = v2(response.drag_delta());
+            let angle = cursor_pos.perp_dot(drag_vec) / cursor_pos.length_squared();
+            Affine2::from_angle(angle)
         } else {
-            self.rotate_center = None;
             Affine2::IDENTITY
         };
 
@@ -111,7 +98,6 @@ impl ScanView {
         Self {
             new_color_map: Some(unsafe { color_map.assume_init() }),
             world_transform: Affine2::IDENTITY,
-            rotate_center: None,
             target_format: wgpu.target_format,
         }
     }
