@@ -15,7 +15,7 @@ use super::shaders::{scan_image, ImageTexture, MetadataBuffer, StorageBuffer, Tr
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
     pub transform: Affine2,
-    pub size: Extent3d,
+    pub size: [u32; 2],
     pub changes: Vec<(usize, Box<[f32]>)>,
 }
 impl CallbackTrait for ImageCallback {
@@ -49,7 +49,7 @@ impl CallbackTrait for ImageCallback {
             image_res.metadata_buffer.set(
                 queue,
                 &copy_texture::Metadata {
-                    width: self.size.width,
+                    width: self.size[0],
                     max: 1.,
                     min: 0.,
                 },
@@ -81,7 +81,7 @@ impl CallbackTrait for ImageCallback {
             });
             cpass.set_pipeline(&global_res.image_copy_pipeline);
             copy_texture::set_bind_groups(&mut cpass, &image_res.image_copy_bind_group);
-            cpass.dispatch_workgroups(self.size.width, self.size.height, 1);
+            cpass.dispatch_workgroups(self.size[0], self.size[1], 1);
         }
         Vec::new()
     }
@@ -118,15 +118,22 @@ pub(super) struct ImageResources {
     image_copy_bind_group: copy_texture::BindGroup,
 }
 impl ImageResources {
-    pub fn new(device: &Device, size: Extent3d) -> Self {
+    pub fn new(device: &Device, size: [u32; 2]) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
         let image_buffer = StorageBuffer::new_with(
             device,
-            (size.width * size.height) as usize,
+            (size[0] * size[1]) as usize,
             f32::NAN,
             BufferUsages::COPY_DST | BufferUsages::STORAGE,
         );
-        let image_texture = ImageTexture::new(device, size);
+        let image_texture = ImageTexture::new(
+            device,
+            Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+        );
         let local_bind_group =
             scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
         let metadata_buffer = MetadataBuffer::new(device);

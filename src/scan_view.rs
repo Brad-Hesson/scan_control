@@ -126,16 +126,16 @@ pub struct ScanViewCtx<'a> {
 pub struct ScanImage {
     uuid: Uuid,
     pub transform: Affine2,
-    size: [usize; 2],
+    size: [u32; 2],
     changes: Vec<(usize, Box<[f32]>)>,
     selected: bool,
 }
 impl ScanImage {
-    pub fn new(width: usize, data: Box<[f32]>, transform: Affine2) -> Self {
+    pub fn new(width: u32, data: Box<[f32]>, transform: Affine2) -> Self {
         Self {
             uuid: Uuid::new_v4(),
             transform,
-            size: [width, data.len() / width],
+            size: [width, data.len() as u32 / width],
             changes: vec![(0, data)],
             selected: false,
         }
@@ -168,11 +168,7 @@ impl ScanImage {
             ImageCallback {
                 uuid: self.uuid,
                 transform: self.transform,
-                size: Extent3d {
-                    width: self.size[0] as u32,
-                    height: self.size[1] as u32,
-                    depth_or_array_layers: 1,
-                },
+                size: self.size,
                 changes: std::mem::take(&mut self.changes),
             },
         );

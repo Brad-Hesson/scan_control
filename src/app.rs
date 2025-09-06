@@ -169,7 +169,7 @@ fn load_file(app: &mut MyApp, path: impl AsRef<Path>) -> Result<()> {
         0.,
         Vec2::from(translation) * 1e9,
     );
-    let new_image = ScanImage::new(width, data, transform);
+    let new_image = ScanImage::new(width as u32, data, transform);
     app.images.push(new_image);
     Ok(())
 }

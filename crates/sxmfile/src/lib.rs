@@ -20,11 +20,11 @@ impl SXM {
         };
         Ok(&self.metadata[i].1)
     }
-    pub fn get_image_size(&self) -> Result<[usize; 2]> {
+    pub fn get_image_size(&self) -> Result<[u32; 2]> {
         let mut dims = self
             .get_metadata("SCAN_PIXELS")?
             .split_ascii_whitespace()
-            .map(str::parse::<usize>);
+            .map(str::parse);
         Ok([
             dims.next()
                 .wrap_err("SCAN_PIXELS x size missing")?
@@ -86,21 +86,23 @@ impl SXM {
         }
         Ok(out)
     }
-    pub fn get_scan_range(&self) -> Result<[f32;2]>{
+    pub fn get_scan_range(&self) -> Result<[f32; 2]> {
         let mut ranges = self
             .get_metadata("SCAN_RANGE")?
             .split_ascii_whitespace()
             .map(str::parse);
         Ok([
-            ranges.next()
+            ranges
+                .next()
                 .wrap_err("SCAN_RANGE x value missing")?
                 .context("SCAN_RANGE x value parse error")?,
-            ranges.next()
+            ranges
+                .next()
                 .wrap_err("SCAN_RANGE y value missing")?
                 .context("SCAN_RANGE y value parse error")?,
         ])
     }
-    pub fn get_scan_center(&self) -> Result<[f32;2]>{
+    pub fn get_scan_center(&self) -> Result<[f32; 2]> {
         let mut pos = self
             .get_metadata("SCAN_OFFSET")?
             .split_ascii_whitespace()
@@ -140,8 +142,8 @@ impl SXM {
             .len();
         let mut read_buf = [0u8; 4];
         for _ in 0..num_channels {
-            let mut data_buf_forward = Vec::with_capacity(pix_x * pix_y);
-            let mut data_buf_backward = Vec::with_capacity(pix_x * pix_y);
+            let mut data_buf_forward = Vec::with_capacity((pix_x * pix_y) as usize);
+            let mut data_buf_backward = Vec::with_capacity((pix_x * pix_y) as usize);
             for _ in 0..pix_x * pix_y {
                 reader
                     .read_exact(&mut read_buf)
