@@ -1639,7 +1639,10 @@ name = "image-compute"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "eframe",
+ "egui",
  "eyre",
+ "glam",
  "itertools",
  "smol",
  "thiserror 2.0.16",

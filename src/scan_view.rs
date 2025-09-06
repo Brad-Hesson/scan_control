@@ -1,28 +1,26 @@
 use core::f32;
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, sync::Arc};
 
 use eframe::{
     egui_wgpu::{self, Callback, RenderState},
-    wgpu::{Extent3d, TextureFormat},
+    wgpu::TextureFormat,
 };
 use egui::{
-    emath::Rot2,
     epaint::{PathShape, PathStroke},
-    Color32, InnerResponse, Pos2, Rect, Response, Sense, Stroke,
+    Color32, Pos2, Rect, Response, Sense,
 };
-use glam::{Affine2, Vec2, Vec3};
+use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use shaders::ColorMapTexture;
+use image_compute::buffers::ColorMapTexture;
 use uuid::Uuid;
 
 use crate::utils::SelectableMember;
 
 mod global;
 mod image;
-mod shaders;
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct ScanView {
     pub world_transform: Affine2,
     target_format: TextureFormat,
@@ -122,22 +120,31 @@ pub struct ScanViewCtx<'a> {
     pub world_transform: Affine2,
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct ScanImage {
     uuid: Uuid,
     pub transform: Affine2,
-    size: [u32; 2],
     changes: Vec<(usize, Box<[f32]>)>,
     selected: bool,
+    image_data: Arc<image_compute::Image>,
 }
 impl ScanImage {
-    pub fn new(width: u32, data: Box<[f32]>, transform: Affine2) -> Self {
+    pub fn new(
+        frame: &eframe::Frame,
+        size: [u32; 2],
+        data: Box<[f32]>,
+        transform: Affine2,
+    ) -> Self {
+        let rs = frame.wgpu_render_state().unwrap();
+        let image_data = Arc::new(image_compute::Image::new(&rs.device, None, size, |write| {
+            write.copy_from_slice(&data);
+        }));
         Self {
             uuid: Uuid::new_v4(),
             transform,
-            size: [width, data.len() as u32 / width],
-            changes: vec![(0, data)],
             selected: false,
+            image_data,
+            changes: vec![(0, data)],
         }
     }
     pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
@@ -166,10 +173,9 @@ impl ScanImage {
         let callback = egui_wgpu::Callback::new_paint_callback(
             ctx.rect,
             ImageCallback {
-                uuid: self.uuid,
                 transform: self.transform,
-                size: self.size,
                 changes: std::mem::take(&mut self.changes),
+                image_data: self.image_data.clone(),
             },
         );
         ctx.ui.painter().add(callback);

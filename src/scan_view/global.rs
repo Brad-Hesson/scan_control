@@ -1,15 +1,12 @@
-use super::{
-    image::ImageResources,
-    shaders::{self, copy_texture, scan_image, ColorMapTexture, TransformBuffer},
-};
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, ComputePipeline, Device, RenderPipeline, TextureFormat},
+    wgpu::{self, Device, RenderPipeline, TextureFormat},
 };
-use egui::ahash::{HashMap, HashMapExt};
 use glam::Affine2;
-use image_compute::{PlaneFitter, PlaneFitterBuffers};
-use uuid::Uuid;
+use image_compute::{
+    buffers::{ColorMapTexture, TransformBuffer},
+    PlaneFitter, PlaneFitterBuffers,
+};
 
 pub(super) struct GlobalCallback {
     pub target_format: TextureFormat,
@@ -51,29 +48,28 @@ impl CallbackTrait for GlobalCallback {
 
 pub(super) struct GlobalResources {
     pub scan_image_pipeline: RenderPipeline,
-    pub image_copy_pipeline: ComputePipeline,
     pub scratch_buffers: PlaneFitterBuffers,
-    pub global_bind_group: scan_image::GlobalBindGroup,
+    pub global_bind_group: image_compute::shaders::scan_image::GlobalBindGroup,
     pub screen_transform_buf: TransformBuffer,
     pub color_map_texture: ColorMapTexture,
-    pub images: HashMap<Uuid, ImageResources>,
     pub plane_fitter: PlaneFitter,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat, initial_size: [u32; 2]) -> Self {
-        let scan_image_pipeline = shaders::scan_image::create_main_pipeline(device, target_format);
-        let image_copy_pipeline = copy_texture::create_main_pipeline(device);
+        let scan_image_pipeline =
+            image_compute::shaders::scan_image::create_main_pipeline(device, target_format);
         let screen_transform_buf = TransformBuffer::new(device);
         let color_map_texture = ColorMapTexture::new(device);
-        let global_bind_group =
-            scan_image::GlobalBindGroup::new(device, &screen_transform_buf, &color_map_texture);
+        let global_bind_group = image_compute::shaders::scan_image::GlobalBindGroup::new(
+            device,
+            &screen_transform_buf,
+            &color_map_texture,
+        );
         Self {
             scan_image_pipeline,
             global_bind_group,
             screen_transform_buf,
-            image_copy_pipeline,
             color_map_texture,
-            images: HashMap::new(),
             scratch_buffers: PlaneFitterBuffers::new(device, initial_size),
             plane_fitter: PlaneFitter::new(device),
         }

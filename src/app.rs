@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
@@ -43,12 +44,36 @@ impl MyApp {
                                           // gradient,
         }
     }
-    pub fn mod_state(
+    pub fn mod_state<T: Any>(
         &mut self,
-        redo: impl Fn(&mut AppState) + 'static,
-        undo: impl Fn(&mut AppState) + 'static,
+        user_data: T,
+        redo: impl Fn(&mut AppState, &mut T) + 'static,
+        undo: impl Fn(&mut AppState, &mut T) + 'static,
     ) {
-        self.undo_queue.push(&mut self.app_state, redo, undo);
+        self.undo_queue
+            .push(&mut self.app_state, user_data, redo, undo);
+    }
+    fn load_file(&mut self, frame: &eframe::Frame, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        info!("Trying to load image `{}`", path.display());
+        let file = sxmfile::SXM::parse_file(&path)?;
+        info!("Loaded image `{}`", path.display());
+        let size = file.get_image_size()?;
+        let data = file.data[0][0].clone();
+        let scale = file.get_scan_range()?;
+        let translation = file.get_scan_center()?;
+        let transform = Affine2::from_scale_angle_translation(
+            Vec2::from(scale) * 1e9,
+            0.,
+            Vec2::from(translation) * 1e9,
+        );
+        self.mod_state(
+            Some(ScanImage::new(frame, size, data, transform)),
+            |state, data| state.images.push(data.take().unwrap()),
+            |state, data| *data = Some(state.images.pop().unwrap()),
+        );
+
+        Ok(())
     }
     // fn update_gradient(&mut self) {
     //     if self.gradient != self.last_gradient {
@@ -66,7 +91,7 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(path) = self.file_dialog.take_picked() {
-            if let Err(e) = load_file(self, path).context("file load failed") {
+            if let Err(e) = self.load_file(_frame, path).context("file load failed") {
                 error!("{e:#}");
             }
         }
@@ -78,8 +103,9 @@ impl eframe::App for MyApp {
             if let Some(i) = self.app_state.images.get_selected_index() {
                 if i + 1 < self.app_state.images.len() {
                     self.mod_state(
-                        move |state| state.images.swap(i, i + 1),
-                        move |state| state.images.swap(i, i + 1),
+                        (),
+                        move |state, _| state.images.swap(i, i + 1),
+                        move |state, _| state.images.swap(i, i + 1),
                     );
                 }
             }
@@ -88,8 +114,9 @@ impl eframe::App for MyApp {
             if let Some(i) = self.app_state.images.get_selected_index() {
                 if i > 0 {
                     self.mod_state(
-                        move |state| state.images.swap(i, i - 1),
-                        move |state| state.images.swap(i, i - 1),
+                        (),
+                        move |state, _| state.images.swap(i, i - 1),
+                        move |state, _| state.images.swap(i, i - 1),
                     );
                 }
             }
@@ -163,23 +190,4 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
         }
     });
     app.file_dialog.update(ctx);
-}
-
-fn load_file(app: &mut MyApp, path: impl AsRef<Path>) -> Result<()> {
-    let path = path.as_ref();
-    info!("Trying to load image `{}`", path.display());
-    let file = sxmfile::SXM::parse_file(&path)?;
-    info!("Loaded image `{}`", path.display());
-    let [width, _] = file.get_image_size()?;
-    let data = file.data[0][0].clone();
-    let scale = file.get_scan_range()?;
-    let translation = file.get_scan_center()?;
-    let transform = Affine2::from_scale_angle_translation(
-        Vec2::from(scale) * 1e9,
-        0.,
-        Vec2::from(translation) * 1e9,
-    );
-    let new_image = ScanImage::new(width as u32, data, transform);
-    app.app_state.images.push(new_image);
-    Ok(())
 }

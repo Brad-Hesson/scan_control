@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|s| s.replace("f64", "f32"))
             .fold(String::new(), |a, b| a + &b + "\n");
     })?;
+    generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
     Ok(())
 }
 

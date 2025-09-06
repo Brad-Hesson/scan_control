@@ -4,16 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [profile.dev]
-incremental = true        # default, but set explicitly
-codegen-units = 256       # faster recompile, slower runtime
+incremental = true  # default, but set explicitly
+codegen-units = 256 # faster recompile, slower runtime
 
 [dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 env_logger = "0.11"
-eframe = { version = "0.32", features = ["wgpu"] }
-egui = { version = "0.32", features = ["mint", "bytemuck"] }
+eframe = { workspace = true, features = ["wgpu"] }
+egui = { workspace = true, features = ["mint", "bytemuck"] }
 # egui-colorgradient = { path = "../egui-colorgradient/egui-colorgradient" }
-glam = { version = "0.30", features = ["mint", "bytemuck"] }
+glam = { workspace = true, features = ["mint", "bytemuck"] }
 mint = "0.5.9"
 itertools.workspace = true
 serde = { version = "1.0", features = ["derive"] }
@@ -45,3 +45,6 @@ eyre = "0.6"
 tracing = "0.1"
 smol = "2.0.2"
 tracing-subscriber = "0.3"
+glam = "0.30"
+eframe = "0.32"
+egui = "0.32"

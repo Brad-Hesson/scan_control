@@ -8,8 +8,11 @@ use wgpu::{
 };
 
 use crate::{
-    buffers::StorageBuffer,
-    shaders::plane_fit::{self, NormalizeData, bind_groups::BindGroup1},
+    buffers::{ImageTexture, StorageBuffer, TransformBuffer},
+    shaders::{
+        plane_fit::{self, NormalizeData, bind_groups::BindGroup1},
+        scan_image::{self, NormalizeControl},
+    },
 };
 
 pub mod buffers;
@@ -58,9 +61,12 @@ impl OutData {
 
 pub struct Image {
     pub size: [u32; 2],
+    pub world_transform_buffer: TransformBuffer,
     size_buffer: StorageBuffer<u32>,
     data_buffer: StorageBuffer<f32>,
-    bind_group: plane_fit::bind_groups::BindGroup0,
+    plane_fit_bg: plane_fit::bind_groups::BindGroup0,
+    pub scan_image_bg: scan_image::bind_groups::BindGroup1,
+    out_data: OutData,
 }
 impl Image {
     pub fn new(
@@ -85,22 +91,53 @@ impl Image {
             size.iter().map(|v| *v as usize).product(),
             init_fn,
         );
-        let bind_group = plane_fit::bind_groups::BindGroup0::from_bindings(
+        let plane_fit_bg = plane_fit::bind_groups::BindGroup0::from_bindings(
             &device,
             plane_fit::bind_groups::BindGroupLayout0 {
                 image_size: size_buffer.inner.as_entire_buffer_binding(),
                 image_in: data_buffer.inner.as_entire_buffer_binding(),
             },
         );
+        let world_transform_buffer = TransformBuffer::new(device);
+        let image_texture = ImageTexture::new(device, size);
+        let normalize_control = StorageBuffer::new(
+            device,
+            None,
+            BufferUsages::UNIFORM | BufferUsages::COPY_SRC,
+            1,
+            |data| {
+                data[0] = NormalizeControl {
+                    max_min: 1,
+                    _pad: 0,
+                    std_dev_mul: 5.,
+                }
+            },
+        );
+        let out_data = OutData::new(device, size, &image_texture.0);
+        let scan_image_bg = scan_image::bind_groups::BindGroup1::from_bindings(
+            device,
+            scan_image::bind_groups::BindGroupLayout1 {
+                quad2world: world_transform_buffer.0.as_entire_buffer_binding(),
+                height_map: &image_texture
+                    .0
+                    .create_view(&TextureViewDescriptor::default()),
+                normalize_data: out_data.normalize_out.inner.as_entire_buffer_binding(),
+                normalize_control: normalize_control.inner.as_entire_buffer_binding(),
+            },
+        );
         Self {
             size_buffer,
             data_buffer,
-            bind_group,
+            plane_fit_bg,
             size,
+            scan_image_bg,
+            out_data,
+            world_transform_buffer,
         }
     }
     pub fn set(&self, pass: &mut ComputePass) {
-        self.bind_group.set(pass);
+        self.plane_fit_bg.set(pass);
+        self.out_data.set(pass);
     }
 }
 
