@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
-use crate::scan_view::{ScanImage, ScanView};
+use crate::scan_view::{BorderRectangle, ScanImage, ScanView};
 use crate::utils::SelectableVecExt as _;
+use egui::Color32;
 use egui::{emath::OrderedFloat, Button, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
@@ -92,13 +93,32 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let mut selected = None;
+                        let mut hovered = None;
                         for (i, image) in self.images.iter_mut().enumerate() {
-                            if image.show(ctx).clicked() {
+                            let resp = image.show(ctx);
+                            if resp.clicked() {
                                 selected = Some(i);
+                            }
+                            if resp.hovered() {
+                                hovered = Some(i);
                             }
                         }
                         if selected.is_some() {
                             self.images.set_selected_idx(selected);
+                        }
+                        if let Some(hov_i) = hovered {
+                            BorderRectangle {
+                                transform: self.images[hov_i].transform,
+                                color: Color32::LIGHT_BLUE,
+                            }
+                            .show(ctx);
+                        }
+                        if let Some(img) = self.images.get_selected() {
+                            BorderRectangle {
+                                transform: img.transform,
+                                color: Color32::GREEN,
+                            }
+                            .show(ctx);
                         }
                     })
                     .clicked()

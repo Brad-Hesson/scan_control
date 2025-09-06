@@ -5,7 +5,11 @@ use eframe::{
     egui_wgpu::{self, Callback, RenderState},
     wgpu::{Extent3d, TextureFormat},
 };
-use egui::{emath::Rot2, Color32, InnerResponse, Pos2, Rect, Response, Sense, Stroke};
+use egui::{
+    emath::Rot2,
+    epaint::{PathShape, PathStroke},
+    Color32, InnerResponse, Pos2, Rect, Response, Sense, Stroke,
+};
 use glam::{Affine2, Vec2, Vec3};
 use global::GlobalCallback;
 use image::ImageCallback;
@@ -159,14 +163,6 @@ impl ScanImage {
             })
             .flatten()
             .unwrap_or_else(|| neutral_response(ctx.ui, egui::Id::new(self.uuid)));
-
-        let border_color = if self.selected {
-            Some(Color32::GREEN)
-        } else if resp.hovered() {
-            Some(Color32::LIGHT_BLUE)
-        } else {
-            None
-        };
         let callback = egui_wgpu::Callback::new_paint_callback(
             ctx.rect,
             ImageCallback {
@@ -178,7 +174,6 @@ impl ScanImage {
                     depth_or_array_layers: 1,
                 },
                 changes: std::mem::take(&mut self.changes),
-                border_color,
             },
         );
         ctx.ui.painter().add(callback);
@@ -201,6 +196,32 @@ impl SelectableMember for ScanImage {
 
     fn is_selected(&self) -> bool {
         self.selected
+    }
+}
+
+pub struct BorderRectangle {
+    pub transform: Affine2,
+    pub color: Color32,
+}
+impl BorderRectangle {
+    pub fn show(&mut self, ctx: &mut ScanViewCtx) {
+        let t = Affine2::from_translation(v2(ctx.rect.center().to_vec2()))
+            * ctx.world_transform
+            * self.transform;
+        let p0: [f32; 2] = t.transform_point2(Vec2::new(-1.0, -1.0)).into();
+        let p1: [f32; 2] = t.transform_point2(Vec2::new(1.0, -1.0)).into();
+        let p2: [f32; 2] = t.transform_point2(Vec2::new(1.0, 1.0)).into();
+        let p3: [f32; 2] = t.transform_point2(Vec2::new(-1.0, 1.0)).into();
+        ctx.ui.painter().add(PathShape {
+            points: vec![p0.into(), p1.into(), p2.into(), p3.into()],
+            closed: true,
+            fill: Color32::TRANSPARENT,
+            stroke: PathStroke {
+                width: 2.,
+                color: egui::epaint::ColorMode::Solid(self.color),
+                kind: egui::StrokeKind::Outside,
+            },
+        });
     }
 }
 

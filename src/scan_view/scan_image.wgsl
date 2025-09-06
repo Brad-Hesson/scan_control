@@ -1,5 +1,3 @@
-const border_width: f32 = 0.00004;
-const border_color: vec4<f32> = vec4(0.0, 1.0, 0.0, 1.0);
 const low_color: vec3<f32> = vec3(0.0, 0.0, 1.0);
 const high_color: vec3<f32> = vec3(1.0, 0.0, 0.0);
 const image_alpha: f32 = 1.;
@@ -16,17 +14,6 @@ var<uniform> quad2world: mat4x4<f32>;
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     var position = vec4(verts[vert_index], 0.0, 1.0);
     var uv = uvs[vert_index];
-    let is_vertical = dot(quad2world * vec4(1., 0., 0., 0.), vec4(1., 0., 0., 0.)) > 0.;
-
-    let border_modifier = world2screen * vec4(vec3(1.0), 0.0);
-    let my_border_width = border_width / length(border_modifier.xy);
-    // if border is enabled, grow the quad and extend the uvs by 2*border width
-    if is_vertical {
-        position.x *= 1.0 + my_border_width * 2.;
-        position.y *= 1.0 + my_border_width * 2.;
-        uv *= 1.0 + my_border_width * 2.;
-        uv -= my_border_width;
-    }
 
     // apply the transforms
     position = world2screen * quad2world * position;
@@ -48,15 +35,8 @@ var color_map: texture_1d<f32>;
 @group(1) @binding(1)
 var height_map: texture_2d<f32>;
 
-@group(1) @binding(2)
-var<uniform> border_data: BorderData;
-
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    // if the uv goes outside of the standard coords, it means we want to draw a border
-    if (vertex.uv.x > 1.0 || vertex.uv.x < 0.0 || vertex.uv.y > 1.0 || vertex.uv.y < 0.0) && border_data.show != 0{
-        return vec4(border_data.color, 1.);
-    }
     // sample the height of this pixel from the height-map texture
     let height = textureSample(height_map, tex_sampler, vertex.uv).r;
 
@@ -78,11 +58,6 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 // ------------ Structs and Data ------------
-
-struct BorderData{
-    color: vec3<f32>,
-    show: u32,
-};
 
 struct VertexOutput {
     @location(0) uv: vec2<f32>,

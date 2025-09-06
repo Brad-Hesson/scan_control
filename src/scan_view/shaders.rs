@@ -27,7 +27,6 @@ pub mod copy_texture {
     pub use bindings::copy_texture::compute::create_main_pipeline;
     pub use bindings::copy_texture::set_bind_groups;
     pub use bindings::copy_texture::Metadata;
-    pub use bindings::scan_image::BorderData;
 
     impl BindGroup {
         pub fn new(
@@ -50,7 +49,6 @@ pub mod copy_texture {
 
 pub mod scan_image {
     use crate::scan_view::shaders;
-    use crate::scan_view::shaders::bindings::scan_image::BorderData;
 
     use super::*;
 
@@ -117,7 +115,6 @@ pub mod scan_image {
             device: &Device,
             world_transform_buf: &TransformBuffer,
             image_texture: &ImageTexture,
-            border_data_buf: &StorageBuffer<BorderData>,
         ) -> Self {
             bindings::scan_image::bind_groups::BindGroup1::from_bindings(
                 device,
@@ -126,7 +123,6 @@ pub mod scan_image {
                     height_map: &image_texture
                         .0
                         .create_view(&TextureViewDescriptor::default()),
-                    border_data: border_data_buf.0.as_entire_buffer_binding(),
                 },
             )
         }
