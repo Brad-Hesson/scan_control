@@ -11,6 +11,7 @@ mod app;
 mod components;
 mod scan_view;
 mod utils;
+mod undo_queue;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()

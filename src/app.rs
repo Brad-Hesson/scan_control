@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::scan_view::{BorderRectangle, ScanImage, ScanView};
+use crate::undo_queue::UndoQueue;
 use crate::utils::SelectableVecExt as _;
 use egui::Color32;
 use egui::{emath::OrderedFloat, Button, MenuBar, Ui};
@@ -11,11 +12,15 @@ use glam::{Affine2, Vec2};
 use tracing::{error, info};
 
 pub struct MyApp {
+    file_dialog: ViewportFileDialog,
+    app_state: AppState,
+    undo_queue: UndoQueue<AppState>, // gradient: egui_colorgradient::Gradient,
+                                     // last_gradient: egui_colorgradient::Gradient,
+}
+
+pub struct AppState {
     scan_view: ScanView,
     images: Vec<ScanImage>,
-    file_dialog: ViewportFileDialog,
-    // gradient: egui_colorgradient::Gradient,
-    // last_gradient: egui_colorgradient::Gradient,
 }
 
 impl MyApp {
@@ -29,12 +34,21 @@ impl MyApp {
         //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
         // );
         Self {
-            scan_view: ScanView::new(wgpu),
-            images: vec![],
+            app_state: AppState {
+                scan_view: ScanView::new(wgpu),
+                images: vec![],
+            },
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
-            // last_gradient: gradient.clone(),
-            // gradient,
+            undo_queue: UndoQueue::new(), // last_gradient: gradient.clone(),
+                                          // gradient,
         }
+    }
+    pub fn mod_state(
+        &mut self,
+        redo: impl Fn(&mut AppState) + 'static,
+        undo: impl Fn(&mut AppState) + 'static,
+    ) {
+        self.undo_queue.push(&mut self.app_state, redo, undo);
     }
     // fn update_gradient(&mut self) {
     //     if self.gradient != self.last_gradient {
@@ -61,18 +75,30 @@ impl eframe::App for MyApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
-            if let Some(i) = self.images.get_selected_index() {
-                if i + 1 < self.images.len() {
-                    self.images.swap(i, i + 1);
+            if let Some(i) = self.app_state.images.get_selected_index() {
+                if i + 1 < self.app_state.images.len() {
+                    self.mod_state(
+                        move |state| state.images.swap(i, i + 1),
+                        move |state| state.images.swap(i, i + 1),
+                    );
                 }
             }
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
-            if let Some(i) = self.images.get_selected_index() {
+            if let Some(i) = self.app_state.images.get_selected_index() {
                 if i > 0 {
-                    self.images.swap(i, i - 1);
+                    self.mod_state(
+                        move |state| state.images.swap(i, i - 1),
+                        move |state| state.images.swap(i, i - 1),
+                    );
                 }
             }
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
+            self.undo_queue.undo(&mut self.app_state);
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
+            self.undo_queue.redo(&mut self.app_state);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -80,7 +106,7 @@ impl eframe::App for MyApp {
             });
         });
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            let tr = self.scan_view.world_transform.inverse();
+            let tr = self.app_state.scan_view.world_transform.inverse();
             let (scale, _, translation) = tr.to_scale_angle_translation();
             ui.label(format!("scale: {scale}, translation: {translation}"));
         });
@@ -90,11 +116,12 @@ impl eframe::App for MyApp {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
                 if self
+                    .app_state
                     .scan_view
                     .show(ui, |ctx| {
                         let mut selected = None;
                         let mut hovered = None;
-                        for (i, image) in self.images.iter_mut().enumerate() {
+                        for (i, image) in self.app_state.images.iter_mut().enumerate() {
                             let resp = image.show(ctx);
                             if resp.clicked() {
                                 selected = Some(i);
@@ -104,16 +131,16 @@ impl eframe::App for MyApp {
                             }
                         }
                         if selected.is_some() {
-                            self.images.set_selected_idx(selected);
+                            self.app_state.images.set_selected_idx(selected);
                         }
                         if let Some(hov_i) = hovered {
                             BorderRectangle {
-                                transform: self.images[hov_i].transform,
+                                transform: self.app_state.images[hov_i].transform,
                                 color: Color32::LIGHT_BLUE,
                             }
                             .show(ctx);
                         }
-                        if let Some(img) = self.images.get_selected() {
+                        if let Some(img) = self.app_state.images.get_selected() {
                             BorderRectangle {
                                 transform: img.transform,
                                 color: Color32::GREEN,
@@ -123,7 +150,7 @@ impl eframe::App for MyApp {
                     })
                     .clicked()
                 {
-                    self.images.set_selected_idx(None);
+                    self.app_state.images.set_selected_idx(None);
                 };
             });
     }
@@ -170,6 +197,6 @@ fn load_file(app: &mut MyApp, path: impl AsRef<Path>) -> Result<()> {
         Vec2::from(translation) * 1e9,
     );
     let new_image = ScanImage::new(width as u32, data, transform);
-    app.images.push(new_image);
+    app.app_state.images.push(new_image);
     Ok(())
 }
