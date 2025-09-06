@@ -10,6 +10,7 @@ use wgpu::{
 mod app;
 mod components;
 mod scan_view;
+mod utils;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()

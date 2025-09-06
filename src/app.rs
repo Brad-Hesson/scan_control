@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::scan_view::{ScanImage, ScanView};
+use crate::utils::SelectableVecExt as _;
 use egui::{emath::OrderedFloat, Button, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
@@ -58,6 +59,20 @@ impl eframe::App for MyApp {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
+            if let Some(i) = self.images.get_selected_index() {
+                if i + 1 < self.images.len() {
+                    self.images.swap(i, i + 1);
+                }
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
+            if let Some(i) = self.images.get_selected_index() {
+                if i > 0 {
+                    self.images.swap(i, i - 1);
+                }
+            }
+        }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
@@ -73,11 +88,23 @@ impl eframe::App for MyApp {
             .show(ctx, |ui| {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
-                self.scan_view.show(ui, |ctx| {
-                    for image in &mut self.images {
-                        image.show(ctx);
-                    }
-                });
+                if self
+                    .scan_view
+                    .show(ui, |ctx| {
+                        let mut selected = None;
+                        for (i, image) in self.images.iter_mut().enumerate() {
+                            if image.show(ctx).clicked() {
+                                selected = Some(i);
+                            }
+                        }
+                        if selected.is_some() {
+                            self.images.set_selected_idx(selected);
+                        }
+                    })
+                    .clicked()
+                {
+                    self.images.set_selected_idx(None);
+                };
             });
     }
 }

@@ -12,6 +12,8 @@ use image::ImageCallback;
 use shaders::ColorMapTexture;
 use uuid::Uuid;
 
+use crate::utils::SelectableMember;
+
 mod global;
 mod image;
 mod shaders;
@@ -27,26 +29,29 @@ impl ScanView {
         &mut self,
         ui: &mut egui::Ui,
         add_contents: impl FnOnce(&mut ScanViewCtx) -> R,
-    ) -> InnerResponse<R> {
-        egui::Frame::canvas(ui.style()).show(ui, |ui| {
-            let (rect, response) =
-                ui.allocate_at_least(ui.available_size_before_wrap(), egui::Sense::all());
-            let screen_transform = self.handle_inputs(ui, response);
-            ui.painter().add(Callback::new_paint_callback(
-                rect,
-                GlobalCallback {
-                    target_format: self.target_format,
-                    screen_transform,
-                    new_color_map: std::mem::take(&mut self.new_color_map),
-                },
-            ));
-            let mut ctx = ScanViewCtx {
-                ui,
-                rect,
-                world_transform: self.world_transform,
-            };
-            add_contents(&mut ctx)
-        })
+    ) -> Response {
+        egui::Frame::canvas(ui.style())
+            .show(ui, |ui| {
+                let (rect, response) =
+                    ui.allocate_at_least(ui.available_size_before_wrap(), egui::Sense::all());
+                let screen_transform = self.handle_inputs(ui, response.clone());
+                ui.painter().add(Callback::new_paint_callback(
+                    rect,
+                    GlobalCallback {
+                        target_format: self.target_format,
+                        screen_transform,
+                        new_color_map: std::mem::take(&mut self.new_color_map),
+                    },
+                ));
+                let mut ctx = ScanViewCtx {
+                    ui,
+                    rect,
+                    world_transform: self.world_transform,
+                };
+                add_contents(&mut ctx);
+                response
+            })
+            .inner
     }
     fn handle_inputs(&mut self, ui: &mut egui::Ui, response: egui::Response) -> Affine2 {
         let rect = response.rect;
@@ -119,6 +124,7 @@ pub struct ScanImage {
     pub transform: Affine2,
     size: [usize; 2],
     changes: Vec<(usize, Box<[f32]>)>,
+    selected: bool,
 }
 impl ScanImage {
     pub fn new(width: usize, data: Box<[f32]>, transform: Affine2) -> Self {
@@ -127,9 +133,10 @@ impl ScanImage {
             transform,
             size: [width, data.len() / width],
             changes: vec![(0, data)],
+            selected: false,
         }
     }
-    pub fn show(&mut self, ctx: &mut ScanViewCtx) {
+    pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
         let resp = ctx
             .ui
             .input(|i| i.pointer.latest_pos())
@@ -143,13 +150,19 @@ impl ScanImage {
                         .abs()
                         .into();
                 (x < 1. && y < 1.).then(|| {
-                    ctx.ui
-                        .interact(ctx.rect, egui::Id::new(self.uuid), Sense::all())
+                    ctx.ui.interact(
+                        ctx.rect,
+                        egui::Id::new(self.uuid),
+                        Sense::focusable_noninteractive() | Sense::click(),
+                    )
                 })
             })
             .flatten()
             .unwrap_or_else(|| neutral_response(ctx.ui, egui::Id::new(self.uuid)));
-        let border_color = if resp.hovered() {
+
+        let border_color = if self.selected {
+            Some(Color32::GREEN)
+        } else if resp.hovered() {
             Some(Color32::LIGHT_BLUE)
         } else {
             None
@@ -169,9 +182,25 @@ impl ScanImage {
             },
         );
         ctx.ui.painter().add(callback);
+        resp
     }
     pub fn set_image_data(&mut self, offset: usize, data: Box<[f32]>) {
         self.changes.push((offset, data));
+    }
+}
+impl PartialEq for ScanImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.uuid == other.uuid
+    }
+}
+impl Eq for ScanImage {}
+impl SelectableMember for ScanImage {
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
     }
 }
 
