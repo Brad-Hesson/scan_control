@@ -27,6 +27,7 @@ pub mod copy_texture {
     pub use bindings::copy_texture::compute::create_main_pipeline;
     pub use bindings::copy_texture::set_bind_groups;
     pub use bindings::copy_texture::Metadata;
+    use image_compute::buffers::StorageBuffer;
 
     impl BindGroup {
         pub fn new(
@@ -37,7 +38,7 @@ pub mod copy_texture {
         ) -> Self {
             let bindings = bindings::copy_texture::bind_groups::BindGroupLayout0 {
                 met: metadata.0.as_entire_buffer_binding(),
-                data: image_buffer.0.as_entire_buffer_binding(),
+                data: image_buffer.inner.as_entire_buffer_binding(),
                 texture: &image_texture
                     .0
                     .create_view(&TextureViewDescriptor::default()),
@@ -55,6 +56,9 @@ pub mod scan_image {
     pub use bindings::scan_image::bind_groups::BindGroup0 as GlobalBindGroup;
     pub use bindings::scan_image::bind_groups::BindGroup1 as LocalBindGroup;
     pub use bindings::scan_image::set_bind_groups;
+    pub use bindings::scan_image::NormalizeControl;
+    use image_compute::buffers::StorageBuffer;
+    use image_compute::shaders::plane_fit::NormalizeData;
 
     pub fn create_main_pipeline(device: &Device, target_format: TextureFormat) -> RenderPipeline {
         let shader_module = bindings::scan_image::create_shader_module(device);
@@ -115,6 +119,8 @@ pub mod scan_image {
             device: &Device,
             world_transform_buf: &TransformBuffer,
             image_texture: &ImageTexture,
+            normalize_buffer: &StorageBuffer<NormalizeData>,
+            normalize_control: &StorageBuffer<NormalizeControl>,
         ) -> Self {
             bindings::scan_image::bind_groups::BindGroup1::from_bindings(
                 device,
@@ -123,6 +129,8 @@ pub mod scan_image {
                     height_map: &image_texture
                         .0
                         .create_view(&TextureViewDescriptor::default()),
+                    normalize_data: normalize_buffer.inner.as_entire_buffer_binding(),
+                    normalize_control: normalize_control.inner.as_entire_buffer_binding(),
                 },
             )
         }
@@ -147,7 +155,7 @@ impl TransformBuffer {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
     }
 }
-pub struct ImageTexture(Texture);
+pub struct ImageTexture(pub Texture);
 impl ImageTexture {
     pub fn new(device: &Device, size: Extent3d) -> Self {
         let texture = device.create_texture(&TextureDescriptor {
@@ -214,50 +222,5 @@ impl MetadataBuffer {
     }
     pub fn set(&self, queue: &Queue, data: &Metadata) {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(data));
-    }
-}
-pub struct StorageBuffer<T: Clone + bytemuck::NoUninit + AnyBitPattern>(Buffer, PhantomData<T>);
-impl<T: Clone + bytemuck::NoUninit + AnyBitPattern> StorageBuffer<T> {
-    pub fn new_with(device: &Device, size: usize, fill: T, usage: BufferUsages) -> Self {
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: (size * std::mem::size_of::<T>()) as u64,
-            usage,
-            mapped_at_creation: true,
-        });
-        bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut()).fill(fill);
-        buffer.unmap();
-        Self(buffer, PhantomData)
-    }
-    pub fn new_as(device: &Device, data: &[T], usage: BufferUsages) -> Self {
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: (data.len() * std::mem::size_of::<T>()) as u64,
-            usage,
-            mapped_at_creation: true,
-        });
-        bytemuck::cast_slice_mut(buffer.slice(..).get_mapped_range_mut().as_mut())
-            .copy_from_slice(data);
-        buffer.unmap();
-        Self(buffer, PhantomData)
-    }
-    pub fn new(device: &Device, size: usize, usage: BufferUsages) -> Self {
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: None,
-            size: (size * std::mem::size_of::<T>()) as u64,
-            usage,
-            mapped_at_creation: false,
-        });
-        Self(buffer, PhantomData)
-    }
-    pub fn set(&self, queue: &Queue, offset: usize, data: &[T]) {
-        queue.write_buffer(
-            &self.0,
-            offset as u64 * size_of::<T>() as u64,
-            bytemuck::cast_slice(data),
-        );
-    }
-    pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> BufferSlice {
-        self.0.slice(bounds)
     }
 }

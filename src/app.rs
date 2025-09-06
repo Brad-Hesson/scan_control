@@ -171,24 +171,7 @@ fn load_file(app: &mut MyApp, path: impl AsRef<Path>) -> Result<()> {
     let file = sxmfile::SXM::parse_file(&path)?;
     info!("Loaded image `{}`", path.display());
     let [width, _] = file.get_image_size()?;
-    let mut data = file.data[0][0].clone();
-    let max = data
-        .iter()
-        .copied()
-        .map(OrderedFloat)
-        .max()
-        .unwrap()
-        .into_inner();
-    let min = data
-        .iter()
-        .copied()
-        .map(OrderedFloat)
-        .min()
-        .unwrap()
-        .into_inner();
-    for d in &mut data {
-        *d = (*d - min) / (max - min);
-    }
+    let data = file.data[0][0].clone();
     let scale = file.get_scan_range()?;
     let translation = file.get_scan_center()?;
     let transform = Affine2::from_scale_angle_translation(

@@ -34,11 +34,21 @@ var color_map: texture_1d<f32>;
 
 @group(1) @binding(1)
 var height_map: texture_2d<f32>;
+@group(1) @binding(2)
+var<uniform> normalize_data: NormalizeData;
+@group(1) @binding(3)
+var<uniform> normalize_control: NormalizeControl;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // sample the height of this pixel from the height-map texture
-    let height = textureSample(height_map, tex_sampler, vertex.uv).r;
+    var height: f32;
+    let raw = textureSample(height_map, tex_sampler, vertex.uv).r;
+    if normalize_control.max_min != 0u {
+        height = (raw - f32(normalize_data.min)) / f32(normalize_data.max - normalize_data.min);
+    } else {
+        height = ((raw + 1.) / 2.) / f32(normalize_data.stddev * 2.0 * normalize_control.std_dev_mul);
+    }
 
     // if the datapoint doesn't exist, discard the fragment
     if isNan(height) {
@@ -58,6 +68,18 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 // ------------ Structs and Data ------------
+
+struct NormalizeControl{
+    max_min: u32,
+    _pad: u32,
+    std_dev_mul: f64
+}
+
+struct NormalizeData{
+    stddev: f64,
+    min: f64,
+    max: f64,
+}
 
 struct VertexOutput {
     @location(0) uv: vec2<f32>,

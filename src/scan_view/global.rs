@@ -8,6 +8,7 @@ use eframe::{
 };
 use egui::ahash::{HashMap, HashMapExt};
 use glam::Affine2;
+use image_compute::{PlaneFitter, PlaneFitterBuffers};
 use uuid::Uuid;
 
 pub(super) struct GlobalCallback {
@@ -26,7 +27,7 @@ impl CallbackTrait for GlobalCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         let global_res = callback_resources
             .entry::<GlobalResources>()
-            .or_insert_with(|| GlobalResources::new(device, self.target_format));
+            .or_insert_with(|| GlobalResources::new(device, self.target_format, [1024, 1024]));
 
         // Set the new screen transform
         global_res
@@ -51,13 +52,15 @@ impl CallbackTrait for GlobalCallback {
 pub(super) struct GlobalResources {
     pub scan_image_pipeline: RenderPipeline,
     pub image_copy_pipeline: ComputePipeline,
+    pub scratch_buffers: PlaneFitterBuffers,
     pub global_bind_group: scan_image::GlobalBindGroup,
     pub screen_transform_buf: TransformBuffer,
     pub color_map_texture: ColorMapTexture,
     pub images: HashMap<Uuid, ImageResources>,
+    pub plane_fitter: PlaneFitter,
 }
 impl GlobalResources {
-    pub fn new(device: &Device, target_format: TextureFormat) -> Self {
+    pub fn new(device: &Device, target_format: TextureFormat, initial_size: [u32; 2]) -> Self {
         let scan_image_pipeline = shaders::scan_image::create_main_pipeline(device, target_format);
         let image_copy_pipeline = copy_texture::create_main_pipeline(device);
         let screen_transform_buf = TransformBuffer::new(device);
@@ -71,6 +74,8 @@ impl GlobalResources {
             image_copy_pipeline,
             color_map_texture,
             images: HashMap::new(),
+            scratch_buffers: PlaneFitterBuffers::new(device, initial_size),
+            plane_fitter: PlaneFitter::new(device),
         }
     }
 }

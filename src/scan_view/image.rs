@@ -6,11 +6,15 @@ use eframe::{
 };
 use egui::Color32;
 use glam::{Affine2, Vec3};
+use image_compute::{buffers::StorageBuffer, OutData};
 use uuid::Uuid;
 
-use crate::scan_view::{global::GlobalResources, shaders::copy_texture};
+use crate::scan_view::{
+    global::GlobalResources,
+    shaders::{copy_texture, scan_image::NormalizeControl},
+};
 
-use super::shaders::{scan_image, ImageTexture, MetadataBuffer, StorageBuffer, TransformBuffer};
+use super::shaders::{scan_image, ImageTexture, MetadataBuffer, TransformBuffer};
 
 pub(super) struct ImageCallback {
     pub uuid: Uuid,
@@ -30,18 +34,14 @@ impl CallbackTrait for ImageCallback {
         let global_res = callback_resources
             .get_mut::<GlobalResources>()
             .expect("GlobalResources not initialized");
-        let image_res = global_res
-            .images
-            .entry(self.uuid)
-            .or_insert_with(|| ImageResources::new(device, self.size));
+        let image_res = global_res.images.entry(self.uuid).or_insert_with(|| {
+            ImageResources::new(device, self.size, |data| {
+                data.copy_from_slice(&self.changes[0].1[..]);
+            })
+        });
 
         // Set the new world transform
         image_res.world_transform_buf.set(queue, self.transform);
-
-        // Write all image changes to the image data buffer
-        for (offset, data) in &self.changes {
-            image_res.image_buffer.set(queue, *offset, &data);
-        }
 
         // If there are changes to the image data, write the image
         // normalization data to the buffer
@@ -79,9 +79,11 @@ impl CallbackTrait for ImageCallback {
                 label: None,
                 timestamp_writes: None,
             });
-            cpass.set_pipeline(&global_res.image_copy_pipeline);
-            copy_texture::set_bind_groups(&mut cpass, &image_res.image_copy_bind_group);
-            cpass.dispatch_workgroups(self.size[0], self.size[1], 1);
+            image_res.image_buffer.set(&mut cpass);
+            image_res.out_data.set(&mut cpass);
+            global_res
+                .plane_fitter
+                .run_mean_subtract(&mut cpass, &global_res.scratch_buffers);
         }
         Vec::new()
     }
@@ -112,19 +114,23 @@ impl CallbackTrait for ImageCallback {
 
 pub(super) struct ImageResources {
     world_transform_buf: TransformBuffer,
-    image_buffer: StorageBuffer<f32>,
+    image_buffer: image_compute::Image,
     local_bind_group: scan_image::LocalBindGroup,
     metadata_buffer: MetadataBuffer,
     image_copy_bind_group: copy_texture::BindGroup,
+    image_texture: ImageTexture,
+    out_data: OutData,
+    normalize_control: StorageBuffer<NormalizeControl>,
 }
 impl ImageResources {
-    pub fn new(device: &Device, size: [u32; 2]) -> Self {
+    pub fn new(device: &Device, size: [u32; 2], init_fn: impl FnOnce(&mut [f32])) -> Self {
         let world_transform_buf = TransformBuffer::new(device);
-        let image_buffer = StorageBuffer::new_with(
+        let image_buffer = StorageBuffer::new(
             device,
-            (size[0] * size[1]) as usize,
-            f32::NAN,
+            None,
             BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            (size[0] * size[1]) as usize,
+            |_| {},
         );
         let image_texture = ImageTexture::new(
             device,
@@ -134,17 +140,39 @@ impl ImageResources {
                 depth_or_array_layers: 1,
             },
         );
-        let local_bind_group =
-            scan_image::LocalBindGroup::new(device, &world_transform_buf, &image_texture);
+        let out_data = OutData::new(device, size, &image_texture.0);
+        let normalize_control = StorageBuffer::new(
+            device,
+            None,
+            BufferUsages::UNIFORM | BufferUsages::COPY_SRC,
+            1,
+            |data| {
+                data[0] = NormalizeControl {
+                    max_min: 1,
+                    _pad: 0,
+                    std_dev_mul: 5.,
+                }
+            },
+        );
+        let local_bind_group = scan_image::LocalBindGroup::new(
+            device,
+            &world_transform_buf,
+            &image_texture,
+            &out_data.normalize_out,
+            &normalize_control,
+        );
         let metadata_buffer = MetadataBuffer::new(device);
         let image_copy_bind_group =
             copy_texture::BindGroup::new(device, &metadata_buffer, &image_buffer, &image_texture);
         Self {
-            image_buffer,
+            image_buffer: image_compute::Image::new(device, None, size, init_fn),
             local_bind_group,
             world_transform_buf,
             metadata_buffer,
             image_copy_bind_group,
+            image_texture,
+            out_data,
+            normalize_control,
         }
     }
 }
