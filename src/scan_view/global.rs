@@ -1,17 +1,16 @@
 use eframe::{
     egui_wgpu::{self, CallbackTrait},
-    wgpu::{self, Device, RenderPipeline, TextureFormat},
+    wgpu::{self, Device, TextureFormat},
 };
 use glam::Affine2;
-use image_compute::{
-    buffers::{ColorMapTexture, TransformBuffer},
-    PlaneFitter, PlaneFitterBuffers,
-};
+use image_compute::{ScanImageBuffers, ScanImagePipeline};
+
+use crate::app::COLOR_MAP_SIZE;
 
 pub(super) struct GlobalCallback {
     pub target_format: TextureFormat,
     pub screen_transform: Affine2,
-    pub new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
+    pub new_color_map: Option<Box<[egui::Color32; COLOR_MAP_SIZE]>>,
 }
 impl CallbackTrait for GlobalCallback {
     fn prepare(
@@ -24,16 +23,18 @@ impl CallbackTrait for GlobalCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         let global_res = callback_resources
             .entry::<GlobalResources>()
-            .or_insert_with(|| GlobalResources::new(device, self.target_format, [1024, 1024]));
+            .or_insert_with(|| GlobalResources::new(device, self.target_format));
 
         // Set the new screen transform
         global_res
-            .screen_transform_buf
-            .set(queue, self.screen_transform);
+            .scan_image_buffers
+            .write_screen_transform(queue, self.screen_transform);
 
         // If there is a new color map, write it to the texture
         if let Some(color_map) = &self.new_color_map {
-            global_res.color_map_texture.set(queue, color_map);
+            global_res
+                .scan_image_buffers
+                .write_color_map(queue, color_map);
         }
         Vec::new()
     }
@@ -47,31 +48,16 @@ impl CallbackTrait for GlobalCallback {
 }
 
 pub(super) struct GlobalResources {
-    pub scan_image_pipeline: RenderPipeline,
-    pub scratch_buffers: PlaneFitterBuffers,
-    pub global_bind_group: image_compute::shaders::scan_image::GlobalBindGroup,
-    pub screen_transform_buf: TransformBuffer,
-    pub color_map_texture: ColorMapTexture,
-    pub plane_fitter: PlaneFitter,
+    pub scan_image_pipeline: ScanImagePipeline,
+    pub scan_image_buffers: ScanImageBuffers<COLOR_MAP_SIZE>,
 }
 impl GlobalResources {
-    pub fn new(device: &Device, target_format: TextureFormat, initial_size: [u32; 2]) -> Self {
-        let scan_image_pipeline =
-            image_compute::shaders::scan_image::create_main_pipeline(device, target_format);
-        let screen_transform_buf = TransformBuffer::new(device);
-        let color_map_texture = ColorMapTexture::new(device);
-        let global_bind_group = image_compute::shaders::scan_image::GlobalBindGroup::new(
-            device,
-            &screen_transform_buf,
-            &color_map_texture,
-        );
+    pub fn new(device: &Device, target_format: TextureFormat) -> Self {
+        let scan_image_pipeline = ScanImagePipeline::new(device, target_format);
+        let scan_image_buffers = ScanImageBuffers::new(device);
         Self {
             scan_image_pipeline,
-            global_bind_group,
-            screen_transform_buf,
-            color_map_texture,
-            scratch_buffers: PlaneFitterBuffers::new(device, initial_size),
-            plane_fitter: PlaneFitter::new(device),
+            scan_image_buffers,
         }
     }
 }

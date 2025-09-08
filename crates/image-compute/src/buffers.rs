@@ -8,13 +8,15 @@ use std::{
 use bytemuck::{AnyBitPattern, NoUninit};
 use glam::{Affine2, Mat3, Mat4};
 use wgpu::{
-    Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device, Extent3d, Queue, Texture,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    Buffer, BufferAddress, BufferBinding, BufferDescriptor, BufferUsages, Device, Extent3d, Queue,
+    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureViewDescriptor,
 };
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct StorageBuffer<T: Clone + NoUninit + AnyBitPattern> {
-    pub inner: Buffer,
+    inner: Buffer,
     pd: PhantomData<T>,
 }
 impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
@@ -81,6 +83,12 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
     {
         self.queue_download_with(device, queue, range, |r| r.to_vec().into_boxed_slice())
     }
+    pub fn as_entire_buffer_binding(&self) -> BufferBinding {
+        self.inner.as_entire_buffer_binding()
+    }
+    pub fn buffer_ref(&self) -> &Buffer {
+        &self.inner
+    }
 }
 
 fn rangebounds_map<I, O>(
@@ -93,7 +101,7 @@ fn rangebounds_map<I, O>(
     )
 }
 
-pub struct TransformBuffer(pub Buffer);
+pub struct TransformBuffer(Buffer);
 impl TransformBuffer {
     pub fn new(device: &Device) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
@@ -104,43 +112,24 @@ impl TransformBuffer {
         });
         Self(buffer)
     }
-    pub fn set(&self, queue: &Queue, transform: Affine2) {
+    pub fn write(&self, queue: &Queue, transform: Affine2) {
         let mut mat4 = Mat4::from_mat3(Mat3::from_mat2(transform.matrix2));
         mat4.w_axis.x = transform.translation.x;
         mat4.w_axis.y = transform.translation.y;
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
     }
-}
-
-pub struct ImageTexture(pub Texture);
-impl ImageTexture {
-    pub fn new(device: &Device, size: [u32; 2]) -> Self {
-        let texture = device.create_texture(&TextureDescriptor {
-            label: None,
-            size: Extent3d {
-                width: size[0],
-                height: size[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[TextureFormat::R32Float],
-        });
-        Self(texture)
+    pub fn as_entire_buffer_binding(&self) -> BufferBinding {
+        self.0.as_entire_buffer_binding()
     }
 }
 
-pub struct ColorMapTexture(pub Texture);
-impl ColorMapTexture {
-    pub const SIZE: usize = 1024;
+pub struct ColorMapTexture<const SIZE: usize>(Texture);
+impl<const SIZE: usize> ColorMapTexture<SIZE> {
     pub fn new(device: &Device) -> Self {
         let texture = device.create_texture(&TextureDescriptor {
             label: None,
             size: Extent3d {
-                width: Self::SIZE as u32,
+                width: SIZE as u32,
                 height: 1,
                 depth_or_array_layers: 1,
             },
@@ -153,20 +142,23 @@ impl ColorMapTexture {
         });
         Self(texture)
     }
-    pub fn set(&self, queue: &Queue, color_map: &[egui::Color32; Self::SIZE]) {
+    pub fn write(&self, queue: &Queue, color_map: &[egui::Color32; SIZE]) {
         queue.write_texture(
             self.0.as_image_copy(),
             bytemuck::cast_slice(color_map),
             eframe::wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(Self::SIZE as u32 * std::mem::size_of::<u8>() as u32 * 4),
+                bytes_per_row: Some(SIZE as u32 * std::mem::size_of::<u8>() as u32 * 4),
                 rows_per_image: Some(1),
             },
             Extent3d {
-                width: Self::SIZE as u32,
+                width: SIZE as u32,
                 height: 1,
                 depth_or_array_layers: 1,
             },
         );
+    }
+    pub fn create_view(&self) -> TextureView {
+        self.0.create_view(&TextureViewDescriptor::default())
     }
 }

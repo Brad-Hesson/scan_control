@@ -1,156 +1,162 @@
 #![allow(dead_code)]
 use std::sync::{Arc, OnceLock};
 
-use itertools::Itertools;
+use egui::Color32;
+use glam::Affine2;
+use itertools::{Itertools, izip};
+use tracing::info;
 use wgpu::{
-    BufferUsages, CommandEncoder, ComputePass, ComputePipeline, Device, QuerySet, QueryType, Queue,
-    Texture, TextureViewDescriptor, util::align_to, wgt::QuerySetDescriptor,
+    BlendState, BufferUsages, ColorTargetState, ColorWrites, CommandEncoder, ComputePass,
+    ComputePipeline, Device, Extent3d, FilterMode, MultisampleState, PrimitiveState,
+    PrimitiveTopology, QuerySet, QueryType, Queue, RenderPass, RenderPipeline,
+    RenderPipelineDescriptor, SamplerDescriptor, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureUsages, TextureViewDescriptor, util::align_to, wgt::QuerySetDescriptor,
 };
 
 use crate::{
-    buffers::{ImageTexture, StorageBuffer, TransformBuffer},
-    shaders::{
-        plane_fit::{self, NormalizeData, bind_groups::BindGroup1},
-        scan_image::{self, NormalizeControl},
-    },
+    buffers::{ColorMapTexture, StorageBuffer, TransformBuffer},
+    shaders::{plane_fit, scan_image},
 };
 
-pub mod buffers;
-pub mod shaders;
+mod buffers;
+mod shaders;
 
-pub struct OutData {
-    bind_group: BindGroup1,
-    planarize_out: StorageBuffer<f64>,
-    pub normalize_out: StorageBuffer<NormalizeData>,
+pub struct ImageComputeBuffers {
+    size: [u32; 2],
+    lines: u32,
+    world_transform_buffer: TransformBuffer,
+    image_size_buffer: StorageBuffer<u32>,
+    image_data_buffer: StorageBuffer<f32>,
+    planarize_buffer: StorageBuffer<f64>,
+    normalize_buffer: StorageBuffer<plane_fit::NormalizeData>,
+    image_src_bg: plane_fit::bind_groups::BindGroup0,
+    normalize_bg: plane_fit::bind_groups::BindGroup1,
+    scan_image_bg: scan_image::bind_groups::BindGroup1,
 }
-
-impl OutData {
-    pub fn new(device: &Device, size: [u32; 2], texture: &Texture) -> Self {
-        let planarize_out = StorageBuffer::<f64>::new(
-            &device,
-            Some("planarize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            size[0] as usize * size[1] as usize,
-            |_| {},
-        );
-        let normalize_out = StorageBuffer::<NormalizeData>::new(
-            &device,
-            Some("normalize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::UNIFORM,
-            1,
-            |_| {},
-        );
-        let bind_group = BindGroup1::from_bindings(
-            &device,
-            plane_fit::bind_groups::BindGroupLayout1 {
-                texture_out: &texture.create_view(&TextureViewDescriptor::default()),
-                planarize_out: planarize_out.inner.as_entire_buffer_binding(),
-                normalize_out: normalize_out.inner.as_entire_buffer_binding(),
-            },
-        );
-        Self {
-            bind_group,
-            planarize_out,
-            normalize_out,
-        }
-    }
-    pub fn set(&self, pass: &mut ComputePass) {
-        self.bind_group.set(pass);
-    }
-}
-
-pub struct Image {
-    pub size: [u32; 2],
-    pub world_transform_buffer: TransformBuffer,
-    size_buffer: StorageBuffer<u32>,
-    data_buffer: StorageBuffer<f32>,
-    plane_fit_bg: plane_fit::bind_groups::BindGroup0,
-    pub scan_image_bg: scan_image::bind_groups::BindGroup1,
-    out_data: OutData,
-}
-impl Image {
+impl ImageComputeBuffers {
     pub fn new(
         device: &Device,
         label: Option<&str>,
         size: [u32; 2],
+        lines: u32,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
         let size_buffer_label = label.map(|name| format!("{name}_size_buffer"));
-        let size_buffer = buffers::StorageBuffer::new(
+        let image_size_buffer = buffers::StorageBuffer::new(
             &device,
             size_buffer_label.as_deref(),
             BufferUsages::UNIFORM,
             2,
-            |buf| buf.copy_from_slice(&size),
+            |buf| {
+                buf[0] = size[0];
+                buf[1] = lines;
+            },
         );
         let data_buffer_label = label.map(|name| format!("{name}_data_buffer"));
-        let data_buffer = buffers::StorageBuffer::new(
+        let image_data_buffer = buffers::StorageBuffer::new(
             &device,
             data_buffer_label.as_deref(),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            size.iter().map(|v| *v as usize).product(),
+            size[0] as usize * size[1] as usize,
             init_fn,
         );
-        let plane_fit_bg = plane_fit::bind_groups::BindGroup0::from_bindings(
-            &device,
-            plane_fit::bind_groups::BindGroupLayout0 {
-                image_size: size_buffer.inner.as_entire_buffer_binding(),
-                image_in: data_buffer.inner.as_entire_buffer_binding(),
-            },
-        );
         let world_transform_buffer = TransformBuffer::new(device);
-        let image_texture = ImageTexture::new(device, size);
+        let image_texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+            view_formats: &[TextureFormat::R32Float],
+        });
         let normalize_control = StorageBuffer::new(
             device,
             None,
             BufferUsages::UNIFORM | BufferUsages::COPY_SRC,
             1,
             |data| {
-                data[0] = NormalizeControl {
+                data[0] = scan_image::NormalizeControl {
                     max_min: 1,
-                    _pad: 0,
                     std_dev_mul: 5.,
+                    _pad: 0,
                 }
             },
         );
-        let out_data = OutData::new(device, size, &image_texture.0);
+        let normalize_buffer = StorageBuffer::<plane_fit::NormalizeData>::new(
+            &device,
+            Some("normalize_out"),
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::UNIFORM,
+            1,
+            |_| {},
+        );
+        let planarize_buffer = StorageBuffer::<f64>::new(
+            &device,
+            Some("planarize_out"),
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            size[0] as usize * size[1] as usize,
+            |_| {},
+        );
+        let image_src_bg = plane_fit::bind_groups::BindGroup0::from_bindings(
+            &device,
+            plane_fit::bind_groups::BindGroupLayout0 {
+                image_size: image_size_buffer.as_entire_buffer_binding(),
+                image_in: image_data_buffer.as_entire_buffer_binding(),
+            },
+        );
         let scan_image_bg = scan_image::bind_groups::BindGroup1::from_bindings(
             device,
             scan_image::bind_groups::BindGroupLayout1 {
-                quad2world: world_transform_buffer.0.as_entire_buffer_binding(),
-                height_map: &image_texture
-                    .0
-                    .create_view(&TextureViewDescriptor::default()),
-                normalize_data: out_data.normalize_out.inner.as_entire_buffer_binding(),
-                normalize_control: normalize_control.inner.as_entire_buffer_binding(),
+                quad2world: world_transform_buffer.as_entire_buffer_binding(),
+                height_map: &image_texture.create_view(&TextureViewDescriptor::default()),
+                normalize_data: normalize_buffer.as_entire_buffer_binding(),
+                normalize_control: normalize_control.as_entire_buffer_binding(),
+            },
+        );
+        let normalize_bg = plane_fit::bind_groups::BindGroup1::from_bindings(
+            &device,
+            plane_fit::bind_groups::BindGroupLayout1 {
+                texture_out: &image_texture.create_view(&TextureViewDescriptor::default()),
+                planarize_out: planarize_buffer.as_entire_buffer_binding(),
+                normalize_out: normalize_buffer.as_entire_buffer_binding(),
             },
         );
         Self {
-            size_buffer,
-            data_buffer,
-            plane_fit_bg,
+            image_size_buffer,
+            image_data_buffer,
+            image_src_bg,
             size,
+            lines,
             scan_image_bg,
-            out_data,
             world_transform_buffer,
+            planarize_buffer,
+            normalize_buffer,
+            normalize_bg,
         }
     }
-    pub fn set(&self, pass: &mut ComputePass) {
-        self.plane_fit_bg.set(pass);
-        self.out_data.set(pass);
+    pub fn write_world_transform(&self, queue: &Queue, transform: Affine2) {
+        self.world_transform_buffer.write(queue, transform);
+    }
+    pub fn current_size(&self) -> [u32; 2] {
+        [self.size[0], self.lines]
     }
 }
 
 #[allow(non_snake_case)]
-pub struct PlaneFitterBuffers {
+struct ImageComputeScratchBuffers {
     xz: StorageBuffer<f64>,
     yz: StorageBuffer<f64>,
     std_dev: StorageBuffer<f64>,
     bg: plane_fit::bind_groups::BindGroup2,
     size: [u32; 2],
 }
-impl PlaneFitterBuffers {
-    pub fn new(device: &Device, size: [u32; 2]) -> Self {
+impl ImageComputeScratchBuffers {
+    fn new(device: &Device, size: [u32; 2]) -> Self {
         let mk_buffer = |s: &'static str| {
             StorageBuffer::new(
                 device,
@@ -168,9 +174,9 @@ impl PlaneFitterBuffers {
             bg: plane_fit::bind_groups::BindGroup2::from_bindings(
                 &device,
                 plane_fit::bind_groups::BindGroupLayout2 {
-                    xz: xz.inner.as_entire_buffer_binding(),
-                    yz: yz.inner.as_entire_buffer_binding(),
-                    std_dev: std_dev.inner.as_entire_buffer_binding(),
+                    xz: xz.as_entire_buffer_binding(),
+                    yz: yz.as_entire_buffer_binding(),
+                    std_dev: std_dev.as_entire_buffer_binding(),
                 },
             ),
             xz,
@@ -180,7 +186,7 @@ impl PlaneFitterBuffers {
     }
 }
 
-pub struct PlaneFitter {
+pub struct ImageComputePipeline {
     copy_image: ComputePipeline,
     copy_image_transpose: ComputePipeline,
     generate_sums_plane: ComputePipeline,
@@ -194,8 +200,9 @@ pub struct PlaneFitter {
     write__mean_subtract: ComputePipeline,
     qs: QuerySet,
     qs_buf: StorageBuffer<u64>,
+    scratch_buffers: ImageComputeScratchBuffers,
 }
-impl PlaneFitter {
+impl ImageComputePipeline {
     pub fn new(device: &Device) -> Self {
         let n_timings = 5;
         Self {
@@ -225,43 +232,53 @@ impl PlaneFitter {
                 n_timings as usize * 2,
                 |_| {},
             ),
+            scratch_buffers: ImageComputeScratchBuffers::new(device, [1024, 1024]),
         }
     }
-    pub fn run_mean_subtract(
-        &self,
+    pub fn dispatch_mean_subtract(
+        &mut self,
+        device: &Device,
         pass: &mut ComputePass,
-        scratch_buffers: &PlaneFitterBuffers,
+        image: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        scratch_buffers.bg.set(pass);
+        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
+            info!("Reallocating scratch buffers to {:?}", image.size);
+            self.scratch_buffers = ImageComputeScratchBuffers::new(device, image.size);
+        }
+
+        self.scratch_buffers.bg.set(pass);
+        image.image_src_bg.set(pass);
+        image.normalize_bg.set(pass);
+        let size = image.current_size();
 
         pass.set_pipeline(&self.copy_image);
         wts(pass);
-        dispatch_linear(pass, scratch_buffers.size);
+        dispatch_linear(pass, size);
         wts(pass);
 
         pass.set_pipeline(&self.reduce_image);
         wts(pass);
-        dispatch_reduction(pass, scratch_buffers.size);
+        dispatch_reduction(pass, size);
         wts(pass);
 
         pass.set_pipeline(&self.generate_normalization__mean_subtract);
         wts(pass);
-        dispatch_linear(pass, scratch_buffers.size);
+        dispatch_linear(pass, size);
         wts(pass);
 
         pass.set_pipeline(&self.reduce_normalizations);
         wts(pass);
-        dispatch_reduction(pass, scratch_buffers.size);
+        dispatch_reduction(pass, size);
         wts(pass);
 
         pass.set_pipeline(&self.write__mean_subtract);
         wts(pass);
-        dispatch_linear(pass, scratch_buffers.size);
+        dispatch_linear(pass, size);
         wts(pass);
 
         qs_n / 2
@@ -362,7 +379,7 @@ impl PlaneFitter {
             })
     }
     pub fn resolve_timings(&self, encoder: &mut CommandEncoder, num: usize) {
-        encoder.resolve_query_set(&self.qs, 0..num as u32 * 2, &self.qs_buf.inner, 0);
+        encoder.resolve_query_set(&self.qs, 0..num as u32 * 2, self.qs_buf.buffer_ref(), 0);
     }
 }
 
@@ -397,20 +414,87 @@ fn dispatch_y_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     }
 }
 
-fn check_sizes<const N: usize>(images: [&Image; N]) -> Result<[u32; 2], TransformError> {
-    let sizes = images.iter().map(|i| i.size).collect::<Vec<_>>();
-    for size in &sizes[1..] {
-        if *size != sizes[0] {
-            return Err(TransformError::SizeMismatch(sizes));
-        }
-    }
-    Ok(sizes[0])
+pub struct ScanImageBuffers<const COLOR_MAP_SIZE: usize> {
+    screen_transform_buffer: TransformBuffer,
+    color_map_texture: ColorMapTexture<COLOR_MAP_SIZE>,
+    bg: shaders::scan_image::bind_groups::BindGroup0,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum TransformError {
-    #[error("Size mismatch between image arguments: {:?}", 0)]
-    SizeMismatch(Vec<[u32; 2]>),
+impl<const COLOR_MAP_SIZE: usize> ScanImageBuffers<COLOR_MAP_SIZE> {
+    pub fn new(device: &Device) -> Self {
+        let sampler = device.create_sampler(&SamplerDescriptor {
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+        let screen_transform_buffer = TransformBuffer::new(device);
+        let color_map_texture = ColorMapTexture::new(device);
+        let bg = shaders::scan_image::bind_groups::BindGroup0::from_bindings(
+            device,
+            shaders::scan_image::bind_groups::BindGroupLayout0 {
+                world2screen: screen_transform_buffer.as_entire_buffer_binding(),
+                tex_sampler: &sampler,
+                color_map: &color_map_texture.create_view(),
+            },
+        );
+        Self {
+            screen_transform_buffer,
+            color_map_texture,
+            bg,
+        }
+    }
+    pub fn write_screen_transform(&self, queue: &Queue, transform: Affine2) {
+        self.screen_transform_buffer.write(queue, transform);
+    }
+    pub fn write_color_map(&self, queue: &Queue, color_map: &[Color32; COLOR_MAP_SIZE]) {
+        self.color_map_texture.write(queue, color_map);
+    }
+}
+
+pub struct ScanImagePipeline {
+    pipeline: RenderPipeline,
+}
+impl ScanImagePipeline {
+    pub fn new(device: &Device, target_format: TextureFormat) -> Self {
+        let shader_module = shaders::scan_image::create_shader_module(device);
+        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&shaders::scan_image::create_pipeline_layout(device)),
+            vertex: scan_image::vertex_state(&shader_module, &scan_image::vs_main_entry()),
+            fragment: Some(scan_image::fragment_state(
+                &shader_module,
+                &scan_image::fs_main_entry([Some(ColorTargetState {
+                    format: target_format,
+                    blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })]),
+            )),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: MultisampleState {
+                count: 4,
+                mask: !0,
+                alpha_to_coverage_enabled: true,
+            },
+            multiview: None,
+            cache: None,
+        });
+        Self { pipeline }
+    }
+    pub fn draw<const COLOR_MAP_SIZE: usize>(
+        &self,
+        pass: &mut RenderPass,
+        image_buffers: &ImageComputeBuffers,
+        scan_image_buffers: &ScanImageBuffers<COLOR_MAP_SIZE>,
+    ) {
+        pass.set_pipeline(&self.pipeline);
+        scan_image_buffers.bg.set(pass);
+        image_buffers.scan_image_bg.set(pass);
+        pass.draw(0..4, 0..1);
+    }
 }
 
 #[cfg(test)]
@@ -436,8 +520,7 @@ mod tests {
         const WIDTH: usize = 512;
         const HEIGHT: usize = 1024;
         const SIZE: [u32; 2] = [WIDTH as _, HEIGHT as _];
-        let plane_fitter = PlaneFitter::new(&device);
-        let plane_fitter_buffers = PlaneFitterBuffers::new(&device, SIZE);
+        let mut plane_fitter = ImageComputePipeline::new(&device);
         let x_slope = 1.0;
         let y_slope = 10.0;
         let offset = 0.0;
@@ -458,44 +541,14 @@ mod tests {
                 }
             }
         };
-        let original = Image::new(&device, Some("original_image"), SIZE, init_data);
+        let original = ImageComputeBuffers::new(
+            &device,
+            Some("original_image"),
+            SIZE,
+            HEIGHT as u32,
+            init_data,
+        );
         mean /= (WIDTH * HEIGHT) as f64;
-        let texture_out = device.create_texture(&TextureDescriptor {
-            label: Some("texture_out"),
-            size: Extent3d {
-                width: WIDTH as u32,
-                height: HEIGHT as u32,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[TextureFormat::R32Float],
-        });
-        let planarize_out = StorageBuffer::<f64>::new(
-            &device,
-            Some("planarize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            WIDTH * HEIGHT,
-            |_| {},
-        );
-        let normalize_out = StorageBuffer::<NormalizeData>::new(
-            &device,
-            Some("normalize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            1,
-            |_| {},
-        );
-        let out_bg = shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
-            &device,
-            plane_fit::bind_groups::BindGroupLayout1 {
-                texture_out: &texture_out.create_view(&TextureViewDescriptor::default()),
-                planarize_out: planarize_out.inner.as_entire_buffer_binding(),
-                normalize_out: normalize_out.inner.as_entire_buffer_binding(),
-            },
-        );
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         unsafe { device.start_graphics_debugger_capture() };
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -507,17 +560,19 @@ mod tests {
                 label: Some("Test Compute Pass"),
                 timestamp_writes: None,
             });
-            original.set(&mut pass);
-            out_bg.set(&mut pass);
-            n_times = plane_fitter.run_mean_subtract(&mut pass, &plane_fitter_buffers);
+            n_times = plane_fitter.dispatch_mean_subtract(&device, &mut pass, &original);
         }
         plane_fitter.resolve_timings(&mut encoder, n_times);
         device.poll(PollType::WaitForSubmissionIndex(
             queue.submit([encoder.finish()]),
         ))?;
         unsafe { device.stop_graphics_debugger_capture() };
-        let meta_download = planarize_out.queue_download(&device, &queue, ..16);
-        let normal_download = normalize_out.queue_download(&device, &queue, ..1);
+        let meta_download = original
+            .planarize_buffer
+            .queue_download(&device, &queue, ..16);
+        let normal_download = original
+            .normalize_buffer
+            .queue_download(&device, &queue, ..1);
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         println!(
             "0: {}, 1: {}, 2: {}",
@@ -535,45 +590,9 @@ mod tests {
         const WIDTH: usize = 1024;
         const HEIGHT: usize = 1024;
         const SIZE: [u32; 2] = [WIDTH as _, HEIGHT as _];
-        let plane_fitter = PlaneFitter::new(&device);
-        let plane_fitter_buffers = PlaneFitterBuffers::new(&device, SIZE);
-        let original = Image::new(&device, Some("original_image"), SIZE, |_| {});
-        let texture_out = device.create_texture(&TextureDescriptor {
-            label: Some("texture_out"),
-            size: Extent3d {
-                width: WIDTH as u32,
-                height: HEIGHT as u32,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[TextureFormat::R32Float],
-        });
-        let planarize_out = StorageBuffer::<f64>::new(
-            &device,
-            Some("planarize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            WIDTH * HEIGHT,
-            |_| {},
-        );
-        let normalize_out = StorageBuffer::<NormalizeData>::new(
-            &device,
-            Some("normalize_out"),
-            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            1,
-            |_| {},
-        );
-        let out_bg = shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
-            &device,
-            plane_fit::bind_groups::BindGroupLayout1 {
-                texture_out: &texture_out.create_view(&TextureViewDescriptor::default()),
-                planarize_out: planarize_out.inner.as_entire_buffer_binding(),
-                normalize_out: normalize_out.inner.as_entire_buffer_binding(),
-            },
-        );
+        let mut plane_fitter = ImageComputePipeline::new(&device);
+        let original =
+            ImageComputeBuffers::new(&device, Some("original_image"), SIZE, HEIGHT as u32, |_| {});
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         let mut times = vec![0., 0., 0., 0., 0.];
         let mut latest = vec![0., 0., 0., 0., 0.];
@@ -588,9 +607,7 @@ mod tests {
                     label: Some("Test Compute Pass"),
                     timestamp_writes: None,
                 });
-                original.set(&mut pass);
-                out_bg.set(&mut pass);
-                n_times = plane_fitter.run_mean_subtract(&mut pass, &plane_fitter_buffers);
+                n_times = plane_fitter.dispatch_mean_subtract(&device, &mut pass, &original);
             }
             plane_fitter.resolve_timings(&mut encoder, n_times);
             device.poll(PollType::WaitForSubmissionIndex(

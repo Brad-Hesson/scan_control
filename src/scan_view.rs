@@ -12,10 +12,10 @@ use egui::{
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use image_compute::buffers::ColorMapTexture;
+use image_compute::ImageComputePipeline;
 use uuid::Uuid;
 
-use crate::utils::SelectableMember;
+use crate::{app::COLOR_MAP_SIZE, utils::SelectableMember};
 
 mod global;
 mod image;
@@ -24,7 +24,7 @@ mod image;
 pub struct ScanView {
     pub world_transform: Affine2,
     target_format: TextureFormat,
-    new_color_map: Option<Box<[egui::Color32; ColorMapTexture::SIZE]>>,
+    new_color_map: Option<Box<[egui::Color32; COLOR_MAP_SIZE]>>,
 }
 impl ScanView {
     pub fn show<R>(
@@ -94,10 +94,9 @@ impl ScanView {
         screen_transform * self.world_transform
     }
     pub fn new(wgpu: &RenderState) -> Self {
-        let mut color_map: Box<MaybeUninit<[egui::Color32; ColorMapTexture::SIZE]>> =
-            Box::new_uninit();
-        for i in 0..ColorMapTexture::SIZE {
-            let color = i as f32 / (ColorMapTexture::SIZE - 1) as f32;
+        let mut color_map: Box<MaybeUninit<[egui::Color32; COLOR_MAP_SIZE]>> = Box::new_uninit();
+        for i in 0..COLOR_MAP_SIZE {
+            let color = i as f32 / (COLOR_MAP_SIZE - 1) as f32;
             unsafe {
                 color_map.assume_init_mut()[i] = Color32::from_gray((color * 255.) as u8);
             }
@@ -108,8 +107,7 @@ impl ScanView {
             target_format: wgpu.target_format,
         }
     }
-    pub const COLOR_MAP_SIZE: usize = ColorMapTexture::SIZE;
-    pub fn set_color_map(&mut self, color_map: Box<[egui::Color32; Self::COLOR_MAP_SIZE]>) {
+    pub fn set_color_map(&mut self, color_map: Box<[egui::Color32; COLOR_MAP_SIZE]>) {
         self.new_color_map = Some(color_map);
     }
 }
@@ -120,31 +118,34 @@ pub struct ScanViewCtx<'a> {
     pub world_transform: Affine2,
 }
 
-// #[derive(Clone)]
 pub struct ScanImage {
     uuid: Uuid,
     pub transform: Affine2,
     changes: Vec<(usize, Box<[f32]>)>,
     selected: bool,
-    image_data: Arc<image_compute::Image>,
+    image_data: Arc<image_compute::ImageComputeBuffers>,
 }
 impl ScanImage {
     pub fn new(
-        frame: &eframe::Frame,
+        wgpu_state: &RenderState,
         size: [u32; 2],
-        data: Box<[f32]>,
+        lines: u32,
         transform: Affine2,
+        init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
-        let rs = frame.wgpu_render_state().unwrap();
-        let image_data = Arc::new(image_compute::Image::new(&rs.device, None, size, |write| {
-            write.copy_from_slice(&data);
-        }));
+        let image_data = Arc::new(image_compute::ImageComputeBuffers::new(
+            &wgpu_state.device,
+            None,
+            size,
+            lines,
+            init_fn,
+        ));
         Self {
             uuid: Uuid::new_v4(),
             transform,
             selected: false,
             image_data,
-            changes: vec![(0, data)],
+            changes: vec![],
         }
     }
     pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
@@ -175,14 +176,28 @@ impl ScanImage {
             ImageCallback {
                 transform: self.transform,
                 changes: std::mem::take(&mut self.changes),
-                image_data: self.image_data.clone(),
+                image_buffers: self.image_data.clone(),
             },
         );
         ctx.ui.painter().add(callback);
         resp
     }
-    pub fn set_image_data(&mut self, offset: usize, data: Box<[f32]>) {
-        self.changes.push((offset, data));
+    pub fn update_texture(&self, wgpu_state: &RenderState, image_encoder: &mut ImageEncoder) {
+        let mut encoder = wgpu_state
+            .device
+            .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            image_encoder.pipeline.dispatch_mean_subtract(
+                &wgpu_state.device,
+                &mut pass,
+                &self.image_data,
+            );
+        }
+        wgpu_state.queue.submit([encoder.finish()]);
     }
 }
 impl PartialEq for ScanImage {
@@ -198,6 +213,16 @@ impl SelectableMember for ScanImage {
 
     fn is_selected(&self) -> bool {
         self.selected
+    }
+}
+
+pub struct ImageEncoder {
+    pipeline: ImageComputePipeline,
+}
+impl ImageEncoder {
+    pub fn new(wgpu_state: &RenderState) -> Self {
+        let pipeline = ImageComputePipeline::new(&wgpu_state.device);
+        Self { pipeline }
     }
 }
 

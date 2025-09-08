@@ -2,19 +2,23 @@ use std::any::Any;
 use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
-use crate::scan_view::{BorderRectangle, ScanImage, ScanView};
+use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::UndoQueue;
 use crate::utils::SelectableVecExt as _;
+use eframe::egui_wgpu::RenderState;
 use egui::Color32;
-use egui::{emath::OrderedFloat, Button, MenuBar, Ui};
+use egui::{Button, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
 use tracing::{error, info};
 
+pub const COLOR_MAP_SIZE: usize = 256;
+
 pub struct MyApp {
     file_dialog: ViewportFileDialog,
     app_state: AppState,
+    image_encoder: ImageEncoder,
     undo_queue: UndoQueue<AppState>, // gradient: egui_colorgradient::Gradient,
                                      // last_gradient: egui_colorgradient::Gradient,
 }
@@ -39,6 +43,7 @@ impl MyApp {
                 scan_view: ScanView::new(wgpu),
                 images: vec![],
             },
+            image_encoder: ImageEncoder::new(wgpu),
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(), // last_gradient: gradient.clone(),
                                           // gradient,
@@ -53,13 +58,12 @@ impl MyApp {
         self.undo_queue
             .push(&mut self.app_state, user_data, redo, undo);
     }
-    fn load_file(&mut self, frame: &eframe::Frame, path: impl AsRef<Path>) -> Result<()> {
+    fn load_file(&mut self, wgpu_state: &RenderState, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         info!("Trying to load image `{}`", path.display());
         let file = sxmfile::SXM::parse_file(&path)?;
         info!("Loaded image `{}`", path.display());
         let size = file.get_image_size()?;
-        let data = file.data[0][0].clone();
         let scale = file.get_scan_range()?;
         let translation = file.get_scan_center()?;
         let transform = Affine2::from_scale_angle_translation(
@@ -67,8 +71,12 @@ impl MyApp {
             0.,
             Vec2::from(translation) * 1e9,
         );
+        let scan_image = ScanImage::new(wgpu_state, size, size[1], transform, |data_mut| {
+            data_mut.copy_from_slice(&file.data[0][0]);
+        });
+        scan_image.update_texture(wgpu_state, &mut self.image_encoder);
         self.mod_state(
-            Some(ScanImage::new(frame, size, data, transform)),
+            Some(scan_image),
             |state, data| state.images.push(data.take().unwrap()),
             |state, data| *data = Some(state.images.pop().unwrap()),
         );
@@ -89,9 +97,12 @@ impl MyApp {
 }
 
 impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if let Some(path) = self.file_dialog.take_picked() {
-            if let Err(e) = self.load_file(_frame, path).context("file load failed") {
+            if let Err(e) = self
+                .load_file(frame.wgpu_render_state().unwrap(), path)
+                .context("file load failed")
+            {
                 error!("{e:#}");
             }
         }

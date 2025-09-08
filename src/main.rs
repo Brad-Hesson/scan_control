@@ -1,6 +1,6 @@
 use eframe::wgpu::{DeviceDescriptor, PresentMode};
 use eyre::Context as _;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 use wgpu::{
     Adapter, Device, FeaturesWGPU, FeaturesWebGPU, Instance, PowerPreference, Queue,
@@ -10,8 +10,8 @@ use wgpu::{
 mod app;
 mod components;
 mod scan_view;
-mod utils;
 mod undo_queue;
+mod utils;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()
