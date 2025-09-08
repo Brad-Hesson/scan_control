@@ -176,12 +176,12 @@ impl ImageComputeBuffers {
                 correct_length,
             });
         }
-        self.lines += 1;
         self.image_data_buffer.queue_write(
             queue,
             self.lines as usize * self.size[0] as usize,
             line,
         );
+        self.lines += 1;
         self.image_size_buffer.queue_write(queue, 1, &[self.lines]);
         Ok(())
     }

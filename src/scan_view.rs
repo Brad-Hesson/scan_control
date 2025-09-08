@@ -208,6 +208,9 @@ impl ScanImage {
     ) -> Result<(), WriteLinesError> {
         self.image_data.write().write_line(&wgpu_state.queue, line)
     }
+    pub fn current_size(&self) -> [u32; 2] {
+        self.image_data.read().current_size()
+    }
 }
 impl PartialEq for ScanImage {
     fn eq(&self, other: &Self) -> bool {

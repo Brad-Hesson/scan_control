@@ -11,6 +11,7 @@ use egui::{Button, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
+use sxmfile::SXM;
 use tracing::{error, info};
 
 pub const COLOR_MAP_SIZE: usize = 256;
@@ -26,6 +27,8 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     images: Vec<ScanImage>,
+    current_scan: ScanImage,
+    src_sxm: SXM,
 }
 
 impl MyApp {
@@ -42,6 +45,14 @@ impl MyApp {
             app_state: AppState {
                 scan_view: ScanView::new(wgpu),
                 images: vec![],
+                current_scan: ScanImage::new(
+                    wgpu,
+                    [512, 512],
+                    0,
+                    Affine2::from_scale([512., 512.].into()),
+                    |_| {},
+                ),
+                src_sxm: SXM::parse_file("20240229_066.sxm").unwrap(),
             },
             image_encoder: ImageEncoder::new(wgpu),
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -138,6 +149,18 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
             self.undo_queue.redo(&mut self.app_state);
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            let render_state = frame.wgpu_render_state().unwrap();
+            let [x, y] = self.app_state.current_scan.current_size();
+            let line = &self.app_state.src_sxm.data[0][0][x as usize * y as usize..][..x as usize];
+            self.app_state
+                .current_scan
+                .write_line(frame.wgpu_render_state().unwrap(), line)
+                .unwrap();
+            self.app_state
+                .current_scan
+                .update_texture(render_state, &mut self.image_encoder);
+        }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
@@ -171,6 +194,7 @@ impl eframe::App for MyApp {
                         if selected.is_some() {
                             self.app_state.images.set_selected_idx(selected);
                         }
+                        self.app_state.current_scan.show(ctx);
                         if let Some(hov_i) = hovered {
                             BorderRectangle {
                                 transform: self.app_state.images[hov_i].transform,
