@@ -7,7 +7,9 @@ use tracing::info;
 use wgpu::{
     BufferUsages, CommandEncoder, ComputePass, ComputePipeline, Device, Extent3d, QuerySet,
     QueryType, Queue, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    TextureViewDescriptor, util::align_to, wgt::QuerySetDescriptor,
+    TextureViewDescriptor,
+    util::{DeviceExt, align_to},
+    wgt::{QuerySetDescriptor, TextureDataOrder},
 };
 
 use crate::{
@@ -60,6 +62,7 @@ pub struct ImageComputeBuffers {
 impl ImageComputeBuffers {
     pub fn new(
         device: &Device,
+        queue: &Queue,
         label: Option<&str>,
         size: [u32; 2],
         lines: u32,
@@ -85,20 +88,25 @@ impl ImageComputeBuffers {
             init_fn,
         );
         let world_transform_buffer = TransformBuffer::new(device);
-        let image_texture = device.create_texture(&TextureDescriptor {
-            label: None,
-            size: Extent3d {
-                width: size[0],
-                height: size[1],
-                depth_or_array_layers: 1,
+        let image_texture = device.create_texture_with_data(
+            queue,
+            &TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R32Float,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+                view_formats: &[TextureFormat::R32Float],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[TextureFormat::R32Float],
-        });
+            TextureDataOrder::LayerMajor,
+            bytemuck::cast_slice(vec![f32::NAN; size[0] as usize * size[1] as usize].as_slice()),
+        );
         let normalize_control_buffer = StorageBuffer::new(
             device,
             None,
@@ -187,6 +195,9 @@ impl ImageComputeBuffers {
     }
     pub fn current_size(&self) -> [u32; 2] {
         [self.size[0], self.lines]
+    }
+    pub fn capacity(&self) -> [u32; 2] {
+        self.size
     }
     pub fn download_normalize_data(
         &self,

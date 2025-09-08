@@ -149,13 +149,15 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
             self.undo_queue.redo(&mut self.app_state);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+            && !self.app_state.current_scan.is_full()
+        {
             let render_state = frame.wgpu_render_state().unwrap();
             let [x, y] = self.app_state.current_scan.current_size();
             let line = &self.app_state.src_sxm.data[0][0][x as usize * y as usize..][..x as usize];
             self.app_state
                 .current_scan
-                .write_line(frame.wgpu_render_state().unwrap(), line)
+                .write_line(render_state, line)
                 .unwrap();
             self.app_state
                 .current_scan

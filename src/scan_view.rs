@@ -137,6 +137,7 @@ impl ScanImage {
     ) -> Self {
         let image_data = Arc::new(RwLock::new(ImageComputeBuffers::new(
             &wgpu_state.device,
+            &wgpu_state.queue,
             None,
             size,
             lines,
@@ -210,6 +211,9 @@ impl ScanImage {
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()
+    }
+    pub fn is_full(&self) -> bool {
+        self.current_size() == self.image_data.read().capacity()
     }
 }
 impl PartialEq for ScanImage {
