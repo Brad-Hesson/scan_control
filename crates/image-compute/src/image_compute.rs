@@ -69,7 +69,7 @@ impl ImageComputeBuffers {
         let image_size_buffer = StorageBuffer::new(
             &device,
             size_buffer_label.as_deref(),
-            BufferUsages::UNIFORM,
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             2,
             |buf| {
                 buf[0] = size[0];
@@ -182,6 +182,7 @@ impl ImageComputeBuffers {
             self.lines as usize * self.size[0] as usize,
             line,
         );
+        self.image_size_buffer.queue_write(queue, 1, &[self.lines]);
         Ok(())
     }
     pub fn current_size(&self) -> [u32; 2] {

@@ -7,12 +7,14 @@ use eframe::{
 };
 use egui::{
     epaint::{PathShape, PathStroke},
+    mutex::RwLock,
     Color32, Pos2, Rect, Response, Sense,
 };
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use image_compute::image_compute::{ImageComputeBuffers, ImageComputePipeline};
+use image_compute::image_compute::{ImageComputeBuffers, ImageComputePipeline, WriteLinesError};
+use sxmfile::SXM;
 use uuid::Uuid;
 
 use crate::{app::COLOR_MAP_SIZE, utils::SelectableMember};
@@ -123,7 +125,7 @@ pub struct ScanImage {
     pub transform: Affine2,
     changes: Vec<(usize, Box<[f32]>)>,
     selected: bool,
-    image_data: Arc<ImageComputeBuffers>,
+    image_data: Arc<RwLock<ImageComputeBuffers>>,
 }
 impl ScanImage {
     pub fn new(
@@ -133,13 +135,13 @@ impl ScanImage {
         transform: Affine2,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
-        let image_data = Arc::new(ImageComputeBuffers::new(
+        let image_data = Arc::new(RwLock::new(ImageComputeBuffers::new(
             &wgpu_state.device,
             None,
             size,
             lines,
             init_fn,
-        ));
+        )));
         Self {
             uuid: Uuid::new_v4(),
             transform,
@@ -194,10 +196,17 @@ impl ScanImage {
             image_encoder.pipeline.dispatch_mean_subtract(
                 &wgpu_state.device,
                 &mut pass,
-                &self.image_data,
+                &self.image_data.read(),
             );
         }
         wgpu_state.queue.submit([encoder.finish()]);
+    }
+    pub fn write_line(
+        &mut self,
+        wgpu_state: &RenderState,
+        line: &[f32],
+    ) -> Result<(), WriteLinesError> {
+        self.image_data.write().write_line(&wgpu_state.queue, line)
     }
 }
 impl PartialEq for ScanImage {

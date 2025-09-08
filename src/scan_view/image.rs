@@ -2,6 +2,7 @@ use core::f32;
 use std::sync::Arc;
 
 use eframe::egui_wgpu::{self, CallbackTrait};
+use egui::mutex::RwLock;
 use glam::Affine2;
 use image_compute::image_compute::ImageComputeBuffers;
 
@@ -10,7 +11,7 @@ use crate::scan_view::global::GlobalResources;
 pub(super) struct ImageCallback {
     pub transform: Affine2,
     pub changes: Vec<(usize, Box<[f32]>)>,
-    pub image_buffers: Arc<ImageComputeBuffers>,
+    pub image_buffers: Arc<RwLock<ImageComputeBuffers>>,
 }
 impl CallbackTrait for ImageCallback {
     fn prepare(
@@ -23,6 +24,7 @@ impl CallbackTrait for ImageCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         // Set the new world transform
         self.image_buffers
+            .read()
             .write_world_transform(queue, self.transform);
         vec![]
     }
@@ -39,7 +41,7 @@ impl CallbackTrait for ImageCallback {
         // Draw the image to the screen
         global_res.scan_image_pipeline.draw(
             render_pass,
-            &self.image_buffers,
+            &self.image_buffers.read(),
             &global_res.scan_image_buffers,
         );
     }
