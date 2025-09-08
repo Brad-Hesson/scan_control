@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use eframe::egui_wgpu::{self, CallbackTrait};
 use glam::Affine2;
+use image_compute::image_compute::ImageComputeBuffers;
 
 use crate::scan_view::global::GlobalResources;
 
 pub(super) struct ImageCallback {
     pub transform: Affine2,
     pub changes: Vec<(usize, Box<[f32]>)>,
-    pub image_buffers: Arc<image_compute::ImageComputeBuffers>,
+    pub image_buffers: Arc<ImageComputeBuffers>,
 }
 impl CallbackTrait for ImageCallback {
     fn prepare(

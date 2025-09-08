@@ -12,7 +12,7 @@ use egui::{
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use image_compute::ImageComputePipeline;
+use image_compute::image_compute::{ImageComputeBuffers, ImageComputePipeline};
 use uuid::Uuid;
 
 use crate::{app::COLOR_MAP_SIZE, utils::SelectableMember};
@@ -123,7 +123,7 @@ pub struct ScanImage {
     pub transform: Affine2,
     changes: Vec<(usize, Box<[f32]>)>,
     selected: bool,
-    image_data: Arc<image_compute::ImageComputeBuffers>,
+    image_data: Arc<ImageComputeBuffers>,
 }
 impl ScanImage {
     pub fn new(
@@ -133,7 +133,7 @@ impl ScanImage {
         transform: Affine2,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
-        let image_data = Arc::new(image_compute::ImageComputeBuffers::new(
+        let image_data = Arc::new(ImageComputeBuffers::new(
             &wgpu_state.device,
             None,
             size,

@@ -3,7 +3,7 @@ use eframe::{
     wgpu::{self, Device, TextureFormat},
 };
 use glam::Affine2;
-use image_compute::{ScanImageBuffers, ScanImagePipeline};
+use image_compute::scan_image::{ScanImageBuffers, ScanImagePipeline};
 
 use crate::app::COLOR_MAP_SIZE;
 
