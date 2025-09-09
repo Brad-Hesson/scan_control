@@ -109,12 +109,14 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if let Some(path) = self.file_dialog.take_picked() {
-            if let Err(e) = self
-                .load_file(frame.wgpu_render_state().unwrap(), path)
-                .context("file load failed")
-            {
-                error!("{e:#}");
+        if let Some(paths) = self.file_dialog.take_picked_multiple() {
+            for path in paths{
+                if let Err(e) = self
+                    .load_file(frame.wgpu_render_state().unwrap(), path)
+                    .context("file load failed")
+                {
+                    error!("{e:#}");
+                }
             }
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
@@ -223,7 +225,7 @@ impl eframe::App for MyApp {
 fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
         if ui.add(Button::new("Import")).clicked() {
-            app.file_dialog.pick_file();
+            app.file_dialog.pick_multiple();
         }
     });
     app.file_dialog.update(ctx);
