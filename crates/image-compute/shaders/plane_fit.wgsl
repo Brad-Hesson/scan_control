@@ -53,6 +53,7 @@ fn reduce_image(
         z_sum_wg[local_index] = planarize_out[read_idx];
     } else {
         z_sum_wg[local_index] = 0.;
+        return;
     }
     var stride = WGS >> 1u;
     while stride > 0u {
@@ -62,7 +63,7 @@ fn reduce_image(
         stride >>= 1u;
     }
     if local_index == 0u {
-        planarize_out[workgroup_id.x] = z_sum_wg[0];
+        planarize_out[read_idx] = z_sum_wg[0];
     } else {
         planarize_out[read_idx] = 0.;
     }
@@ -82,6 +83,7 @@ fn reduce_image_lines(
         z_sum_wg[local_index] = planarize_out[idx(sz, global_id.x, col_read_idx)];
     } else {
         z_sum_wg[local_index] = 0.;
+        return;
     }
     var stride = WGS_SQUARE >> 1u;
     while stride > 0u {
@@ -91,7 +93,7 @@ fn reduce_image_lines(
         stride >>= 1u;
     }
     if local_id.y == 0u {
-        planarize_out[idx(sz, global_id.x, workgroup_id.y)] = z_sum_wg[local_id.x];
+        planarize_out[idx(sz, global_id.x, col_read_idx)] = z_sum_wg[local_id.x];
     } else {
         planarize_out[idx(sz, global_id.x, col_read_idx)] = 0.;
     }
@@ -116,16 +118,6 @@ fn generate_sums_lines(@builtin(global_invocation_id) global_index: vec3<u32>) {
     xz[idx(image_size.yx, global_id.y, global_id.x)] = val;
 }
 
-@compute @workgroup_size(WGS)
-fn generate_normalization__mean_subtract(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let i = global_id.x;
-    if i >= image_len() { return; }
-    let basis = calc_basis(i);
-    xz[i] = basis.z;
-    yz[i] = basis.z;
-    std_dev[i] = basis.z * basis.z;
-}
-
 var<workgroup> xz_sum_wg: array<f64, WGS>;
 var<workgroup> yz_sum_wg: array<f64, WGS>;
 @compute @workgroup_size(WGS)
@@ -141,6 +133,7 @@ fn reduce_sums_plane(
     } else {
         xz_sum_wg[local_index] = 0.;
         yz_sum_wg[local_index] = 0.;
+        return;
     }
     var stride = WGS >> 1u;
     while stride > 0u {
@@ -151,8 +144,8 @@ fn reduce_sums_plane(
         stride >>= 1u;
     }
     if local_index == 0u {
-        xz[workgroup_id.x] = xz_sum_wg[0];
-        yz[workgroup_id.x] = yz_sum_wg[0];
+        xz[read_idx] = xz_sum_wg[0];
+        yz[read_idx] = yz_sum_wg[0];
     } else {
         xz[read_idx] = 0.;
         yz[read_idx] = 0.;
@@ -167,12 +160,14 @@ fn reduce_sums_lines(
     @builtin(num_workgroups) num_workgroups: vec3<u32>
 ) {
     let sz = image_size.yx;
+    if global_id.x >= sz.x { return; }
     let local_id = vec2(local_index % WGS_SQUARE, local_index / WGS_SQUARE);
     let col_read_idx = num_workgroups.y * local_id.y + workgroup_id.y;
     if col_read_idx < sz.y && global_id.x < sz.x {
         xz_sum_wg[local_index] = xz[idx(sz, global_id.x, col_read_idx)];
     } else {
         xz_sum_wg[local_index] = 0.;
+        return;
     }
     var stride = WGS_SQUARE >> 1u;
     while stride > 0u {
@@ -182,10 +177,93 @@ fn reduce_sums_lines(
         stride >>= 1u;
     }
     if local_id.y == 0u {
-        xz[idx(sz, global_id.x, workgroup_id.y)] = xz_sum_wg[local_id.x];
+        xz[idx(sz, global_id.x, col_read_idx)] = xz_sum_wg[local_id.x];
     } else {
         xz[idx(sz, global_id.x, col_read_idx)] = 0.;
     }
+}
+
+@compute @workgroup_size(WGS)
+fn generate_normalization__mean_subtract(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x;
+    if i >= image_len() { return; }
+    let basis = calc_basis(i);
+    xz[i] = basis.z;
+    yz[i] = basis.z;
+    std_dev[i] = basis.z * basis.z;
+}
+
+var<workgroup> x_slope: f64;
+var<workgroup> y_slope: f64;
+@compute @workgroup_size(WGS)
+fn generate_normalization__plane_fit(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(local_invocation_index) local_index: u32
+) {
+    let i = global_id.x;
+    if i >= image_len() { return; }
+    if local_index == 0u {
+        let sums = axis_sums();
+        let s_xz = xz[0];
+        let s_yz = yz[0];
+        let s_xx = sums.x;
+        let s_yy = sums.y;
+        x_slope = s_xz / s_xx;
+        y_slope = s_yz / s_yy;
+    }
+    workgroupBarrier();
+    let basis = calc_basis(i);
+    let plane = x_slope * basis.x + y_slope * basis.y;
+    let value = basis.z - plane;
+    xz[i] = value;
+    yz[i] = value;
+    std_dev[i] = value * value;
+    if i == 0u {
+        planarize_out[1] = x_slope;
+        planarize_out[2] = y_slope;
+    }
+}
+
+@compute @workgroup_size(WGS)
+fn copy_line_slopes(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_size.y { return; }
+    let slope = xz[i] / axis_sum();
+    planarize_out[image_size.y + i] = slope;
+}
+
+@compute @workgroup_size(WGS)
+fn generate_normalization__line_fit(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_len() { return; }
+    let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
+    let mean = planarize_out[global_id.y] / f64(image_size.x);
+    let slope = planarize_out[image_size.y + global_id.y];
+    let value = f64(image_in[i]) - mean - slope * mean_center(image_size.x, global_id.x);
+    xz[i] = value;
+    yz[i] = value;
+    std_dev[i] = value * value;
+}
+
+@compute @workgroup_size(WGS)
+fn generate_normalization__line_mean(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_len() { return; }
+    let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
+    let mean = planarize_out[global_id.y] / f64(image_size.x);
+    let value = f64(image_in[i]) - mean;
+    xz[i] = value;
+    yz[i] = value;
+    std_dev[i] = value * value;
 }
 
 var<workgroup> min_wg: array<f64, WGS>;
@@ -203,9 +281,10 @@ fn reduce_normalizations(
         max_wg[local_index] = yz[read_idx];
         std_dev_sum_wg[local_index] = std_dev[read_idx];
     } else {
-        min_wg[local_index] = 0.;
-        max_wg[local_index] = 0.;
+        min_wg[local_index] = f64_pos_infinity();
+        max_wg[local_index] = f64_neg_infinity();
         std_dev_sum_wg[local_index] = 0.;
+        return;
     }
     var stride = WGS >> 1u;
     while stride > 0u {
@@ -217,59 +296,15 @@ fn reduce_normalizations(
         stride >>= 1u;
     }
     if local_index == 0u {
-        xz[workgroup_id.x] = min_wg[0];
-        yz[workgroup_id.x] = max_wg[0];
-        std_dev[workgroup_id.x] = std_dev_sum_wg[0];
+        xz[read_idx] = min_wg[0];
+        yz[read_idx] = max_wg[0];
+        std_dev[read_idx] = std_dev_sum_wg[0];
     } else {
         xz[read_idx] = 0.;
         yz[read_idx] = 0.;
         std_dev[read_idx] = 0.;
     }
 }
-
-// var<workgroup> x_slope: f64;
-// var<workgroup> y_slope: f64;
-// @compute @workgroup_size(WGS)
-// fn subtract_plane(
-//     @builtin(local_invocation_index) local_index: u32,
-//     @builtin(global_invocation_id) global_id: vec3<u32>
-// ) {
-//     let i = global_id.x;
-//     if i >= image_len() { return; }
-//     if local_index == 0u {
-//         let sums = axis_sums();
-//         let s_xz = xz[0];
-//         let s_yz = yz[0];
-//         let s_xx = sums.x;
-//         let s_yy = sums.y;
-//         x_slope = s_xz / s_xx;
-//         y_slope = s_yz / s_yy;
-//     }
-//     workgroupBarrier();
-//     let basis = calc_basis(i);
-//     var plane = x_slope * basis.x + y_slope * basis.y;
-//     image_out[i] = f32(basis.z - plane);
-//     if i == 0u {
-//         planarize_out[1] = x_slope;
-//         planarize_out[2] = y_slope;
-//     }
-// }
-
-// @compute @workgroup_size(WGS)
-// fn subtract_lines(
-//     @builtin(local_invocation_index) local_index: u32,
-//     @builtin(global_invocation_id) global_index: vec3<u32>
-// ) {
-//     let i = global_index.x;
-//     if i >= image_len() { return; }
-//     let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
-//     let mean = planarize_out[global_id.y] / f64(image_size.x);
-//     let slope = xz[global_id.y] / axis_sum();
-//     image_out[i] = f32(f64(image_in[i]) - mean - slope * mean_center(image_size.x, global_id.x));
-//     if global_id.x == 0u {
-//         planarize_out[image_size.y + global_id.y] = slope;
-//     }
-// }
 
 @compute @workgroup_size(WGS)
 fn write__mean_subtract(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -284,6 +319,60 @@ fn write__mean_subtract(@builtin(global_invocation_id) global_id: vec3<u32>) {
         normalize_out.stddev = sqrt(std_dev[0] / f64(image_len()));
     }
 }
+
+@compute @workgroup_size(WGS)
+fn write__plane_fit(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x;
+    if i >= image_len() { return; }
+    let basis = calc_basis(i);
+    let plane = planarize_out[1] * basis.x + planarize_out[2] * basis.y;
+    let value = f32(basis.z - plane);
+    textureStore(texture_out, vec2(global_id.x % image_size.x, global_id.x / image_size.x), vec4(value, 0.0, 0.0, 0.0));
+    if i == 0u {
+        normalize_out.min = xz[0];
+        normalize_out.max = yz[0];
+        normalize_out.stddev = sqrt(std_dev[0] / f64(image_len()));
+    }
+}
+
+@compute @workgroup_size(WGS)
+fn write__line_fit(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_len() { return; }
+    let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
+    let mean = planarize_out[global_id.y] / f64(image_size.x);
+    let slope = planarize_out[image_size.y + global_id.y];
+    let value = f32(f64(image_in[i]) - mean - slope * mean_center(image_size.x, global_id.x));
+    textureStore(texture_out, global_id, vec4(value, 0.0, 0.0, 0.0));
+    if i == 0u {
+        normalize_out.min = xz[0];
+        normalize_out.max = yz[0];
+        normalize_out.stddev = sqrt(std_dev[0] / f64(image_len()));
+    }
+}
+
+@compute @workgroup_size(WGS)
+fn write__line_mean(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_len() { return; }
+    let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
+    let mean = planarize_out[global_id.y] / f64(image_size.x);
+    let value = f32(f64(image_in[i]) - mean);
+    textureStore(texture_out, global_id, vec4(value, 0.0, 0.0, 0.0));
+    if i == 0u {
+        normalize_out.min = xz[0];
+        normalize_out.max = yz[0];
+        normalize_out.stddev = sqrt(std_dev[0] / f64(image_len()));
+    }
+}
+
+// ------------ Helper Functions ------------
 
 fn image_len() -> u32 {
     return image_size.x * image_size.y;
@@ -319,4 +408,20 @@ fn axis_sum() -> f64 {
 }
 fn idx(sz: vec2<u32>, x: u32, y: u32) -> u32 {
     return x + y * sz.x;
+}
+
+fn make_u64(hi: u32, lo: u32) -> u64 {
+    return (u64(hi) << 32u) | u64(lo);
+}
+
+// +Infinity: 0x7FF0_0000_0000_0000
+fn f64_pos_infinity() -> f64 {
+    let bits = make_u64(0x7FF00000u, 0x00000000u);
+    return bitcast<f64>(bits);
+}
+
+// -Infinity: 0xFFF0_0000_0000_0000
+fn f64_neg_infinity() -> f64 {
+    let bits = make_u64(0xFFF00000u, 0x00000000u);
+    return bitcast<f64>(bits);
 }

@@ -6,7 +6,3 @@ pub mod scan_image {
     #![allow(dead_code, non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/scan_image.rs"));
 }
-pub mod plane_fit_32 {
-    #![allow(dead_code, non_snake_case)]
-    include!(concat!(env!("OUT_DIR"), "/plane_fit_32.rs"));
-}

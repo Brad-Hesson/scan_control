@@ -185,7 +185,11 @@ impl ScanImage {
         ctx.ui.painter().add(callback);
         resp
     }
-    pub fn update_texture(&self, wgpu_state: &RenderState, image_encoder: &mut ImageEncoder) {
+    pub fn write_texture_mean_subtract(
+        &self,
+        wgpu_state: &RenderState,
+        image_encoder: &mut ImageEncoder,
+    ) {
         let mut encoder = wgpu_state
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
@@ -195,6 +199,69 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             image_encoder.pipeline.dispatch_mean_subtract(
+                &wgpu_state.device,
+                &mut pass,
+                &self.image_data.read(),
+            );
+        }
+        wgpu_state.queue.submit([encoder.finish()]);
+    }
+    pub fn write_texture_plane_fit_subtract(
+        &self,
+        wgpu_state: &RenderState,
+        image_encoder: &mut ImageEncoder,
+    ) {
+        let mut encoder = wgpu_state
+            .device
+            .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            image_encoder.pipeline.dispatch_plane_fit_subtract(
+                &wgpu_state.device,
+                &mut pass,
+                &self.image_data.read(),
+            );
+        }
+        wgpu_state.queue.submit([encoder.finish()]);
+    }
+    pub fn write_texture_line_fit_subtract(
+        &self,
+        wgpu_state: &RenderState,
+        image_encoder: &mut ImageEncoder,
+    ) {
+        let mut encoder = wgpu_state
+            .device
+            .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            image_encoder.pipeline.dispatch_line_fit_subtract(
+                &wgpu_state.device,
+                &mut pass,
+                &self.image_data.read(),
+            );
+        }
+        wgpu_state.queue.submit([encoder.finish()]);
+    }
+    pub fn write_texture_line_mean_subtract(
+        &self,
+        wgpu_state: &RenderState,
+        image_encoder: &mut ImageEncoder,
+    ) {
+        let mut encoder = wgpu_state
+            .device
+            .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            image_encoder.pipeline.dispatch_line_mean_subtract(
                 &wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),

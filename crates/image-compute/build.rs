@@ -4,12 +4,12 @@ use wgsl_to_wgpu::{MatrixVectorTypes, WriteOptions, create_shader_module};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     generate_wgsl_bindings("plane_fit", "plane_fit", |_| {})?;
-    generate_wgsl_bindings("plane_fit", "plane_fit_32", |src| {
-        *src = src
-            .lines()
-            .map(|s| s.replace("f64", "f32"))
-            .fold(String::new(), |a, b| a + &b + "\n");
-    })?;
+    // generate_wgsl_bindings("plane_fit", "plane_fit_32", |src| {
+    //     *src = src
+    //         .lines()
+    //         .map(|s| s.replace("f64", "f32"))
+    //         .fold(String::new(), |a, b| a + &b + "\n");
+    // })?;
     generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
     Ok(())
 }

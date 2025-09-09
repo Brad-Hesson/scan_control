@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use glam::Affine2;
-use itertools::{Itertools, chain, izip};
+use itertools::{Itertools, izip};
 pub use shaders::plane_fit::NormalizeData;
 use tracing::info;
 use wgpu::{
@@ -112,7 +112,7 @@ impl ImageComputeBuffers {
             None,
             BufferUsages::UNIFORM | BufferUsages::COPY_SRC,
             1,
-            |data| data[0] = NormalizationType::MinMax.into(),
+            |data| data[0] = NormalizationType::StdDev(3.).into(),
         );
         let normalize_buffer = StorageBuffer::<shaders::plane_fit::NormalizeData>::new(
             &device,
@@ -255,6 +255,7 @@ impl ScratchBuffers {
     }
 }
 
+#[allow(non_snake_case)]
 pub struct ImageComputePipeline {
     copy_image: ComputePipeline,
     copy_image_transpose: ComputePipeline,
@@ -266,14 +267,21 @@ pub struct ImageComputePipeline {
     reduce_sums_lines: ComputePipeline,
     reduce_normalizations: ComputePipeline,
     generate_normalization__mean_subtract: ComputePipeline,
+    generate_normalization__plane_fit: ComputePipeline,
+    generate_normalization__line_fit: ComputePipeline,
+    generate_normalization__line_mean: ComputePipeline,
+    copy_line_slopes: ComputePipeline,
     write__mean_subtract: ComputePipeline,
+    write__plane_fit: ComputePipeline,
+    write__line_fit: ComputePipeline,
+    write__line_mean: ComputePipeline,
     qs: QuerySet,
     qs_buf: StorageBuffer<u64>,
     scratch_buffers: ScratchBuffers,
 }
 impl ImageComputePipeline {
     pub fn new(device: &Device) -> Self {
-        let n_timings = 5;
+        let n_timings = 8;
         Self {
             copy_image: shaders::plane_fit::compute::create_copy_image_pipeline(device),
             copy_image_transpose: shaders::plane_fit::compute::create_copy_image_transpose_pipeline(
@@ -301,9 +309,25 @@ impl ImageComputePipeline {
                 shaders::plane_fit::compute::create_generate_normalization__mean_subtract_pipeline(
                     device,
                 ),
+            generate_normalization__plane_fit:
+                shaders::plane_fit::compute::create_generate_normalization__plane_fit_pipeline(
+                    device,
+                ),
+            generate_normalization__line_fit:
+                shaders::plane_fit::compute::create_generate_normalization__line_fit_pipeline(
+                    device,
+                ),
+            generate_normalization__line_mean:
+                shaders::plane_fit::compute::create_generate_normalization__line_mean_pipeline(
+                    device,
+                ),
+            copy_line_slopes: shaders::plane_fit::compute::create_copy_line_slopes_pipeline(device),
             write__mean_subtract: shaders::plane_fit::compute::create_write__mean_subtract_pipeline(
                 device,
             ),
+            write__plane_fit: shaders::plane_fit::compute::create_write__plane_fit_pipeline(device),
+            write__line_fit: shaders::plane_fit::compute::create_write__line_fit_pipeline(device),
+            write__line_mean: shaders::plane_fit::compute::create_write__line_mean_pipeline(device),
             qs: device.create_query_set(&QuerySetDescriptor {
                 label: Some("plane_fitter_qs"),
                 ty: QueryType::Timestamp,
@@ -367,84 +391,175 @@ impl ImageComputePipeline {
 
         qs_n / 2
     }
-    // pub fn run_subtract_plane(
-    //     &self,
-    //     pass: &mut ComputePass,
-    //     scratch_buffers: &PlaneFitterBuffers,
-    // ) -> usize {
-    //     let mut qs_n = 0;
-    //     let mut wts = |pass: &mut ComputePass| {
-    //         pass.write_timestamp(&self.qs, qs_n as u32);
-    //         qs_n += 1;
-    //     };
-    //     scratch_buffers.bg.set(pass);
+    pub fn dispatch_plane_fit_subtract(
+        &mut self,
+        device: &Device,
+        pass: &mut ComputePass,
+        image: &ImageComputeBuffers,
+    ) -> usize {
+        let mut qs_n = 0;
+        let mut wts = |pass: &mut ComputePass| {
+            pass.write_timestamp(&self.qs, qs_n as u32);
+            qs_n += 1;
+        };
+        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
+            info!("Reallocating scratch buffers to {:?}", image.size);
+            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        }
 
-    //     pass.set_pipeline(&self.copy_image);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        self.scratch_buffers.bg.set(pass);
+        image.image_src_bg.set(pass);
+        image.normalize_bg.set(pass);
+        let size = image.current_size();
 
-    //     pass.set_pipeline(&self.reduce_image);
-    //     wts(pass);
-    //     dispatch_reduction(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.copy_image);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.generate_sums_plane);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.reduce_image);
+        wts(pass);
+        dispatch_reduction(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.reduce_sums_plane);
-    //     wts(pass);
-    //     dispatch_reduction(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.generate_sums_plane);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.subtract_plane);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.reduce_sums_plane);
+        wts(pass);
+        dispatch_reduction(pass, size);
+        wts(pass);
 
-    //     qs_n / 2
-    // }
-    // pub fn run_subtract_lines(
-    //     &self,
-    //     pass: &mut ComputePass,
-    //     scratch_buffers: &PlaneFitterBuffers,
-    // ) -> usize {
-    //     let mut qs_n = 0;
-    //     let mut wts = |pass: &mut ComputePass| {
-    //         pass.write_timestamp(&self.qs, qs_n as u32);
-    //         qs_n += 1;
-    //     };
-    //     scratch_buffers.bg.set(pass);
+        pass.set_pipeline(&self.generate_normalization__plane_fit);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.copy_image_transpose);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.reduce_normalizations);
+        wts(pass);
+        dispatch_reduction(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.reduce_image_lines);
-    //     wts(pass);
-    //     dispatch_y_reduction(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.write__plane_fit);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
 
-    //     pass.set_pipeline(&self.generate_sums_lines);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        qs_n / 2
+    }
+    pub fn dispatch_line_fit_subtract(
+        &mut self,
+        device: &Device,
+        pass: &mut ComputePass,
+        image: &ImageComputeBuffers,
+    ) -> usize {
+        let mut qs_n = 0;
+        let mut wts = |pass: &mut ComputePass| {
+            pass.write_timestamp(&self.qs, qs_n as u32);
+            qs_n += 1;
+        };
+        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
+            info!("Reallocating scratch buffers to {:?}", image.size);
+            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        }
 
-    //     pass.set_pipeline(&self.reduce_sums_lines);
-    //     wts(pass);
-    //     dispatch_y_reduction(pass, scratch_buffers.size);
-    //     wts(pass);
+        self.scratch_buffers.bg.set(pass);
+        image.image_src_bg.set(pass);
+        image.normalize_bg.set(pass);
+        let size = image.current_size();
 
-    //     pass.set_pipeline(&self.subtract_lines);
-    //     wts(pass);
-    //     dispatch_linear(pass, scratch_buffers.size);
-    //     wts(pass);
+        pass.set_pipeline(&self.copy_image_transpose);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
 
-    //     qs_n / 2
-    // }
+        pass.set_pipeline(&self.reduce_image_lines);
+        wts(pass);
+        dispatch_y_reduction(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.generate_sums_lines);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.reduce_sums_lines);
+        wts(pass);
+        dispatch_y_reduction(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.copy_line_slopes);
+        wts(pass);
+        dispatch_linear(pass, [size[1], 1]);
+        wts(pass);
+
+        pass.set_pipeline(&self.generate_normalization__line_fit);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.reduce_normalizations);
+        wts(pass);
+        dispatch_reduction(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.write__line_fit);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        qs_n / 2
+    }
+    pub fn dispatch_line_mean_subtract(
+        &mut self,
+        device: &Device,
+        pass: &mut ComputePass,
+        image: &ImageComputeBuffers,
+    ) -> usize {
+        let mut qs_n = 0;
+        let mut wts = |pass: &mut ComputePass| {
+            pass.write_timestamp(&self.qs, qs_n as u32);
+            qs_n += 1;
+        };
+        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
+            info!("Reallocating scratch buffers to {:?}", image.size);
+            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        }
+
+        self.scratch_buffers.bg.set(pass);
+        image.image_src_bg.set(pass);
+        image.normalize_bg.set(pass);
+        let size = image.current_size();
+
+        pass.set_pipeline(&self.copy_image_transpose);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.reduce_image_lines);
+        wts(pass);
+        dispatch_y_reduction(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.generate_normalization__line_mean);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.reduce_normalizations);
+        wts(pass);
+        dispatch_reduction(pass, size);
+        wts(pass);
+
+        pass.set_pipeline(&self.write__line_mean);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        qs_n / 2
+    }
     pub fn queue_timings_download(
         &self,
         device: &Device,

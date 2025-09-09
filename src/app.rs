@@ -28,7 +28,7 @@ pub struct AppState {
     scan_view: ScanView,
     images: Vec<ScanImage>,
     current_scan: ScanImage,
-    src_sxm: SXM,
+    current_scan_src: Box<[f32]>,
 }
 
 impl MyApp {
@@ -41,18 +41,27 @@ impl MyApp {
         //         .try_into()
         //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
         // );
+
+        let src_sxm = SXM::parse_file("20240229_075.sxm").unwrap();
+        let width = 97;
+        let mut current_scan_src = vec![];
+        let src_size = src_sxm.get_image_size().unwrap();
+        for y in 0..src_size[1] as usize {
+            let line = &src_sxm.data[0][0][y * src_size[0] as usize..][..width];
+            current_scan_src.extend_from_slice(line);
+        }
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(wgpu),
                 images: vec![],
                 current_scan: ScanImage::new(
                     wgpu,
-                    [512, 512],
+                    [width as u32, 512],
                     0,
-                    Affine2::from_scale([512., 512.].into()),
+                    Affine2::from_scale([width as _, 512.].into()),
                     |_| {},
                 ),
-                src_sxm: SXM::parse_file("20240229_066.sxm").unwrap(),
+                current_scan_src: current_scan_src.into_boxed_slice(),
             },
             image_encoder: ImageEncoder::new(wgpu),
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -85,7 +94,7 @@ impl MyApp {
         let scan_image = ScanImage::new(wgpu_state, size, size[1], transform, |data_mut| {
             data_mut.copy_from_slice(&file.data[0][0]);
         });
-        scan_image.update_texture(wgpu_state, &mut self.image_encoder);
+        scan_image.write_texture_plane_fit_subtract(wgpu_state, &mut self.image_encoder);
         self.mod_state(
             Some(scan_image),
             |state, data| state.images.push(data.take().unwrap()),
@@ -110,7 +119,7 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
-            for path in paths{
+            for path in paths {
                 if let Err(e) = self
                     .load_file(frame.wgpu_render_state().unwrap(), path)
                     .context("file load failed")
@@ -156,14 +165,14 @@ impl eframe::App for MyApp {
         {
             let render_state = frame.wgpu_render_state().unwrap();
             let [x, y] = self.app_state.current_scan.current_size();
-            let line = &self.app_state.src_sxm.data[0][0][x as usize * y as usize..][..x as usize];
+            let line = &self.app_state.current_scan_src[x as usize * y as usize..][..x as usize];
             self.app_state
                 .current_scan
                 .write_line(render_state, line)
                 .unwrap();
             self.app_state
                 .current_scan
-                .update_texture(render_state, &mut self.image_encoder);
+                .write_texture_plane_fit_subtract(render_state, &mut self.image_encoder);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -198,6 +207,11 @@ impl eframe::App for MyApp {
                         if selected.is_some() {
                             self.app_state.images.set_selected_idx(selected);
                         }
+                        BorderRectangle {
+                            transform: self.app_state.current_scan.transform,
+                            color: Color32::RED,
+                        }
+                        .show(ctx);
                         self.app_state.current_scan.show(ctx);
                         if let Some(hov_i) = hovered {
                             BorderRectangle {
