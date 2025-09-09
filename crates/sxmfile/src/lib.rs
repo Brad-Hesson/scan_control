@@ -116,6 +116,15 @@ impl SXM {
                 .context("SCAN_OFFSET y value parse error")?,
         ])
     }
+    pub fn get_datetime(&self) -> Result<chrono::NaiveDateTime> {
+        let date_raw = self.get_metadata("REC_DATE")?;
+        let date = chrono::NaiveDate::parse_from_str(date_raw, "%d.%m.%Y")
+            .context("failed to parse date")?;
+        let time_raw = self.get_metadata("REC_TIME")?;
+        let time = chrono::NaiveTime::parse_from_str(time_raw, "%H:%M:%S")
+            .context("failed to parse time")?;
+        Ok(date.and_time(time))
+    }
     #[inline]
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self> {
         Self::parse(BufReader::new(std::fs::File::open(path)?))
