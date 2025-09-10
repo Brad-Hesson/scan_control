@@ -7,6 +7,7 @@ use std::{
 
 use eyre::{Context, ContextCompat, Result, bail, ensure};
 use itertools::Itertools;
+use typed_path::WindowsPath;
 
 pub struct SXM {
     pub metadata: Vec<(Box<str>, Box<str>)>,
@@ -124,6 +125,10 @@ impl SXM {
         let time = chrono::NaiveTime::parse_from_str(time_raw, "%H:%M:%S")
             .context("failed to parse time")?;
         Ok(date.and_time(time))
+    }
+    pub fn get_scan_file_path(&self) -> Result<&WindowsPath> {
+        let path_str = self.get_metadata("SCAN_FILE")?;
+        Ok(WindowsPath::new(path_str))
     }
     #[inline]
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self> {

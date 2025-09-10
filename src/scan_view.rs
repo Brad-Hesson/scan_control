@@ -283,21 +283,6 @@ impl ScanImage {
         self.current_size() == self.image_data.read().capacity()
     }
 }
-impl PartialEq for ScanImage {
-    fn eq(&self, other: &Self) -> bool {
-        self.uuid == other.uuid
-    }
-}
-impl Eq for ScanImage {}
-impl SelectableMember for ScanImage {
-    fn set_selected(&mut self, selected: bool) {
-        self.selected = selected;
-    }
-
-    fn is_selected(&self) -> bool {
-        self.selected
-    }
-}
 
 pub struct ImageEncoder {
     pipeline: ImageComputePipeline,

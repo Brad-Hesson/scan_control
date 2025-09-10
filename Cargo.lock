@@ -3081,6 +3081,7 @@ dependencies = [
  "chrono",
  "eyre",
  "itertools",
+ "typed-path",
 ]
 
 [[package]]
@@ -3329,6 +3330,12 @@ checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
 dependencies = [
  "rustc-hash 2.1.1",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c462d18470a2857aa657d338af5fa67170bb48bcc80a296710ce3b0802a32566"
 
 [[package]]
 name = "uds_windows"
