@@ -6,7 +6,7 @@ use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::UndoQueue;
 use crate::utils::{SelectableMember, SelectableVecExt as _};
 use eframe::egui_wgpu::RenderState;
-use egui::{Button, MenuBar, Ui};
+use egui::{Button, Image, MenuBar, Response, Ui, Widget};
 use egui::{Color32, Sense};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, ContextCompat, Result};
@@ -20,8 +20,9 @@ pub struct MyApp {
     file_dialog: ViewportFileDialog,
     app_state: AppState,
     image_encoder: ImageEncoder,
-    undo_queue: UndoQueue<AppState>, // gradient: egui_colorgradient::Gradient,
-                                     // last_gradient: egui_colorgradient::Gradient,
+    undo_queue: UndoQueue<AppState>,
+    image_list_responses: Vec<Response>,
+    list_open: bool,
 }
 
 pub struct AppState {
@@ -65,8 +66,9 @@ impl MyApp {
             },
             image_encoder: ImageEncoder::new(wgpu),
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
-            undo_queue: UndoQueue::new(), // last_gradient: gradient.clone(),
-                                          // gradient,
+            undo_queue: UndoQueue::new(),
+            image_list_responses: Vec::new(),
+            list_open: true,
         }
     }
     pub fn mod_state<T: Any>(
@@ -179,32 +181,22 @@ impl eframe::App for MyApp {
             let (scale, _, translation) = tr.to_scale_angle_translation();
             ui.label(format!("scale: {scale}, translation: {translation}"));
         });
-        egui::SidePanel::left("list").show(ctx, |ui| {
-            for img in &mut self.app_state.images {
-                let name = match img
-                    .image_src
-                    .get_scan_file_path()
-                    .and_then(|path| path.file_stem().context("path was not a file"))
-                    .and_then(|bytes| {
-                        str::from_utf8(bytes).context("file name was not valid utf-8")
-                    })
-                    .context("failed to get name from file")
-                {
-                    Ok(name) => name,
-                    Err(e) => {
-                        error!("{e:#}");
-                        "unnamed"
+        egui::SidePanel::left("list")
+            .resizable(false)
+            .show_animated(ctx, self.list_open, |ui| {
+                self.image_list_responses.clear();
+                for i in (0..self.app_state.images.len()).into_iter().rev() {
+                    let item_response = ui.add(image_list_item(&self.app_state.images[i]));
+                    if item_response.hovered() {
+                        self.app_state.images[i].hovered = true;
                     }
-                };
-                let label = ui.add(egui::Label::new(name).sense(Sense::HOVER));
-                if label.hovered() {
-                    img.hovered = true;
+                    if item_response.clicked() {
+                        self.app_state.images.set_selected_idx(Some(i));
+                    }
+                    self.image_list_responses.push(item_response);
                 }
-                if img.hovered {
-                    label.highlight();
-                }
-            }
-        });
+                self.image_list_responses.reverse();
+            });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -233,13 +225,16 @@ impl eframe::App for MyApp {
                         }
                         .show(ctx);
                         self.app_state.current_scan.show(ctx);
-                        for img in &self.app_state.images {
+                        for (i, img) in self.app_state.images.iter().enumerate() {
                             if img.hovered {
                                 BorderRectangle {
                                     transform: img.image_data.transform,
                                     color: Color32::LIGHT_BLUE,
                                 }
                                 .show(ctx);
+                                if self.list_open {
+                                    self.image_list_responses.remove(i).highlight();
+                                }
                             }
                         }
                         if let Some(img) = self.app_state.images.get_selected() {
@@ -254,6 +249,14 @@ impl eframe::App for MyApp {
                 {
                     self.app_state.images.set_selected_idx(None);
                 };
+            });
+        let button_pos = if self.list_open { 0.0 } else { 0.0 };
+        egui::Area::new(egui::Id::new("side_handle"))
+            .fixed_pos(egui::pos2(button_pos, 48.0))
+            .show(ctx, |ui| {
+                if ui.button("▶").clicked() {
+                    self.list_open = !self.list_open;
+                }
             });
     }
 }
@@ -295,9 +298,7 @@ impl StaticImage {
             hovered: false,
         })
     }
-    pub fn set_hovered(){
-        
-    }
+    pub fn set_hovered() {}
 }
 impl SelectableMember for StaticImage {
     fn set_selected(&mut self, selected: bool) {
@@ -314,3 +315,27 @@ impl PartialEq for StaticImage {
     }
 }
 impl Eq for StaticImage {}
+
+fn image_list_item(image: &StaticImage) -> impl Widget {
+    let name = match image
+        .image_src
+        .get_scan_file_path()
+        .and_then(|path| path.file_stem().context("path was not a file"))
+        .and_then(|bytes| str::from_utf8(bytes).context("file name was not valid utf-8"))
+        .context("failed to get name from file")
+    {
+        Ok(name) => name,
+        Err(e) => {
+            error!("{e:#}");
+            "unnamed"
+        }
+    };
+    egui::widgets::Button::new((
+        Image::new(egui::include_image!("../assets/scan_image_icon.png"))
+            .fit_to_exact_size(egui::Vec2::new(20., 20.)),
+        name,
+    ))
+    .frame(true)
+    .selected(image.selected)
+    .wrap_mode(egui::TextWrapMode::Extend)
+}
