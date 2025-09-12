@@ -1,16 +1,19 @@
 use std::any::Any;
+use std::ops::RangeBounds;
 use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
+use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::UndoQueue;
 use crate::utils::{SelectableMember, SelectableVecExt as _};
 use eframe::egui_wgpu::RenderState;
-use egui::{Button, Image, MenuBar, Response, Ui, Widget};
+use egui::{Atoms, Button, Image, IntoAtoms, Key, MenuBar, Response, Ui, Widget};
 use egui::{Color32, Sense};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, ContextCompat, Result};
 use glam::{Affine2, Vec2};
+use itertools::Itertools;
 use sxmfile::SXM;
 use tracing::{error, info};
 
@@ -27,7 +30,7 @@ pub struct MyApp {
 
 pub struct AppState {
     scan_view: ScanView,
-    images: Vec<StaticImage>,
+    image_list: SelectableList<StaticImage>,
     current_scan: ScanImage,
     current_scan_src: Box<[f32]>,
 }
@@ -54,7 +57,7 @@ impl MyApp {
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(wgpu),
-                images: vec![],
+                image_list: SelectableList::new(),
                 current_scan: ScanImage::new(
                     wgpu,
                     [width as u32, 512],
@@ -89,10 +92,11 @@ impl MyApp {
         static_image
             .image_data
             .write_texture_plane_fit_subtract(wgpu_state, &mut self.image_encoder);
+        let entry = SelectableEntry::new(static_image, image_list_item);
         self.mod_state(
-            Some(static_image),
-            |state, data| state.images.push(data.take().unwrap()),
-            |state, data| *data = Some(state.images.pop().unwrap()),
+            Some(entry),
+            |state, data| state.image_list.push(data.take().unwrap()),
+            |state, data| *data = Some(state.image_list.pop().unwrap()),
         );
 
         Ok(())
@@ -112,9 +116,6 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        for img in &mut self.app_state.images {
-            img.hovered = false;
-        }
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
             for path in paths {
                 if let Err(e) = self
@@ -130,26 +131,28 @@ impl eframe::App for MyApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
-            if let Some(i) = self.app_state.images.get_selected_index() {
-                if i + 1 < self.app_state.images.len() {
-                    self.mod_state(
-                        (),
-                        move |state, _| state.images.swap(i, i + 1),
-                        move |state, _| state.images.swap(i, i + 1),
-                    );
-                }
-            }
+            let indexes = self
+                .app_state
+                .image_list
+                .iter_selected_indexes()
+                .collect_vec();
+            self.mod_state(
+                (indexes, Vec::new()),
+                |state, indexes| indexes.1 = dbg!(state.image_list.move_indexes_down(&indexes.0)),
+                |state, indexes| indexes.0 = dbg!(state.image_list.move_indexes_up(&indexes.1)),
+            );
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
-            if let Some(i) = self.app_state.images.get_selected_index() {
-                if i > 0 {
-                    self.mod_state(
-                        (),
-                        move |state, _| state.images.swap(i, i - 1),
-                        move |state, _| state.images.swap(i, i - 1),
-                    );
-                }
-            }
+            let indexes = self
+                .app_state
+                .image_list
+                .iter_selected_indexes()
+                .collect_vec();
+            self.mod_state(
+                (indexes, Vec::new()),
+                |state, indexes| indexes.1 = dbg!(state.image_list.move_indexes_up(&indexes.0)),
+                |state, indexes| indexes.0 = dbg!(state.image_list.move_indexes_down(&indexes.1)),
+            );
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
             self.undo_queue.undo(&mut self.app_state);
@@ -184,18 +187,7 @@ impl eframe::App for MyApp {
         egui::SidePanel::left("list")
             .resizable(false)
             .show_animated(ctx, self.list_open, |ui| {
-                self.image_list_responses.clear();
-                for i in (0..self.app_state.images.len()).into_iter().rev() {
-                    let item_response = ui.add(image_list_item(&self.app_state.images[i]));
-                    if item_response.hovered() {
-                        self.app_state.images[i].hovered = true;
-                    }
-                    if item_response.clicked() {
-                        self.app_state.images.set_selected_idx(Some(i));
-                    }
-                    self.image_list_responses.push(item_response);
-                }
-                self.image_list_responses.reverse();
+                self.app_state.image_list.show(ui);
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -206,18 +198,22 @@ impl eframe::App for MyApp {
                     .app_state
                     .scan_view
                     .show(ui, |ctx| {
+                        let images = &mut self.app_state.image_list;
                         let mut selected = None;
-                        for (i, image) in self.app_state.images.iter_mut().enumerate() {
-                            let resp = image.image_data.show(ctx);
+                        for i in 0..images.len() {
+                            let resp = images[i].image_data.show(ctx);
                             if resp.clicked() {
+                                if !ctx.ui.input(|i| i.modifiers.ctrl) {
+                                    images.clear_selected();
+                                };
                                 selected = Some(i);
                             }
                             if resp.hovered() {
-                                image.hovered = true;
+                                images.set_hovered(i);
                             }
                         }
-                        if selected.is_some() {
-                            self.app_state.images.set_selected_idx(selected);
+                        if let Some(i) = selected {
+                            images[i].selected = true;
                         }
                         BorderRectangle {
                             transform: self.app_state.current_scan.transform,
@@ -225,21 +221,16 @@ impl eframe::App for MyApp {
                         }
                         .show(ctx);
                         self.app_state.current_scan.show(ctx);
-                        for (i, img) in self.app_state.images.iter().enumerate() {
-                            if img.hovered {
-                                BorderRectangle {
-                                    transform: img.image_data.transform,
-                                    color: Color32::LIGHT_BLUE,
-                                }
-                                .show(ctx);
-                                if self.list_open {
-                                    self.image_list_responses.remove(i).highlight();
-                                }
-                            }
-                        }
-                        if let Some(img) = self.app_state.images.get_selected() {
+                        if let Some(img) = images.get_hovered() {
                             BorderRectangle {
                                 transform: img.image_data.transform,
+                                color: Color32::LIGHT_BLUE,
+                            }
+                            .show(ctx);
+                        }
+                        for i in images.iter_selected_indexes() {
+                            BorderRectangle {
+                                transform: images[i].image_data.transform,
                                 color: Color32::GREEN,
                             }
                             .show(ctx);
@@ -247,7 +238,7 @@ impl eframe::App for MyApp {
                     })
                     .clicked()
                 {
-                    self.app_state.images.set_selected_idx(None);
+                    self.app_state.image_list.clear_selected();
                 };
             });
         let button_pos = if self.list_open { 0.0 } else { 0.0 };
@@ -271,11 +262,8 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
 }
 
 struct StaticImage {
-    uuid: uuid::Uuid,
     image_data: ScanImage,
     image_src: SXM,
-    selected: bool,
-    hovered: bool,
 }
 impl StaticImage {
     pub fn load_sxm(sxm_file: SXM, wgpu_state: &RenderState) -> Result<Self> {
@@ -291,32 +279,14 @@ impl StaticImage {
             data_mut.copy_from_slice(&sxm_file.data[0][0]);
         });
         Ok(Self {
-            uuid: uuid::Uuid::new_v4(),
             image_data: scan_image,
             image_src: sxm_file,
-            selected: false,
-            hovered: false,
         })
     }
     pub fn set_hovered() {}
 }
-impl SelectableMember for StaticImage {
-    fn set_selected(&mut self, selected: bool) {
-        self.selected = selected;
-    }
 
-    fn is_selected(&self) -> bool {
-        self.selected
-    }
-}
-impl PartialEq for StaticImage {
-    fn eq(&self, other: &Self) -> bool {
-        self.uuid == other.uuid
-    }
-}
-impl Eq for StaticImage {}
-
-fn image_list_item(image: &StaticImage) -> impl Widget {
+fn image_list_item(image: &StaticImage) -> Atoms {
     let name = match image
         .image_src
         .get_scan_file_path()
@@ -330,12 +300,10 @@ fn image_list_item(image: &StaticImage) -> impl Widget {
             "unnamed"
         }
     };
-    egui::widgets::Button::new((
+    (
         Image::new(egui::include_image!("../assets/scan_image_icon.png"))
             .fit_to_exact_size(egui::Vec2::new(20., 20.)),
         name,
-    ))
-    .frame(true)
-    .selected(image.selected)
-    .wrap_mode(egui::TextWrapMode::Extend)
+    )
+        .into_atoms()
 }

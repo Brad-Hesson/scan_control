@@ -117,6 +117,16 @@ impl SXM {
                 .context("SCAN_OFFSET y value parse error")?,
         ])
     }
+    pub fn get_scan_angle(&self) -> Result<f32> {
+        let mut pos = self
+            .get_metadata("SCAN_ANGLE")?
+            .split_ascii_whitespace()
+            .map(str::parse);
+        Ok(pos
+            .next()
+            .wrap_err("SCAN_ANGLE value missing")?
+            .context("SCAN_ANGLE value parse error")?)
+    }
     pub fn get_datetime(&self) -> Result<chrono::NaiveDateTime> {
         let date_raw = self.get_metadata("REC_DATE")?;
         let date = chrono::NaiveDate::parse_from_str(date_raw, "%d.%m.%Y")
