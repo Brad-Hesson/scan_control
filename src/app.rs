@@ -138,8 +138,8 @@ impl eframe::App for MyApp {
                 .collect_vec();
             self.mod_state(
                 (indexes, Vec::new()),
-                |state, indexes| indexes.1 = dbg!(state.image_list.move_indexes_down(&indexes.0)),
-                |state, indexes| indexes.0 = dbg!(state.image_list.move_indexes_up(&indexes.1)),
+                |state, indexes| indexes.1 = state.image_list.move_indexes_down(&indexes.0),
+                |state, indexes| indexes.0 = state.image_list.move_indexes_up(&indexes.1),
             );
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
@@ -150,8 +150,8 @@ impl eframe::App for MyApp {
                 .collect_vec();
             self.mod_state(
                 (indexes, Vec::new()),
-                |state, indexes| indexes.1 = dbg!(state.image_list.move_indexes_up(&indexes.0)),
-                |state, indexes| indexes.0 = dbg!(state.image_list.move_indexes_down(&indexes.1)),
+                |state, indexes| indexes.1 = state.image_list.move_indexes_up(&indexes.0),
+                |state, indexes| indexes.0 = state.image_list.move_indexes_down(&indexes.1),
             );
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {

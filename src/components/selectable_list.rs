@@ -22,7 +22,7 @@ impl<T> SelectableList<T> {
                 response = response.highlight();
             }
             if response.clicked() {
-                if !ui.input(|i| i.modifiers.ctrl){
+                if !ui.input(|i| i.modifiers.ctrl) {
                     self.clear_selected();
                 }
                 self[i].selected = true;
@@ -62,14 +62,15 @@ impl<T> SelectableList<T> {
     }
     pub fn move_indexes_down(&mut self, indexes: &[usize]) -> Vec<usize> {
         let mut moved = Vec::new();
-        for (i, index) in indexes.into_iter().copied().enumerate().rev() {
-            dbg!(i, index);
+        for (i, index) in indexes.into_iter().copied().rev().enumerate() {
+            let i = self.len() - i - 1;
             if i == index {
                 continue;
             }
             self.swap(index, index + 1);
             moved.push(index + 1);
         }
+        moved.reverse();
         moved
     }
 }
@@ -86,6 +87,13 @@ impl<T> DerefMut for SelectableList<T> {
     }
 }
 
+#[test]
+fn feature() {
+    let a = vec![6, 5, 4, 3];
+    for (i, idx) in a.into_iter().enumerate().rev() {
+        dbg!(i, idx);
+    }
+}
 pub struct SelectableEntry<T> {
     pub inner: T,
     pub selected: bool,
