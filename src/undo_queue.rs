@@ -1,43 +1,27 @@
 use std::any::Any;
 
-struct StateModifier<S> {
-    redo: Box<dyn Fn(&mut S, &mut Box<dyn Any>)>,
-    undo: Box<dyn Fn(&mut S, &mut Box<dyn Any>)>,
-    user_data: Box<dyn Any>,
-}
-
 pub struct UndoQueue<S> {
-    queue: Vec<StateModifier<S>>,
+    queue: Vec<Box<dyn StateModify<S>>>,
     index: usize,
 }
-impl<S> UndoQueue<S> {
+impl<S: 'static> UndoQueue<S> {
     pub fn new() -> Self {
         Self {
             queue: Vec::new(),
             index: 0,
         }
     }
-    pub fn push<T: Any>(
-        &mut self,
-        app_state: &mut S,
-        user_data: T,
-        redo: impl Fn(&mut S, &mut T) + 'static,
-        undo: impl Fn(&mut S, &mut T) + 'static,
-    ) {
+    pub fn push<T: StateModify<S>>(&mut self, app_state: &mut S, mut modifier: T) {
+        if !modifier.redo(app_state) {
+            return;
+        }
         self.queue.truncate(self.index);
-        let mut user_data: Box<dyn Any> = Box::new(user_data);
-        let redo = move |state: &mut S, data: &mut Box<dyn Any>| {
-            redo(state, data.downcast_mut().unwrap());
-        };
-        let undo = move |state: &mut S, data: &mut Box<dyn Any>| {
-            undo(state, data.downcast_mut().unwrap());
-        };
-        redo(app_state, &mut user_data);
-        self.queue.push(StateModifier {
-            undo: Box::new(undo),
-            redo: Box::new(redo),
-            user_data,
-        });
+        if let Some(prev) = self.queue.last_mut() {
+            if modifier.combine(prev.as_mut()) {
+                return;
+            }
+        }
+        self.queue.push(Box::new(modifier));
         self.index += 1;
     }
     pub fn undo(&mut self, app_state: &mut S) {
@@ -46,14 +30,49 @@ impl<S> UndoQueue<S> {
         }
         self.index -= 1;
         let entry = &mut self.queue[self.index];
-        (&entry.undo)(app_state, &mut entry.user_data);
+        entry.undo(app_state);
     }
     pub fn redo(&mut self, app_state: &mut S) {
         if self.index == self.queue.len() {
             return;
         }
         let entry = &mut self.queue[self.index];
-        (&entry.redo)(app_state, &mut entry.user_data);
+        entry.redo(app_state);
         self.index += 1;
+    }
+}
+
+pub trait StateModify<S>: Any {
+    fn redo<'s>(&mut self, state: &'s mut S) -> bool;
+    fn undo<'s>(&mut self, state: &'s mut S);
+    fn combine(&mut self, previous: &mut dyn StateModify<S>) -> bool {
+        false
+    }
+}
+
+impl<S, F> StateModify<S> for F
+where
+    F: Fn(&mut S) -> bool + 'static,
+{
+    fn redo<'s>(&mut self, state: &'s mut S) -> bool {
+        self(state)
+    }
+
+    fn undo<'s>(&mut self, state: &'s mut S) {
+        self(state);
+    }
+}
+
+impl<S, F1, F2> StateModify<S> for (F1, F2)
+where
+    F1: Fn(&mut S) -> bool + 'static,
+    F2: Fn(&mut S) + 'static,
+{
+    fn redo<'s>(&mut self, state: &'s mut S) -> bool {
+        self.0(state)
+    }
+
+    fn undo<'s>(&mut self, state: &'s mut S) {
+        self.1(state);
     }
 }

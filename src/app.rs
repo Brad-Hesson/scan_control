@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
-use crate::undo_queue::UndoQueue;
+use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::{SelectableMember, SelectableVecExt as _};
 use eframe::egui_wgpu::RenderState;
 use egui::{Atoms, Button, Image, IntoAtoms, Key, MenuBar, Response, Ui, Widget};
@@ -74,14 +74,8 @@ impl MyApp {
             list_open: true,
         }
     }
-    pub fn mod_state<T: Any>(
-        &mut self,
-        user_data: T,
-        redo: impl Fn(&mut AppState, &mut T) + 'static,
-        undo: impl Fn(&mut AppState, &mut T) + 'static,
-    ) {
-        self.undo_queue
-            .push(&mut self.app_state, user_data, redo, undo);
+    pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
+        self.undo_queue.push(&mut self.app_state, modifier);
     }
     fn load_file(&mut self, wgpu_state: &RenderState, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
@@ -93,12 +87,7 @@ impl MyApp {
             .image_data
             .write_texture_plane_fit_subtract(wgpu_state, &mut self.image_encoder);
         let entry = SelectableEntry::new(static_image, image_list_item);
-        self.mod_state(
-            Some(entry),
-            |state, data| state.image_list.push(data.take().unwrap()),
-            |state, data| *data = Some(state.image_list.pop().unwrap()),
-        );
-
+        self.mod_state(LoadImageModifier(Some(entry)));
         Ok(())
     }
     // fn update_gradient(&mut self) {
@@ -136,11 +125,7 @@ impl eframe::App for MyApp {
                 .image_list
                 .iter_selected_indexes()
                 .collect_vec();
-            self.mod_state(
-                (indexes, Vec::new()),
-                |state, indexes| indexes.1 = state.image_list.move_indexes_down(&indexes.0),
-                |state, indexes| indexes.0 = state.image_list.move_indexes_up(&indexes.1),
-            );
+            self.mod_state(MoveForwardModifier(indexes));
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
             let indexes = self
@@ -148,11 +133,7 @@ impl eframe::App for MyApp {
                 .image_list
                 .iter_selected_indexes()
                 .collect_vec();
-            self.mod_state(
-                (indexes, Vec::new()),
-                |state, indexes| indexes.1 = state.image_list.move_indexes_up(&indexes.0),
-                |state, indexes| indexes.0 = state.image_list.move_indexes_down(&indexes.1),
-            );
+            self.mod_state(MoveBackwardModifier(indexes));
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
             self.undo_queue.undo(&mut self.app_state);
@@ -306,4 +287,41 @@ fn image_list_item(image: &StaticImage) -> Atoms {
         name,
     )
         .into_atoms()
+}
+
+struct LoadImageModifier(Option<SelectableEntry<StaticImage>>);
+impl StateModify<AppState> for LoadImageModifier {
+    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+        state.image_list.push(self.0.take().unwrap());
+        true
+    }
+
+    fn undo<'s>(&mut self, state: &'s mut AppState) {
+        let mut entry = state.image_list.pop().unwrap();
+        entry.selected = false;
+        self.0 = Some(entry);
+    }
+}
+
+struct MoveForwardModifier(Vec<usize>);
+impl StateModify<AppState> for MoveForwardModifier {
+    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+        self.0 = state.image_list.move_indexes_down(&self.0);
+        !self.0.is_empty()
+    }
+
+    fn undo<'s>(&mut self, state: &'s mut AppState) {
+        self.0 = state.image_list.move_indexes_up(&self.0)
+    }
+}
+struct MoveBackwardModifier(Vec<usize>);
+impl StateModify<AppState> for MoveBackwardModifier {
+    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+        self.0 = state.image_list.move_indexes_up(&self.0);
+        !self.0.is_empty()
+    }
+
+    fn undo<'s>(&mut self, state: &'s mut AppState) {
+        self.0 = state.image_list.move_indexes_down(&self.0)
+    }
 }
