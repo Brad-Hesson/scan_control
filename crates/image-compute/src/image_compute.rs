@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    ops::RangeBounds,
+    sync::{Arc, OnceLock},
+};
 
 use glam::Affine2;
 use itertools::{Itertools, izip};
@@ -199,21 +202,30 @@ impl ImageComputeBuffers {
     pub fn capacity(&self) -> [u32; 2] {
         self.size
     }
-    pub fn download_normalize_data(
+    pub fn download_normalize_data<W>(
         &self,
         device: &Device,
         queue: &Queue,
-    ) -> Arc<OnceLock<NormalizeData>> {
+        f: impl FnOnce(&NormalizeData) -> W + Send + 'static,
+    ) -> Arc<OnceLock<W>>
+    where
+        W: Sync + Send + std::fmt::Debug + 'static,
+    {
         self.normalize_buffer
-            .queue_download_with(device, queue, ..1, |d| d[0])
+            .queue_download_with(device, queue, ..1, |data| f(&data[0]))
     }
-    pub fn download_planarize_data(
+    pub fn download_planarize_data<W>(
         &self,
         device: &Device,
         queue: &Queue,
-        len: usize,
-    ) -> Arc<OnceLock<Box<[f64]>>> {
-        self.planarize_buffer.queue_download(device, queue, ..len)
+        range: impl RangeBounds<usize>,
+        f: impl FnOnce(&[f64]) -> W + Send + 'static,
+    ) -> Arc<OnceLock<W>>
+    where
+        W: Sync + Send + std::fmt::Debug + 'static,
+    {
+        self.planarize_buffer
+            .queue_download_with(device, queue, range, f)
     }
 }
 

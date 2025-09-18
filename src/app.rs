@@ -1,21 +1,19 @@
-use std::any::Any;
-use std::ops::RangeBounds;
+use std::fmt::Display;
 use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
-use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
+use crate::scan_view::{BorderRectangle, FitData, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
-use crate::utils::{SelectableMember, SelectableVecExt as _};
 use eframe::egui_wgpu::RenderState;
-use egui::{Atoms, Button, Image, IntoAtoms, Key, MenuBar, Response, Ui, Widget};
-use egui::{Color32, Sense};
+use egui::Color32;
+use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
-use eyre::{Context, ContextCompat, Result};
+use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
 use itertools::Itertools;
 use sxmfile::SXM;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -24,8 +22,6 @@ pub struct MyApp {
     app_state: AppState,
     image_encoder: ImageEncoder,
     undo_queue: UndoQueue<AppState>,
-    image_list_responses: Vec<Response>,
-    list_open: bool,
 }
 
 pub struct AppState {
@@ -70,8 +66,6 @@ impl MyApp {
             image_encoder: ImageEncoder::new(wgpu),
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(),
-            image_list_responses: Vec::new(),
-            list_open: true,
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -165,11 +159,6 @@ impl eframe::App for MyApp {
             let (scale, _, translation) = tr.to_scale_angle_translation();
             ui.label(format!("scale: {scale}, translation: {translation}"));
         });
-        egui::SidePanel::left("list")
-            .resizable(false)
-            .show_animated(ctx, self.list_open, |ui| {
-                self.app_state.image_list.show(ui);
-            });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -221,13 +210,48 @@ impl eframe::App for MyApp {
                 {
                     self.app_state.image_list.clear_selected();
                 };
-            });
-        let button_pos = if self.list_open { 0.0 } else { 0.0 };
-        egui::Area::new(egui::Id::new("side_handle"))
-            .fixed_pos(egui::pos2(button_pos, 48.0))
-            .show(ctx, |ui| {
-                if ui.button("▶").clicked() {
-                    self.list_open = !self.list_open;
+                egui::Window::new("Images")
+                    .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                    .constrain_to(ui.min_rect())
+                    .anchor(Align2::LEFT_TOP, egui::Vec2::new(5., 5.))
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        let vis = &mut ui.style_mut().visuals.widgets.inactive;
+                        vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
+                        self.app_state.image_list.show(ui);
+                    });
+                let mut new_top = egui::Window::new("Current Scan")
+                    .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                    .constrain_to(ui.min_rect())
+                    .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
+                    .resizable(false)
+                    .show(ctx, |ui| image_menu(ui, &self.app_state.current_scan))
+                    .unwrap()
+                    .response
+                    .rect
+                    .bottom();
+                for i in self.app_state.image_list.iter_selected_indexes() {
+                    let name = match self.app_state.image_list[i].image_src.get_name() {
+                        Ok(name) => name,
+                        Err(e) => {
+                            error!("{e:#}");
+                            "unnamed"
+                        }
+                    };
+                    let mut rect = ui.min_rect();
+                    rect.set_top(new_top);
+                    new_top = egui::Window::new(name)
+                        .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                        .constrain_to(rect)
+                        .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            image_menu(ui, &self.app_state.image_list[i].image_data)
+                        })
+                        .unwrap()
+                        .response
+                        .rect
+                        .bottom();
                 }
             });
     }
@@ -240,6 +264,28 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
         }
     });
     app.file_dialog.update(ctx);
+}
+fn image_menu(ui: &mut Ui, image: &ScanImage) {
+    let vis = &mut ui.style_mut().visuals.widgets.inactive;
+    vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
+    if let Some(data) = image.norm_data.read().as_ref() {
+        ui.label(format!("Min: {:.2}", MetersFmt(data.min)));
+        ui.label(format!("Max: {:.2}", MetersFmt(data.max)));
+        ui.label(format!("Std Dev: {:.2}", MetersFmt(data.stddev)));
+    }
+    if let Some(data) = image.fit_data.read().as_ref() {
+        match data {
+            FitData::PlaneFit {
+                mean,
+                x_slope,
+                y_slope,
+            } => {
+                ui.label(format!("Mean: {:.2}", MetersFmt(*mean)));
+                ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
+                ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
+            }
+        }
+    }
 }
 
 struct StaticImage {
@@ -264,17 +310,10 @@ impl StaticImage {
             image_src: sxm_file,
         })
     }
-    pub fn set_hovered() {}
 }
 
 fn image_list_item(image: &StaticImage) -> Atoms {
-    let name = match image
-        .image_src
-        .get_scan_file_path()
-        .and_then(|path| path.file_stem().context("path was not a file"))
-        .and_then(|bytes| str::from_utf8(bytes).context("file name was not valid utf-8"))
-        .context("failed to get name from file")
-    {
+    let name = match image.image_src.get_name() {
         Ok(name) => name,
         Err(e) => {
             error!("{e:#}");
@@ -323,5 +362,36 @@ impl StateModify<AppState> for MoveBackwardModifier {
 
     fn undo<'s>(&mut self, state: &'s mut AppState) {
         self.0 = state.image_list.move_indexes_down(&self.0)
+    }
+}
+
+#[repr(transparent)]
+struct MetersFmt(f64);
+impl Display for MetersFmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mag = (self.0.abs().log10() / 3.).floor();
+        let scaled = self.0 / (10f64).powf(mag * 3.);
+        let suf = match mag as i32 {
+            4 => Some("Tm"),
+            3 => Some("Gm"),
+            2 => Some("Mm"),
+            1 => Some("km"),
+            0 => Some("m"),
+            -1 => Some("mm"),
+            -2 => Some("μm"),
+            -3 => Some("nm"),
+            -4 => Some("pm"),
+            -5 => Some("fm"),
+            _ => None,
+        };
+        if let Some(suf) = suf {
+            warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
+            f64::fmt(&scaled, f)?;
+            write!(f, " {}", suf)?;
+        } else {
+            f64::fmt(&self.0, f)?;
+            write!(f, " m")?;
+        }
+        Ok(())
     }
 }

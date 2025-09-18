@@ -140,6 +140,12 @@ impl SXM {
         let path_str = self.get_metadata("SCAN_FILE")?;
         Ok(WindowsPath::new(path_str))
     }
+    pub fn get_name(&self) -> Result<&str> {
+        self.get_scan_file_path()
+            .and_then(|path| path.file_stem().context("path was not a file"))
+            .and_then(|bytes| str::from_utf8(bytes).context("file name was not valid utf-8"))
+            .context("failed to get name from file")
+    }
     #[inline]
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self> {
         Self::parse(BufReader::new(std::fs::File::open(path)?))

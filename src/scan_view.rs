@@ -13,7 +13,9 @@ use egui::{
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use image_compute::image_compute::{ImageComputeBuffers, ImageComputePipeline, WriteLinesError};
+use image_compute::image_compute::{
+    ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
+};
 use sxmfile::SXM;
 use uuid::Uuid;
 
@@ -124,8 +126,9 @@ pub struct ScanImage {
     uuid: Uuid,
     pub transform: Affine2,
     changes: Vec<(usize, Box<[f32]>)>,
-    selected: bool,
     image_data: Arc<RwLock<ImageComputeBuffers>>,
+    pub fit_data: Arc<RwLock<Option<FitData>>>,
+    pub norm_data: Arc<RwLock<Option<NormalizeData>>>,
 }
 impl ScanImage {
     pub fn new(
@@ -146,9 +149,10 @@ impl ScanImage {
         Self {
             uuid: Uuid::new_v4(),
             transform,
-            selected: false,
             image_data,
             changes: vec![],
+            fit_data: Arc::new(RwLock::new(None)),
+            norm_data: Arc::new(RwLock::new(None)),
         }
     }
     pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
@@ -226,6 +230,27 @@ impl ScanImage {
             );
         }
         wgpu_state.queue.submit([encoder.finish()]);
+        let norm_data = self.norm_data.clone();
+        let fit_data = self.fit_data.clone();
+        let image_data = self.image_data.clone();
+        let device = wgpu_state.device.clone();
+        let queue = wgpu_state.queue.clone();
+        wgpu_state.queue.on_submitted_work_done(move || {
+            image_data
+                .read()
+                .download_normalize_data(&device, &queue, move |data| {
+                    *norm_data.write() = Some(*data)
+                });
+            image_data
+                .read()
+                .download_planarize_data(&device, &queue, ..3, move |data| {
+                    *fit_data.write() = Some(FitData::PlaneFit {
+                        mean: data[0],
+                        x_slope: data[1],
+                        y_slope: data[2],
+                    })
+                });
+        });
     }
     pub fn write_texture_line_fit_subtract(
         &self,
@@ -282,6 +307,14 @@ impl ScanImage {
     pub fn is_full(&self) -> bool {
         self.current_size() == self.image_data.read().capacity()
     }
+}
+
+pub enum FitData {
+    PlaneFit {
+        mean: f64,
+        x_slope: f64,
+        y_slope: f64,
+    },
 }
 
 pub struct ImageEncoder {
