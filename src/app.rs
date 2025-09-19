@@ -75,7 +75,7 @@ impl MyApp {
     fn load_file(&mut self, wgpu_state: &RenderState, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         info!("Trying to load image `{}`", path.display());
-        let sxm_file = sxmfile::SXM::parse_file(&path)?;
+        let sxm_file = sxmfile::SXM::parse_file(path)?;
         info!("Loaded image `{}`", path.display());
         let static_image = StaticImage::load_sxm(sxm_file, wgpu_state)?;
         static_image
@@ -321,12 +321,12 @@ fn image_list_item(image: &StaticImage) -> Atoms<'_> {
 
 struct LoadImageModifier(Option<SelectableEntry<StaticImage>>);
 impl StateModify<AppState> for LoadImageModifier {
-    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+    fn redo(&mut self, state: &mut AppState) -> bool {
         state.image_list.push(self.0.take().unwrap());
         true
     }
 
-    fn undo<'s>(&mut self, state: &'s mut AppState) {
+    fn undo(&mut self, state: &mut AppState) {
         let mut entry = state.image_list.pop().unwrap();
         entry.selected = false;
         self.0 = Some(entry);
@@ -335,23 +335,23 @@ impl StateModify<AppState> for LoadImageModifier {
 
 struct MoveForwardModifier(Vec<usize>);
 impl StateModify<AppState> for MoveForwardModifier {
-    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+    fn redo(&mut self, state: &mut AppState) -> bool {
         self.0 = state.image_list.move_indexes_down(&self.0);
         !self.0.is_empty()
     }
 
-    fn undo<'s>(&mut self, state: &'s mut AppState) {
+    fn undo(&mut self, state: &mut AppState) {
         self.0 = state.image_list.move_indexes_up(&self.0)
     }
 }
 struct MoveBackwardModifier(Vec<usize>);
 impl StateModify<AppState> for MoveBackwardModifier {
-    fn redo<'s>(&mut self, state: &'s mut AppState) -> bool {
+    fn redo(&mut self, state: &mut AppState) -> bool {
         self.0 = state.image_list.move_indexes_up(&self.0);
         !self.0.is_empty()
     }
 
-    fn undo<'s>(&mut self, state: &'s mut AppState) {
+    fn undo(&mut self, state: &mut AppState) {
         self.0 = state.image_list.move_indexes_down(&self.0)
     }
 }

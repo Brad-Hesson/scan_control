@@ -56,8 +56,7 @@ impl SXM {
             "expected `DATA_INFO` header to be `{expected_header:?}` but got `{header:?}`"
         );
         let mut out = vec![];
-        let mut lines = lines.enumerate();
-        while let Some((i, line)) = lines.next() {
+        for (i, line) in lines.enumerate() {
             let [channel, name, unit, dir, cal, off] = line
                 .trim()
                 .split("\t")
@@ -122,10 +121,9 @@ impl SXM {
             .get_metadata("SCAN_ANGLE")?
             .split_ascii_whitespace()
             .map(str::parse);
-        Ok(pos
-            .next()
+        pos.next()
             .wrap_err("SCAN_ANGLE value missing")?
-            .context("SCAN_ANGLE value parse error")?)
+            .context("SCAN_ANGLE value parse error")
     }
     pub fn get_datetime(&self) -> Result<chrono::NaiveDateTime> {
         let date_raw = self.get_metadata("REC_DATE")?;
@@ -155,7 +153,7 @@ impl SXM {
         reader.read_until(0x04, &mut meta)?;
 
         let mut out = Self {
-            metadata: Self::parse_metadata(&mut meta).context("failed to parse metadata")?,
+            metadata: Self::parse_metadata(&meta).context("failed to parse metadata")?,
             data: vec![],
         };
 

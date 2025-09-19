@@ -17,7 +17,7 @@ impl<T> SelectableList<T> {
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
-        for i in (0..self.items.len()).into_iter().rev() {
+        for i in (0..self.items.len()).rev() {
             let mut response = ui
                 .add(list_item(&self.items[i]))
                 .synchronize(&mut self.items[i].resp_group);
@@ -62,11 +62,11 @@ impl<T> SelectableList<T> {
             .filter_map(|(i, item)| item.selected.then_some(i))
     }
     pub fn iter_selected(&self) -> impl Iterator<Item = &SelectableEntry<T>> {
-        self.iter().filter_map(|item| item.selected.then_some(item))
+        self.iter().filter(|item| item.selected)
     }
     pub fn move_indexes_up(&mut self, indexes: &[usize]) -> Vec<usize> {
         let mut moved = Vec::new();
-        for (i, index) in indexes.into_iter().copied().enumerate() {
+        for (i, index) in indexes.iter().copied().enumerate() {
             if i == index {
                 continue;
             }
@@ -77,7 +77,7 @@ impl<T> SelectableList<T> {
     }
     pub fn move_indexes_down(&mut self, indexes: &[usize]) -> Vec<usize> {
         let mut moved = Vec::new();
-        for (i, index) in indexes.into_iter().copied().rev().enumerate() {
+        for (i, index) in indexes.iter().copied().rev().enumerate() {
             let i = self.len() - i - 1;
             if i == index {
                 continue;

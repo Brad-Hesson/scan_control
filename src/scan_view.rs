@@ -158,7 +158,7 @@ impl ScanImage {
         let resp = ctx
             .ui
             .input(|i| i.pointer.latest_pos())
-            .map(|pos| {
+            .and_then(|pos| {
                 let [x, y] =
                     (Affine2::from_translation(<[f32; 2]>::from(ctx.rect.center()).into())
                         * ctx.world_transform
@@ -175,7 +175,6 @@ impl ScanImage {
                     )
                 })
             })
-            .flatten()
             .unwrap_or_else(|| neutral_response(ctx.ui, egui::Id::new(self.uuid)));
         let callback = egui_wgpu::Callback::new_paint_callback(
             ctx.rect,

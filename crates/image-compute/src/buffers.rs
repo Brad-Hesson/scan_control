@@ -83,7 +83,7 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
     {
         self.queue_download_with(device, queue, range, |r| r.to_vec().into_boxed_slice())
     }
-    pub fn as_entire_buffer_binding(&self) -> BufferBinding {
+    pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.inner.as_entire_buffer_binding()
     }
     pub fn buffer_ref(&self) -> &Buffer {
@@ -118,7 +118,7 @@ impl TransformBuffer {
         mat4.w_axis.y = transform.translation.y;
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
     }
-    pub fn as_entire_buffer_binding(&self) -> BufferBinding {
+    pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.0.as_entire_buffer_binding()
     }
 }

@@ -73,7 +73,7 @@ impl ImageComputeBuffers {
     ) -> Self {
         let size_buffer_label = label.map(|name| format!("{name}_size_buffer"));
         let image_size_buffer = StorageBuffer::new(
-            &device,
+            device,
             size_buffer_label.as_deref(),
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             2,
@@ -84,7 +84,7 @@ impl ImageComputeBuffers {
         );
         let data_buffer_label = label.map(|name| format!("{name}_data_buffer"));
         let image_data_buffer = StorageBuffer::new(
-            &device,
+            device,
             data_buffer_label.as_deref(),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
             size[0] as usize * size[1] as usize,
@@ -118,21 +118,21 @@ impl ImageComputeBuffers {
             |data| data[0] = NormalizationType::StdDev(3.).into(),
         );
         let normalize_buffer = StorageBuffer::<shaders::plane_fit::NormalizeData>::new(
-            &device,
+            device,
             Some("normalize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::UNIFORM,
             1,
             |_| {},
         );
         let planarize_buffer = StorageBuffer::<f64>::new(
-            &device,
+            device,
             Some("planarize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             size[0] as usize * size[1] as usize,
             |_| {},
         );
         let image_src_bg = shaders::plane_fit::bind_groups::BindGroup0::from_bindings(
-            &device,
+            device,
             shaders::plane_fit::bind_groups::BindGroupLayout0 {
                 image_size: image_size_buffer.as_entire_buffer_binding(),
                 image_in: image_data_buffer.as_entire_buffer_binding(),
@@ -148,7 +148,7 @@ impl ImageComputeBuffers {
             },
         );
         let normalize_bg = shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
-            &device,
+            device,
             shaders::plane_fit::bind_groups::BindGroupLayout1 {
                 texture_out: &image_texture.create_view(&TextureViewDescriptor::default()),
                 planarize_out: planarize_buffer.as_entire_buffer_binding(),
@@ -253,7 +253,7 @@ impl ScratchBuffers {
         Self {
             size,
             bg: shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
-                &device,
+                device,
                 shaders::plane_fit::bind_groups::BindGroupLayout2 {
                     xz: xz.as_entire_buffer_binding(),
                     yz: yz.as_entire_buffer_binding(),
