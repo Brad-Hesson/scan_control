@@ -10,11 +10,15 @@ use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};
 
 pub struct SelectableList<T> {
     items: Vec<SelectableEntry<T>>,
+    last_selected: Option<usize>,
 }
 
 impl<T> SelectableList<T> {
     pub fn new() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            last_selected: None,
+        }
     }
     pub fn show(&mut self, ui: &mut Ui) {
         for i in (0..self.items.len()).into_iter().rev() {
@@ -25,10 +29,23 @@ impl<T> SelectableList<T> {
                 response = response.highlight();
             }
             if response.clicked() {
-                if !ui.input(|i| i.modifiers.ctrl) {
+                if ui.input(|i| i.modifiers.shift) && self.last_selected.is_some() {
+                    let mut i = i as isize;
+                    let last = self.last_selected.unwrap() as isize;
+                    let add = ((i < last) as isize) * 2 - 1;
+                    while i != last {
+                        self.items[i as usize].selected = true;
+                        i += add;
+                    }
+                } else if ui.input(|i| i.modifiers.ctrl) {
+                    self[i].selected = !self[i].selected;
+                } else {
                     self.clear_selected();
+                    self[i].selected = true;
                 }
-                self[i].selected = true;
+                if self[i].selected {
+                    self.last_selected = Some(i);
+                }
             }
         }
     }
@@ -41,6 +58,7 @@ impl<T> SelectableList<T> {
         for item in &mut self.items {
             item.selected = false;
         }
+        self.last_selected = None;
     }
     pub fn iter_selected_indexes<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
         self.iter()
@@ -88,13 +106,6 @@ impl<T> DerefMut for SelectableList<T> {
     }
 }
 
-#[test]
-fn feature() {
-    let a = vec![6, 5, 4, 3];
-    for (i, idx) in a.into_iter().enumerate().rev() {
-        dbg!(i, idx);
-    }
-}
 pub struct SelectableEntry<T> {
     pub inner: T,
     pub selected: bool,
