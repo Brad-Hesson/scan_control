@@ -1,10 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use egui::{
-    ahash::{HashSet, HashSetExt},
-    Atoms, Context, Response, Ui, Widget,
-};
-use tracing::info;
+use egui::{Atoms, Context, Ui, Widget};
 
 use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};
 
