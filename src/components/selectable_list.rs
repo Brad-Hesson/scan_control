@@ -6,7 +6,7 @@ use egui::{
 };
 use tracing::info;
 
-use crate::utils::response_group::{ResponseGroup, ResponseGroupExt as ResponseGroupExt};
+use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};
 
 pub struct SelectableList<T> {
     items: Vec<SelectableEntry<T>>,
@@ -46,6 +46,9 @@ impl<T> SelectableList<T> {
         self.iter()
             .enumerate()
             .filter_map(|(i, item)| item.selected.then_some(i))
+    }
+    pub fn iter_selected(&self) -> impl Iterator<Item = &SelectableEntry<T>> {
+        self.iter().filter_map(|item| item.selected.then_some(item))
     }
     pub fn move_indexes_up(&mut self, indexes: &[usize]) -> Vec<usize> {
         let mut moved = Vec::new();

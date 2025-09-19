@@ -169,8 +169,8 @@ impl eframe::App for MyApp {
                     .app_state
                     .scan_view
                     .show(ui, |ctx| {
-                        let images = &mut self.app_state.image_list;
-                        for image in images.iter_mut() {
+                        let image_list = &mut self.app_state.image_list;
+                        for image in image_list.iter_mut() {
                             image
                                 .image_data
                                 .show(ctx)
@@ -182,16 +182,16 @@ impl eframe::App for MyApp {
                         }
                         .show(ctx);
                         self.app_state.current_scan.show(ctx);
-                        if let Some(img) = images.get_hovered(ctx.ui.ctx()) {
+                        if let Some(image) = image_list.get_hovered(ctx.ui.ctx()) {
                             BorderRectangle {
-                                transform: img.image_data.transform,
+                                transform: image.image_data.transform,
                                 color: Color32::LIGHT_BLUE,
                             }
                             .show(ctx);
                         }
-                        for i in images.iter_selected_indexes() {
+                        for image in image_list.iter_selected() {
                             BorderRectangle {
-                                transform: images[i].image_data.transform,
+                                transform: image.image_data.transform,
                                 color: Color32::GREEN,
                             }
                             .show(ctx);
