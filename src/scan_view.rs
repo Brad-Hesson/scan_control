@@ -16,10 +16,9 @@ use image::ImageCallback;
 use image_compute::image_compute::{
     ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
 };
-use sxmfile::SXM;
 use uuid::Uuid;
 
-use crate::{app::COLOR_MAP_SIZE, utils::SelectableMember};
+use crate::app::COLOR_MAP_SIZE;
 
 mod global;
 mod image;

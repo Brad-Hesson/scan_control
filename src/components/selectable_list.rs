@@ -1,7 +1,12 @@
-use std::ops::{Bound, Deref, DerefMut, RangeBounds};
+use std::ops::{Deref, DerefMut};
 
-use egui::{Atoms, Response, Ui, Widget};
-use itertools::Itertools;
+use egui::{
+    ahash::{HashSet, HashSetExt},
+    Atoms, Context, Response, Ui, Widget,
+};
+use tracing::info;
+
+use crate::utils::response_group::{ResponseGroup, ResponseGroupExt as ResponseGroupExt};
 
 pub struct SelectableList<T> {
     items: Vec<SelectableEntry<T>>,
@@ -12,13 +17,11 @@ impl<T> SelectableList<T> {
         Self { items: Vec::new() }
     }
     pub fn show(&mut self, ui: &mut Ui) {
-        for item in &mut self.items {
-            item.hovered = false;
-        }
         for i in (0..self.items.len()).into_iter().rev() {
-            let mut response = ui.add(list_item(&self.items[i]));
+            let mut response = ui
+                .add(list_item(&self.items[i]))
+                .synchronize(&mut self.items[i].resp_group);
             if response.hovered() {
-                self.items[i].hovered = true;
                 response = response.highlight();
             }
             if response.clicked() {
@@ -27,8 +30,12 @@ impl<T> SelectableList<T> {
                 }
                 self[i].selected = true;
             }
-            self.items[i].response = Some(response);
         }
+    }
+    pub fn get_hovered(&self, ctx: &Context) -> Option<&SelectableEntry<T>> {
+        self.items
+            .iter()
+            .find_map(|item| item.resp_group.response(ctx)?.hovered().then_some(item))
     }
     pub fn clear_selected(&mut self) {
         for item in &mut self.items {
@@ -39,15 +46,6 @@ impl<T> SelectableList<T> {
         self.iter()
             .enumerate()
             .filter_map(|(i, item)| item.selected.then_some(i))
-    }
-    pub fn set_hovered(&mut self, i: usize) {
-        self.items[i].hovered = true;
-        if let Some(resp) = self.items[i].response.take() {
-            self.items[i].response = Some(resp.highlight());
-        }
-    }
-    pub fn get_hovered(&self) -> Option<&SelectableEntry<T>> {
-        self.iter().find(|e| e.hovered)
     }
     pub fn move_indexes_up(&mut self, indexes: &[usize]) -> Vec<usize> {
         let mut moved = Vec::new();
@@ -97,8 +95,7 @@ fn feature() {
 pub struct SelectableEntry<T> {
     pub inner: T,
     pub selected: bool,
-    hovered: bool,
-    response: Option<Response>,
+    pub resp_group: ResponseGroup,
     construct_fn: Box<dyn Fn(&T) -> Atoms>,
 }
 impl<T> SelectableEntry<T> {
@@ -106,9 +103,8 @@ impl<T> SelectableEntry<T> {
         Self {
             inner: data,
             selected: false,
-            hovered: false,
-            response: None,
             construct_fn: Box::new(construct_fn),
+            resp_group: ResponseGroup::new(),
         }
     }
 }

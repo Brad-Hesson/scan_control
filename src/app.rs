@@ -5,6 +5,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, FitData, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
+use crate::utils::response_group::ResponseGroupExt as _;
 use eframe::egui_wgpu::RenderState;
 use egui::Color32;
 use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Ui};
@@ -169,21 +170,11 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let images = &mut self.app_state.image_list;
-                        let mut selected = None;
-                        for i in 0..images.len() {
-                            let resp = images[i].image_data.show(ctx);
-                            if resp.clicked() {
-                                if !ctx.ui.input(|i| i.modifiers.ctrl) {
-                                    images.clear_selected();
-                                };
-                                selected = Some(i);
-                            }
-                            if resp.hovered() {
-                                images.set_hovered(i);
-                            }
-                        }
-                        if let Some(i) = selected {
-                            images[i].selected = true;
+                        for image in images.iter_mut() {
+                            image
+                                .image_data
+                                .show(ctx)
+                                .synchronize(&mut image.resp_group);
                         }
                         BorderRectangle {
                             transform: self.app_state.current_scan.transform,
@@ -191,7 +182,7 @@ impl eframe::App for MyApp {
                         }
                         .show(ctx);
                         self.app_state.current_scan.show(ctx);
-                        if let Some(img) = images.get_hovered() {
+                        if let Some(img) = images.get_hovered(ctx.ui.ctx()) {
                             BorderRectangle {
                                 transform: img.image_data.transform,
                                 color: Color32::LIGHT_BLUE,
@@ -312,7 +303,7 @@ impl StaticImage {
     }
 }
 
-fn image_list_item(image: &StaticImage) -> Atoms {
+fn image_list_item(image: &StaticImage) -> Atoms<'_> {
     let name = match image.image_src.get_name() {
         Ok(name) => name,
         Err(e) => {
