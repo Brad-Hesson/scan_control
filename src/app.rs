@@ -170,11 +170,17 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let image_list = &mut self.app_state.image_list;
-                        for image in image_list.iter_mut() {
-                            image
-                                .image_data
-                                .show(ctx)
-                                .synchronize(&mut image.resp_group);
+                        for i in 0..image_list.len() {
+                            let resp = image_list[i].image_data.show(ctx);
+                            resp.clone().synchronize(&mut image_list[i].resp_group);
+                            if resp.clicked() {
+                                if ctx.ui.input(|i| i.modifiers.ctrl) {
+                                    image_list[i].selected = !image_list[i].selected;
+                                } else {
+                                    image_list.clear_selected();
+                                    image_list[i].selected = true;
+                                }
+                            }
                         }
                         BorderRectangle {
                             transform: self.app_state.current_scan.transform,
