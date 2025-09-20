@@ -172,7 +172,7 @@ impl eframe::App for MyApp {
                         let image_list = &mut self.app_state.image_list;
                         for i in 0..image_list.len() {
                             let resp = image_list[i].image_data.show(ctx);
-                            resp.clone().synchronize(&mut image_list[i].resp_group);
+                            let resp_sync = resp.clone().synchronize(&mut image_list[i].resp_group);
                             if resp.clicked() {
                                 if ctx.ui.input(|i| i.modifiers.ctrl) {
                                     image_list[i].selected = !image_list[i].selected;
@@ -181,10 +181,27 @@ impl eframe::App for MyApp {
                                     image_list[i].selected = true;
                                 }
                             }
+                            if resp_sync.hovered() {
+                                BorderRectangle {
+                                    transform: image_list[i].image_data.transform,
+                                    color: Color32::LIGHT_BLUE,
+                                    dashed: false,
+                                }
+                                .show(ctx);
+                            }
+                            if image_list[i].selected {
+                                BorderRectangle {
+                                    transform: image_list[i].image_data.transform,
+                                    color: Color32::GREEN,
+                                    dashed: false,
+                                }
+                                .show(ctx);
+                            }
                         }
                         BorderRectangle {
                             transform: self.app_state.current_scan.transform,
                             color: Color32::RED,
+                            dashed: false,
                         }
                         .show(ctx);
                         self.app_state.current_scan.show(ctx);
@@ -192,6 +209,7 @@ impl eframe::App for MyApp {
                             BorderRectangle {
                                 transform: image.image_data.transform,
                                 color: Color32::LIGHT_BLUE,
+                                dashed: true,
                             }
                             .show(ctx);
                         }
@@ -199,6 +217,7 @@ impl eframe::App for MyApp {
                             BorderRectangle {
                                 transform: image.image_data.transform,
                                 color: Color32::GREEN,
+                                dashed: true,
                             }
                             .show(ctx);
                         }

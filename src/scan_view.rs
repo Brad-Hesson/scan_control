@@ -8,7 +8,7 @@ use eframe::{
 use egui::{
     epaint::{PathShape, PathStroke},
     mutex::RwLock,
-    Color32, Pos2, Rect, Response, Sense,
+    Color32, Pos2, Rect, Response, Sense, Shape, Stroke,
 };
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
@@ -328,6 +328,7 @@ impl ImageEncoder {
 pub struct BorderRectangle {
     pub transform: Affine2,
     pub color: Color32,
+    pub dashed: bool,
 }
 impl BorderRectangle {
     pub fn show(&mut self, ctx: &mut ScanViewCtx) {
@@ -338,16 +339,24 @@ impl BorderRectangle {
         let p1: [f32; 2] = t.transform_point2(Vec2::new(1.0, -1.0)).into();
         let p2: [f32; 2] = t.transform_point2(Vec2::new(1.0, 1.0)).into();
         let p3: [f32; 2] = t.transform_point2(Vec2::new(-1.0, 1.0)).into();
-        ctx.ui.painter().add(PathShape {
-            points: vec![p0.into(), p1.into(), p2.into(), p3.into()],
-            closed: true,
-            fill: Color32::TRANSPARENT,
-            stroke: PathStroke {
-                width: 2.,
-                color: egui::epaint::ColorMode::Solid(self.color),
-                kind: egui::StrokeKind::Outside,
-            },
-        });
+        let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
+        if self.dashed {
+            points.push(p0.into());
+            ctx.ui
+                .painter()
+                .add(Shape::dotted_line(&points, self.color, 5., 0.7));
+        } else {
+            ctx.ui.painter().add(PathShape {
+                points,
+                closed: true,
+                fill: Color32::TRANSPARENT,
+                stroke: PathStroke {
+                    width: 2.,
+                    color: egui::epaint::ColorMode::Solid(self.color),
+                    kind: egui::StrokeKind::Middle,
+                },
+            });
+        }
     }
 }
 
