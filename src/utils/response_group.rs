@@ -25,10 +25,18 @@ impl ResponseGroup {
     }
 }
 pub trait ResponseGroupExt {
-    fn synchronize(self, group: &mut ResponseGroup) -> Self;
+    fn synchronize(self, group: &mut ResponseGroup) -> SyncResponse;
 }
 impl ResponseGroupExt for Response {
-    fn synchronize(self, group: &mut ResponseGroup) -> Self {
-        group.wrap(self)
+    fn synchronize(self, group: &mut ResponseGroup) -> SyncResponse {
+        SyncResponse {
+            orig: self.clone(),
+            sync: group.wrap(self),
+        }
     }
+}
+
+pub struct SyncResponse {
+    pub orig: Response,
+    pub sync: Response,
 }

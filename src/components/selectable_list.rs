@@ -18,12 +18,13 @@ impl<T> SelectableList<T> {
     }
     pub fn show(&mut self, ui: &mut Ui) {
         for i in (0..self.items.len()).rev() {
-            let mut resp = ui.add(list_item(&self.items[i]));
-            let sync_resp = resp.clone().synchronize(&mut self.items[i].resp_group);
-            if sync_resp.hovered() {
-                resp = resp.highlight();
+            let mut resp = ui
+                .add(list_item(&self.items[i]))
+                .synchronize(&mut self.items[i].resp_group);
+            if resp.sync.hovered() {
+                resp.orig = resp.orig.highlight();
             }
-            if resp.clicked() {
+            if resp.orig.clicked() {
                 if ui.input(|i| i.modifiers.shift) && self.last_selected.is_some() {
                     let mut i = i as isize;
                     let last = self.last_selected.unwrap() as isize;
