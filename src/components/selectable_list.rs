@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use egui::{
-    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, Frame, NumExt as _,
-    Response, Sense, TextStyle, Ui, Widget, WidgetInfo, WidgetType,
+    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, Frame, Response, Sense,
+    TextStyle, Ui,
 };
 
 use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};

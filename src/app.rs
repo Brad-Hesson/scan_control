@@ -6,13 +6,12 @@ use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, FitData, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
-use eframe::egui_wgpu::RenderState;
 use egui::Color32;
 use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Ui};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use sxmfile::SXM;
 use tracing::{error, info, warn};
 
@@ -51,12 +50,13 @@ impl MyApp {
             let line = &src_sxm.data[0][0][y * src_size[0] as usize..][..width];
             current_scan_src.extend_from_slice(line);
         }
+        let image_encoder = ImageEncoder::new(wgpu);
         Self {
             app_state: AppState {
-                scan_view: ScanView::new(wgpu),
+                scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
                 current_scan: ScanImage::new(
-                    wgpu,
+                    &image_encoder,
                     [width as u32, 512],
                     0,
                     Affine2::from_scale([width as _, 512.].into()),
@@ -64,7 +64,7 @@ impl MyApp {
                 ),
                 current_scan_src: current_scan_src.into_boxed_slice(),
             },
-            image_encoder: ImageEncoder::new(wgpu),
+            image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(),
         }
@@ -72,15 +72,15 @@ impl MyApp {
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
         self.undo_queue.push(&mut self.app_state, modifier);
     }
-    fn load_file(&mut self, wgpu_state: &RenderState, path: impl AsRef<Path>) -> Result<()> {
+    fn load_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         info!("Trying to load image `{}`", path.display());
         let sxm_file = sxmfile::SXM::parse_file(path)?;
         info!("Loaded image `{}`", path.display());
-        let static_image = StaticImage::load_sxm(sxm_file, wgpu_state)?;
+        let static_image = StaticImage::load_sxm(sxm_file, &self.image_encoder)?;
         static_image
             .image_data
-            .write_texture_plane_fit_subtract(wgpu_state, &mut self.image_encoder);
+            .write_texture_line_fit_subtract(&mut self.image_encoder);
         let entry = SelectableEntry::new(static_image, image_list_item);
         self.mod_state(LoadImageModifier(Some(entry)));
         Ok(())
@@ -99,13 +99,10 @@ impl MyApp {
 }
 
 impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
             for path in paths {
-                if let Err(e) = self
-                    .load_file(frame.wgpu_render_state().unwrap(), path)
-                    .context("file load failed")
-                {
+                if let Err(e) = self.load_file(path).context("file load failed") {
                     error!("{e:#}");
                 }
             }
@@ -139,16 +136,15 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
             && !self.app_state.current_scan.is_full()
         {
-            let render_state = frame.wgpu_render_state().unwrap();
             let [x, y] = self.app_state.current_scan.current_size();
             let line = &self.app_state.current_scan_src[x as usize * y as usize..][..x as usize];
             self.app_state
                 .current_scan
-                .write_line(render_state, line)
+                .write_line(&self.image_encoder, line)
                 .unwrap();
             self.app_state
                 .current_scan
-                .write_texture_plane_fit_subtract(render_state, &mut self.image_encoder);
+                .write_texture_line_fit_subtract(&mut self.image_encoder);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -302,6 +298,19 @@ fn image_menu(ui: &mut Ui, image: &ScanImage) {
                 ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
                 ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
             }
+            FitData::MeanSubtract { mean } => {
+                ui.label(format!("Mean: {:.2}", MetersFmt(*mean)));
+            }
+            FitData::LineMeanSubtract { means } => {
+                for m in means {
+                    ui.label(format!("{:.2}", MetersFmt(*m)));
+                }
+            }
+            FitData::LineFitSubtract { means, slopes } => {
+                for (m, s) in izip!(means, slopes) {
+                    ui.label(format!("{:.2}  {:.2}", MetersFmt(*m), MetersFmt(*s)));
+                }
+            }
         }
     }
 }
@@ -311,7 +320,7 @@ struct StaticImage {
     image_src: SXM,
 }
 impl StaticImage {
-    pub fn load_sxm(sxm_file: SXM, wgpu_state: &RenderState) -> Result<Self> {
+    pub fn load_sxm(sxm_file: SXM, image_encoder: &ImageEncoder) -> Result<Self> {
         let size = sxm_file.get_image_size()?;
         let scale = sxm_file.get_scan_range()?;
         let translation = sxm_file.get_scan_center()?;
@@ -320,7 +329,7 @@ impl StaticImage {
             0.,
             Vec2::from(translation) * 1e9,
         );
-        let scan_image = ScanImage::new(wgpu_state, size, size[1], transform, |data_mut| {
+        let scan_image = ScanImage::new(image_encoder, size, size[1], transform, |data_mut| {
             data_mut.copy_from_slice(&sxm_file.data[0][0]);
         });
         Ok(Self {

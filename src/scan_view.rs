@@ -16,6 +16,7 @@ use image::ImageCallback;
 use image_compute::image_compute::{
     ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
 };
+use itertools::Itertools;
 use uuid::Uuid;
 
 use crate::app::COLOR_MAP_SIZE;
@@ -96,7 +97,7 @@ impl ScanView {
 
         screen_transform * self.world_transform
     }
-    pub fn new(wgpu: &RenderState) -> Self {
+    pub fn new(image_encoder: &ImageEncoder) -> Self {
         let mut color_map: Box<MaybeUninit<[egui::Color32; COLOR_MAP_SIZE]>> = Box::new_uninit();
         for i in 0..COLOR_MAP_SIZE {
             let color = i as f32 / (COLOR_MAP_SIZE - 1) as f32;
@@ -107,7 +108,7 @@ impl ScanView {
         Self {
             new_color_map: Some(unsafe { color_map.assume_init() }),
             world_transform: Affine2::IDENTITY,
-            target_format: wgpu.target_format,
+            target_format: image_encoder.wgpu_state.target_format,
         }
     }
     pub fn set_color_map(&mut self, color_map: Box<[egui::Color32; COLOR_MAP_SIZE]>) {
@@ -131,15 +132,15 @@ pub struct ScanImage {
 }
 impl ScanImage {
     pub fn new(
-        wgpu_state: &RenderState,
+        image_encoder: &ImageEncoder,
         size: [u32; 2],
         lines: u32,
         transform: Affine2,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
         let image_data = Arc::new(RwLock::new(ImageComputeBuffers::new(
-            &wgpu_state.device,
-            &wgpu_state.queue,
+            &image_encoder.wgpu_state.device,
+            &image_encoder.wgpu_state.queue,
             None,
             size,
             lines,
@@ -187,12 +188,9 @@ impl ScanImage {
         ctx.ui.painter().add(callback);
         resp
     }
-    pub fn write_texture_mean_subtract(
-        &self,
-        wgpu_state: &RenderState,
-        image_encoder: &mut ImageEncoder,
-    ) {
-        let mut encoder = wgpu_state
+    pub fn write_texture_mean_subtract(&self, image_encoder: &mut ImageEncoder) {
+        let mut encoder = image_encoder
+            .wgpu_state
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
         {
@@ -201,19 +199,41 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             image_encoder.pipeline.dispatch_mean_subtract(
-                &wgpu_state.device,
+                &image_encoder.wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),
             );
         }
-        wgpu_state.queue.submit([encoder.finish()]);
+        image_encoder.wgpu_state.queue.submit([encoder.finish()]);
+        let norm_data = self.norm_data.clone();
+        let fit_data = self.fit_data.clone();
+        let image_data = self.image_data.clone();
+        let wgpu_state = image_encoder.wgpu_state.clone();
+        let current_size = self.current_size()[0] * self.current_size()[1];
+        image_encoder
+            .wgpu_state
+            .queue
+            .on_submitted_work_done(move || {
+                image_data.read().download_normalize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    move |data| *norm_data.write() = Some(*data),
+                );
+                image_data.read().download_planarize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    ..1,
+                    move |data| {
+                        *fit_data.write() = Some(FitData::MeanSubtract {
+                            mean: data[0] / current_size as f64,
+                        })
+                    },
+                );
+            });
     }
-    pub fn write_texture_plane_fit_subtract(
-        &self,
-        wgpu_state: &RenderState,
-        image_encoder: &mut ImageEncoder,
-    ) {
-        let mut encoder = wgpu_state
+    pub fn write_texture_plane_fit_subtract(&self, image_encoder: &mut ImageEncoder) {
+        let mut encoder = image_encoder
+            .wgpu_state
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
         {
@@ -222,41 +242,43 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             image_encoder.pipeline.dispatch_plane_fit_subtract(
-                &wgpu_state.device,
+                &image_encoder.wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),
             );
         }
-        wgpu_state.queue.submit([encoder.finish()]);
+        image_encoder.wgpu_state.queue.submit([encoder.finish()]);
         let norm_data = self.norm_data.clone();
         let fit_data = self.fit_data.clone();
         let image_data = self.image_data.clone();
-        let device = wgpu_state.device.clone();
-        let queue = wgpu_state.queue.clone();
-        let current_size = self.current_size()[0] * self.current_size()[1];
-        wgpu_state.queue.on_submitted_work_done(move || {
-            image_data
-                .read()
-                .download_normalize_data(&device, &queue, move |data| {
-                    *norm_data.write() = Some(*data)
-                });
-            image_data
-                .read()
-                .download_planarize_data(&device, &queue, ..3, move |data| {
-                    *fit_data.write() = Some(FitData::PlaneFit {
-                        mean: data[0] / current_size as f64,
-                        x_slope: data[1],
-                        y_slope: data[2],
-                    })
-                });
-        });
+        let wgpu_state = image_encoder.wgpu_state.clone();
+        let current_size = self.current_size();
+        image_encoder
+            .wgpu_state
+            .queue
+            .on_submitted_work_done(move || {
+                image_data.read().download_normalize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    move |data| *norm_data.write() = Some(*data),
+                );
+                image_data.read().download_planarize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    ..3,
+                    move |data| {
+                        *fit_data.write() = Some(FitData::PlaneFit {
+                            mean: data[0] / (current_size[0] * current_size[1]) as f64,
+                            x_slope: data[1] * current_size[1] as f64,
+                            y_slope: data[2] * current_size[0] as f64,
+                        })
+                    },
+                );
+            });
     }
-    pub fn write_texture_line_fit_subtract(
-        &self,
-        wgpu_state: &RenderState,
-        image_encoder: &mut ImageEncoder,
-    ) {
-        let mut encoder = wgpu_state
+    pub fn write_texture_line_fit_subtract(&self, image_encoder: &mut ImageEncoder) {
+        let mut encoder = image_encoder
+            .wgpu_state
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
         {
@@ -265,19 +287,50 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             image_encoder.pipeline.dispatch_line_fit_subtract(
-                &wgpu_state.device,
+                &image_encoder.wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),
             );
         }
-        wgpu_state.queue.submit([encoder.finish()]);
+        image_encoder.wgpu_state.queue.submit([encoder.finish()]);
+        let norm_data = self.norm_data.clone();
+        let fit_data = self.fit_data.clone();
+        let image_data = self.image_data.clone();
+        let wgpu_state = image_encoder.wgpu_state.clone();
+        let current_size = self.current_size();
+        image_encoder
+            .wgpu_state
+            .queue
+            .on_submitted_work_done(move || {
+                image_data.read().download_normalize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    move |data| *norm_data.write() = Some(*data),
+                );
+                image_data.read().download_planarize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    ..current_size[1] as usize * 2,
+                    move |data| {
+                        *fit_data.write() = Some(FitData::LineFitSubtract {
+                            means: data[..current_size[1] as usize]
+                                .iter()
+                                .map(|v| v / current_size[0] as f64)
+                                .collect_vec()
+                                .into_boxed_slice(),
+                            slopes: data[current_size[1] as usize..]
+                                .iter()
+                                .map(|v| v * current_size[0] as f64)
+                                .collect_vec()
+                                .into_boxed_slice(),
+                        })
+                    },
+                );
+            });
     }
-    pub fn write_texture_line_mean_subtract(
-        &self,
-        wgpu_state: &RenderState,
-        image_encoder: &mut ImageEncoder,
-    ) {
-        let mut encoder = wgpu_state
+    pub fn write_texture_line_mean_subtract(&self, image_encoder: &mut ImageEncoder) {
+        let mut encoder = image_encoder
+            .wgpu_state
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor { label: None });
         {
@@ -286,19 +339,50 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             image_encoder.pipeline.dispatch_line_mean_subtract(
-                &wgpu_state.device,
+                &image_encoder.wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),
             );
         }
-        wgpu_state.queue.submit([encoder.finish()]);
+        image_encoder.wgpu_state.queue.submit([encoder.finish()]);
+        let norm_data = self.norm_data.clone();
+        let fit_data = self.fit_data.clone();
+        let image_data = self.image_data.clone();
+        let wgpu_state = image_encoder.wgpu_state.clone();
+        let current_size = self.current_size();
+        image_encoder
+            .wgpu_state
+            .queue
+            .on_submitted_work_done(move || {
+                image_data.read().download_normalize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    move |data| *norm_data.write() = Some(*data),
+                );
+                image_data.read().download_planarize_data(
+                    &wgpu_state.device,
+                    &wgpu_state.queue,
+                    ..current_size[1] as usize,
+                    move |data| {
+                        *fit_data.write() = Some(FitData::LineMeanSubtract {
+                            means: data
+                                .iter()
+                                .map(|v| v / current_size[0] as f64)
+                                .collect_vec()
+                                .into_boxed_slice(),
+                        })
+                    },
+                );
+            });
     }
     pub fn write_line(
         &mut self,
-        wgpu_state: &RenderState,
+        image_encoder: &ImageEncoder,
         line: &[f32],
     ) -> Result<(), WriteLinesError> {
-        self.image_data.write().write_line(&wgpu_state.queue, line)
+        self.image_data
+            .write()
+            .write_line(&image_encoder.wgpu_state.queue, line)
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()
@@ -309,20 +393,34 @@ impl ScanImage {
 }
 
 pub enum FitData {
+    MeanSubtract {
+        mean: f64,
+    },
     PlaneFit {
         mean: f64,
         x_slope: f64,
         y_slope: f64,
     },
+    LineMeanSubtract {
+        means: Box<[f64]>,
+    },
+    LineFitSubtract {
+        means: Box<[f64]>,
+        slopes: Box<[f64]>,
+    },
 }
 
 pub struct ImageEncoder {
     pipeline: ImageComputePipeline,
+    wgpu_state: RenderState,
 }
 impl ImageEncoder {
     pub fn new(wgpu_state: &RenderState) -> Self {
         let pipeline = ImageComputePipeline::new(&wgpu_state.device);
-        Self { pipeline }
+        Self {
+            pipeline,
+            wgpu_state: wgpu_state.clone(),
+        }
     }
 }
 
