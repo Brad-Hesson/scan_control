@@ -348,9 +348,9 @@ impl BorderRectangle {
         };
         if self.dashed {
             points.push(p0.into());
-            let mut shapes = Vec::new();
-            dashes_from_line(&points, stroke, &[6.], &[3.], &mut shapes, 0.);
-            ctx.ui.painter().add(shapes);
+            ctx.ui
+                .painter()
+                .add(dashes_from_line(&points, stroke, 6., 3.));
         } else {
             ctx.ui.painter().add(PathShape {
                 points,
@@ -378,22 +378,12 @@ fn neutral_response(ui: &egui::Ui, id: egui::Id) -> Response {
 fn dashes_from_line(
     path: &[Pos2],
     stroke: PathStroke,
-    dash_lengths: &[f32],
-    gap_lengths: &[f32],
-    shapes: &mut Vec<Shape>,
-    dash_offset: f32,
-) {
-    assert_eq!(
-        dash_lengths.len(),
-        gap_lengths.len(),
-        "Mismatched dash and gap lengths, got dash_lengths: {}, gap_lengths: {}",
-        dash_lengths.len(),
-        gap_lengths.len()
-    );
-    let mut position_on_segment = dash_offset;
+    dash_length: f32,
+    gap_length: f32,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let mut position_on_segment = 0.;
     let mut drawing_dash = false;
-    let mut step = 0;
-    let steps = dash_lengths.len();
     for window in path.windows(2) {
         let (start, end) = (window[0], window[1]);
         let vector = end - start;
@@ -410,16 +400,11 @@ fn dashes_from_line(
                     fill: Color32::TRANSPARENT,
                     stroke: stroke.clone(),
                 }));
-                position_on_segment += gap_lengths[step];
-                // Increment step counter
-                step += 1;
-                if step >= steps {
-                    step = 0;
-                }
+                position_on_segment += gap_length;
             } else {
                 // Start a new dash.
                 start_point = new_point;
-                position_on_segment += dash_lengths[step];
+                position_on_segment += dash_length;
             }
             drawing_dash = !drawing_dash;
         }
@@ -436,4 +421,5 @@ fn dashes_from_line(
 
         position_on_segment -= segment_length;
     }
+    shapes
 }

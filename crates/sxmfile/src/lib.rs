@@ -1,17 +1,17 @@
 use std::{
-    io::{BufRead, BufReader},
-    path::Path,
+    io::{BufRead, BufReader, Read as _},
+    path::{Path, PathBuf},
     str::Utf8Error,
     vec,
 };
 
 use eyre::{Context, ContextCompat, Result, bail, ensure};
 use itertools::Itertools;
-use typed_path::WindowsPath;
 
 pub struct SXM {
     pub metadata: Vec<(Box<str>, Box<str>)>,
     pub data: Vec<[Box<[f32]>; 2]>,
+    path: PathBuf,
 }
 
 impl SXM {
@@ -134,27 +134,39 @@ impl SXM {
             .context("failed to parse time")?;
         Ok(date.and_time(time))
     }
-    pub fn get_scan_file_path(&self) -> Result<&WindowsPath> {
-        let path_str = self.get_metadata("SCAN_FILE")?;
-        Ok(WindowsPath::new(path_str))
-    }
     pub fn get_name(&self) -> Result<&str> {
-        self.get_scan_file_path()
-            .and_then(|path| path.file_stem().context("path was not a file"))
-            .and_then(|bytes| str::from_utf8(bytes).context("file name was not valid utf-8"))
+        self.path
+            .file_stem()
+            .context("path was not a file")?
+            .to_str()
+            .context("file name was not valid utf-8")
             .context("failed to get name from file")
+    }
+    pub fn rename(&mut self, new_name: &str) -> Result<()> {
+        let new_path = self
+            .path
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .join(format!("{new_name}.sxm"));
+        if new_path.exists() {
+            bail!("file `{}` already exists", new_path.to_str().unwrap())
+        }
+        std::fs::rename(&self.path, &new_path).context("failed to rename file")?;
+        self.path = new_path;
+        Ok(())
     }
     #[inline]
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self> {
-        Self::parse(BufReader::new(std::fs::File::open(path)?))
-    }
-    pub fn parse(mut reader: impl BufRead) -> Result<Self> {
+        let mut reader = BufReader::new(std::fs::File::open(&path)?);
+
         let mut meta = Vec::new();
         reader.read_until(0x04, &mut meta)?;
 
         let mut out = Self {
             metadata: Self::parse_metadata(&meta).context("failed to parse metadata")?,
             data: vec![],
+            path: path.as_ref().to_path_buf(),
         };
 
         let scanit_type = out.get_metadata("SCANIT_TYPE")?.replace(" ", "");
