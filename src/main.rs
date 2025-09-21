@@ -51,6 +51,8 @@ fn main() -> eframe::Result {
         native_options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            cc.egui_ctx
+                .tessellation_options_mut(|opt| opt.feathering = false);
             Ok(Box::new(app::MyApp::new(cc)))
         }),
     )

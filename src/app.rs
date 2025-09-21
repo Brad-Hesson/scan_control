@@ -198,13 +198,13 @@ impl eframe::App for MyApp {
                                 .show(ctx);
                             }
                         }
+                        self.app_state.current_scan.show(ctx);
                         BorderRectangle {
                             transform: self.app_state.current_scan.transform,
                             color: Color32::RED,
                             dashed: false,
                         }
                         .show(ctx);
-                        self.app_state.current_scan.show(ctx);
                         if let Some(image) = image_list.get_hovered(ctx.ui.ctx()) {
                             BorderRectangle {
                                 transform: image.image_data.transform,

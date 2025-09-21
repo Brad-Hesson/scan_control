@@ -6,9 +6,9 @@ use eframe::{
     wgpu::TextureFormat,
 };
 use egui::{
-    epaint::{PathShape, PathStroke},
+    epaint::{ColorMode, PathShape, PathStroke},
     mutex::RwLock,
-    Color32, Pos2, Rect, Response, Sense, Shape, Stroke,
+    Color32, Mesh, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind,
 };
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
@@ -340,21 +340,22 @@ impl BorderRectangle {
         let p2: [f32; 2] = t.transform_point2(Vec2::new(1.0, 1.0)).into();
         let p3: [f32; 2] = t.transform_point2(Vec2::new(-1.0, 1.0)).into();
         let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
+        let stroke = PathStroke {
+            width: 2.,
+            color: ColorMode::Solid(self.color),
+            kind: StrokeKind::Outside,
+        };
         if self.dashed {
             points.push(p0.into());
-            ctx.ui
-                .painter()
-                .add(Shape::dotted_line(&points, self.color, 5., 0.7));
+            let mut shapes = Vec::new();
+            dashes_from_line(&points, stroke, &[6.], &[3.], &mut shapes, 0.);
+            ctx.ui.painter().add(shapes);
         } else {
             ctx.ui.painter().add(PathShape {
                 points,
                 closed: true,
                 fill: Color32::TRANSPARENT,
-                stroke: PathStroke {
-                    width: 2.,
-                    color: egui::epaint::ColorMode::Solid(self.color),
-                    kind: egui::StrokeKind::Middle,
-                },
+                stroke,
             });
         }
     }
@@ -370,4 +371,68 @@ fn neutral_response(ui: &egui::Ui, id: egui::Id) -> Response {
         id,
         Sense::empty(),
     )
+}
+
+/// Creates dashes from a line.
+fn dashes_from_line(
+    path: &[Pos2],
+    stroke: PathStroke,
+    dash_lengths: &[f32],
+    gap_lengths: &[f32],
+    shapes: &mut Vec<Shape>,
+    dash_offset: f32,
+) {
+    assert_eq!(
+        dash_lengths.len(),
+        gap_lengths.len(),
+        "Mismatched dash and gap lengths, got dash_lengths: {}, gap_lengths: {}",
+        dash_lengths.len(),
+        gap_lengths.len()
+    );
+    let mut position_on_segment = dash_offset;
+    let mut drawing_dash = false;
+    let mut step = 0;
+    let steps = dash_lengths.len();
+    for window in path.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        let vector = end - start;
+        let segment_length = vector.length();
+
+        let mut start_point = start;
+        while position_on_segment < segment_length {
+            let new_point = start + vector * (position_on_segment / segment_length);
+            if drawing_dash {
+                // This is the end point.
+                shapes.push(Shape::Path(PathShape {
+                    points: [start_point, new_point].into(),
+                    closed: false,
+                    fill: Color32::TRANSPARENT,
+                    stroke: stroke.clone(),
+                }));
+                position_on_segment += gap_lengths[step];
+                // Increment step counter
+                step += 1;
+                if step >= steps {
+                    step = 0;
+                }
+            } else {
+                // Start a new dash.
+                start_point = new_point;
+                position_on_segment += dash_lengths[step];
+            }
+            drawing_dash = !drawing_dash;
+        }
+
+        // If the segment ends and the dash is not finished, add the segment's end point.
+        if drawing_dash {
+            shapes.push(Shape::Path(PathShape {
+                points: [start_point, end].into(),
+                closed: false,
+                fill: Color32::TRANSPARENT,
+                stroke: stroke.clone(),
+            }));
+        }
+
+        position_on_segment -= segment_length;
+    }
 }
