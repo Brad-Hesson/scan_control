@@ -175,11 +175,6 @@ impl eframe::App for MyApp {
                                 .image_data
                                 .show(ctx)
                                 .synchronize(&mut image_list[i].resp_group);
-                            if resp.sync.clicked() && !resp.orig.clicked(){
-                                if let Err(e) = image_list[i].image_src.rename("test_name"){
-                                    error!("{e:#}");
-                                }
-                            }
                             if resp.orig.clicked() {
                                 if ctx.ui.input(|i| i.modifiers.ctrl) {
                                     image_list[i].selected = !image_list[i].selected;
