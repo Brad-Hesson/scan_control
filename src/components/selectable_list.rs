@@ -140,94 +140,46 @@ fn list_item<'a, T>(ui: &mut Ui, item: &'a SelectableEntry<T>) -> Response {
         .sense(Sense::click())
         .wrap_mode(egui::TextWrapMode::Extend)
         .fallback_font(TextStyle::Button);
-    let fill = None;
-    let stroke = None;
-    let small = false;
-    let frame = Some(true);
-    let frame_when_inactive = true;
-    let mut min_size = egui::Vec2::ZERO;
-    let corner_radius = None;
+
     let selected = item.selected;
-    let image_tint_follows_text_color = false;
-    let limit_image_size = false;
+    let min_size = egui::Vec2::new(0., ui.spacing().interact_size.y);
 
-    if !small {
-        min_size.y = min_size.y.at_least(ui.spacing().interact_size.y);
-    }
+    layout.map_atoms(|atom| {
+        if matches!(&atom.kind, AtomKind::Image(_)) {
+            atom.atom_max_height_font_size(ui)
+        } else {
+            atom
+        }
+    });
 
-    if limit_image_size {
-        layout.map_atoms(|atom| {
-            if matches!(&atom.kind, AtomKind::Image(_)) {
-                atom.atom_max_height_font_size(ui)
-            } else {
-                atom
-            }
-        });
-    }
-
-    let text = layout.text().map(String::from);
-
-    let has_frame_margin = frame.unwrap_or_else(|| ui.visuals().button_frame);
-
-    let mut button_padding = if has_frame_margin {
-        ui.spacing().button_padding
-    } else {
-        egui::Vec2::ZERO
-    };
-    if small {
-        button_padding.y = 0.0;
-    }
+    let button_padding = ui.spacing().button_padding;
 
     let mut prepared = layout
         .frame(Frame::new().inner_margin(button_padding))
         .min_size(min_size)
         .allocate(ui);
 
-    let response = if ui.is_rect_visible(prepared.response.rect) {
+    if ui.is_rect_visible(prepared.response.rect) {
         let visuals = ui.style().interact_selectable(&prepared.response, selected);
 
-        let visible_frame = if frame_when_inactive {
-            has_frame_margin
-        } else {
-            has_frame_margin
-                && (prepared.response.hovered()
-                    || prepared.response.is_pointer_button_down_on()
-                    || prepared.response.has_focus())
-        };
-
-        if image_tint_follows_text_color {
-            prepared.map_images(|image| image.tint(visuals.text_color()));
-        }
+        prepared.map_images(|image| image.tint(visuals.text_color()));
 
         prepared.fallback_text_color = visuals.text_color();
 
-        if visible_frame {
-            let stroke = stroke.unwrap_or(visuals.bg_stroke);
-            let fill = fill.unwrap_or(visuals.weak_bg_fill);
-            prepared.frame = prepared
-                .frame
-                .inner_margin(
-                    button_padding + egui::Vec2::splat(visuals.expansion)
-                        - egui::Vec2::splat(stroke.width),
-                )
-                .outer_margin(-egui::Vec2::splat(visuals.expansion))
-                .fill(fill)
-                .stroke(stroke)
-                .corner_radius(corner_radius.unwrap_or(visuals.corner_radius));
-        };
+        prepared.frame = prepared
+            .frame
+            .inner_margin(
+                button_padding + egui::Vec2::splat(visuals.expansion)
+                    - egui::Vec2::splat(visuals.bg_stroke.width),
+            )
+            .outer_margin(-egui::Vec2::splat(visuals.expansion))
+            .fill(visuals.weak_bg_fill)
+            .stroke(visuals.bg_stroke)
+            .corner_radius(visuals.corner_radius);
 
         prepared.paint(ui)
     } else {
         AtomLayoutResponse::empty(prepared.response)
-    };
-
-    response.response.widget_info(|| {
-        if let Some(text) = &text {
-            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), text)
-        } else {
-            WidgetInfo::new(WidgetType::Button)
-        }
-    });
-
-    response.response
+    }
+    .response
 }

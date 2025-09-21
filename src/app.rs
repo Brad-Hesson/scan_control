@@ -339,8 +339,7 @@ fn image_list_item(image: &StaticImage) -> Atoms<'_> {
         }
     };
     (
-        Image::new(egui::include_image!("../assets/scan_image_icon.png"))
-            .fit_to_exact_size(egui::Vec2::new(20., 20.)),
+        Image::new(egui::include_image!("../assets/scan_image_icon.png")),
         name,
     )
         .into_atoms()
