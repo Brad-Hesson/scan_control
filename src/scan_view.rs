@@ -233,6 +233,7 @@ impl ScanImage {
         let image_data = self.image_data.clone();
         let device = wgpu_state.device.clone();
         let queue = wgpu_state.queue.clone();
+        let current_size = self.current_size()[0] * self.current_size()[1];
         wgpu_state.queue.on_submitted_work_done(move || {
             image_data
                 .read()
@@ -243,7 +244,7 @@ impl ScanImage {
                 .read()
                 .download_planarize_data(&device, &queue, ..3, move |data| {
                     *fit_data.write() = Some(FitData::PlaneFit {
-                        mean: data[0],
+                        mean: data[0] / current_size as f64,
                         x_slope: data[1],
                         y_slope: data[2],
                     })

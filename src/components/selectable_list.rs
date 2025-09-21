@@ -55,7 +55,7 @@ impl<T> SelectableList<T> {
         }
         self.last_selected = None;
     }
-    pub fn iter_selected_indexes<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_selected_indexes<'a>(&'a self) -> impl DoubleEndedIterator<Item = usize> + 'a {
         self.iter()
             .enumerate()
             .filter_map(|(i, item)| item.selected.then_some(i))

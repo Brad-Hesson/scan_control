@@ -246,7 +246,7 @@ impl eframe::App for MyApp {
                     .response
                     .rect
                     .bottom();
-                for i in self.app_state.image_list.iter_selected_indexes() {
+                for i in self.app_state.image_list.iter_selected_indexes().rev() {
                     let name = match self.app_state.image_list[i].image_src.get_name() {
                         Ok(name) => name,
                         Err(e) => {
