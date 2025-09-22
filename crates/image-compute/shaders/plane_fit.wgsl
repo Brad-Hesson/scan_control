@@ -17,7 +17,7 @@ var<storage, read_write> yz: array<f64>;
 @group(2) @binding(2)
 var<storage, read_write> std_dev: array<f64>;
 
-struct NormalizeData{
+struct NormalizeData {
     stddev: f64,
     min: f64,
     max: f64,
@@ -213,7 +213,12 @@ fn generate_normalization__plane_fit(
     }
     workgroupBarrier();
     let basis = calc_basis(i);
-    let plane = x_slope * basis.x + y_slope * basis.y;
+    var plane: f64;
+    if isNan(y_slope) {
+        plane = x_slope * basis.x;
+    } else {
+        plane = x_slope * basis.x + y_slope * basis.y;
+    }
     let value = basis.z - plane;
     xz[i] = value;
     yz[i] = value;
@@ -325,7 +330,12 @@ fn write__plane_fit(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
     if i >= image_len() { return; }
     let basis = calc_basis(i);
-    let plane = planarize_out[1] * basis.x + planarize_out[2] * basis.y;
+    var plane: f64;
+    if isNan(planarize_out[2]) {
+        plane = planarize_out[1] * basis.x;
+    } else {
+        plane = planarize_out[1] * basis.x + planarize_out[2] * basis.y;
+    }
     let value = f32(basis.z - plane);
     textureStore(texture_out, vec2(global_id.x % image_size.x, global_id.x / image_size.x), vec4(value, 0.0, 0.0, 0.0));
     if i == 0u {
@@ -369,6 +379,22 @@ fn write__line_mean(
         normalize_out.min = xz[0];
         normalize_out.max = yz[0];
         normalize_out.stddev = sqrt(std_dev[0] / f64(image_len()));
+    }
+}
+
+@compute @workgroup_size(WGS)
+fn clear_texture(
+    @builtin(local_invocation_index) local_index: u32,
+    @builtin(global_invocation_id) global_index: vec3<u32>
+) {
+    let i = global_index.x;
+    if i >= image_len() { return; }
+    let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
+    textureStore(texture_out, global_id, vec4(f32_nan(), 0.0, 0.0, 0.0));
+    if i == 0u {
+        normalize_out.min = f64_nan();
+        normalize_out.max = f64_nan();
+        normalize_out.stddev = f64_nan();
     }
 }
 
@@ -424,4 +450,52 @@ fn f64_pos_infinity() -> f64 {
 fn f64_neg_infinity() -> f64 {
     let bits = make_u64(0xFFF00000u, 0x00000000u);
     return bitcast<f64>(bits);
+}
+
+fn f64_nan() -> f64 {
+    // Exponent = all ones (0x7ff)
+    let exp: u64 = u64((1u << 11u) - 1u);
+
+    // Mantissa: just set the top bit of the mantissa (bit 51)
+    // Build as u64 without u64 literals
+    let mantissa: u64 = u64(1u) << 51u;
+
+    // Sign = 0
+    let sign: u64 = u64(0u);
+
+    // Assemble: (sign << 63) | (exp << 52) | mantissa
+    let bits: u64 = (sign << 63u) | (exp << 52u) | mantissa;
+
+    return bitcast<f64>(bits);
+}
+
+fn f32_nan() -> f32 {
+    // Exponent = all ones (0xFF)
+    let exp: u32 = 0xffu;
+
+    // Mantissa: set the top mantissa bit (bit 22)
+    let mantissa: u32 = 1u << 22u;
+
+    // Sign = 0
+    let sign: u32 = 0u;
+
+    // Assemble: (sign << 31) | (exp << 23) | mantissa
+    let bits: u32 = (sign << 31u) | (exp << 23u) | mantissa;
+
+    return bitcast<f32>(bits);
+}
+
+fn isNan(x: f64) -> bool {
+    let bits: u64 = bitcast<u64>(x);
+
+    // Build masks without any u64 literals and using u32 shift counts.
+    let mask11: u64 = u64((1u << 11u) - 1u);            // 0x7ff as u64
+
+    // 52 ones as u64: low 32 ones + high 20 ones shifted by 32
+    let mask52: u64 = u64(0xffffffffu) | (u64((1u << 20u) - 1u) << 32u);
+
+    let exponent: u64 = (bits >> 52u) & mask11;         // bits 62..52
+    let mantissa: u64 = bits & mask52;                  // bits 51..0
+
+    return (exponent == mask11) && (mantissa != u64(0u));
 }

@@ -1,7 +1,4 @@
-use std::{
-    ops::RangeBounds,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 use glam::Affine2;
 use itertools::{Itertools, izip};
@@ -16,7 +13,7 @@ use wgpu::{
 };
 
 use crate::{
-    buffers::{StorageBuffer, TransformBuffer},
+    buffers::{QueueDownloadError, StorageBuffer, TransformBuffer},
     shaders::{self, scan_image::NormalizeControl},
 };
 
@@ -207,30 +204,99 @@ impl ImageComputeBuffers {
     pub fn capacity(&self) -> [u32; 2] {
         self.size
     }
-    pub fn download_normalize_data<W>(
+    pub fn download_normalize_data(
         &self,
         device: &Device,
         queue: &Queue,
-        f: impl FnOnce(&NormalizeData) -> W + Send + 'static,
-    ) -> Arc<OnceLock<W>>
-    where
-        W: Sync + Send + std::fmt::Debug + 'static,
-    {
+        callback: impl FnOnce(NormalizeData) + Send + 'static,
+    ) -> Result<(), QueueDownloadError> {
         self.normalize_buffer
-            .queue_download_with(device, queue, ..1, |data| f(&data[0]))
+            .queue_download_with(device, queue, ..1, |data| callback(data[0]))
+            .map(|_| {})
     }
-    pub fn download_planarize_data<W>(
+    pub fn download_fit_data(
         &self,
         device: &Device,
         queue: &Queue,
-        range: impl RangeBounds<usize>,
-        f: impl FnOnce(&[f64]) -> W + Send + 'static,
-    ) -> Arc<OnceLock<W>>
-    where
-        W: Sync + Send + std::fmt::Debug + 'static,
-    {
+        fit_type: FitType,
+        callback: impl FnOnce(FitData) + Send + 'static,
+    ) -> Result<(), QueueDownloadError> {
+        let size = self.current_size();
         self.planarize_buffer
-            .queue_download_with(device, queue, range, f)
+            .queue_download_with(device, queue, ..fit_type.download_size(size), move |data| {
+                callback(FitData::from_raw(data, size, fit_type))
+            })
+            .map(|_| {})
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FitType {
+    MeanSubtract,
+    PlaneFitSubtract,
+    LineMeanSubtract,
+    LineFitSubtract,
+}
+impl FitType {
+    const fn download_size(&self, size: [u32; 2]) -> usize {
+        match self {
+            FitType::MeanSubtract => 1,
+            FitType::PlaneFitSubtract => 3,
+            FitType::LineMeanSubtract => size[1] as usize,
+            FitType::LineFitSubtract => size[1] as usize * 2,
+        }
+    }
+}
+pub enum FitData {
+    MeanSubtract {
+        mean: f64,
+    },
+    PlaneFitSubtract {
+        mean: f64,
+        x_slope: f64,
+        y_slope: f64,
+    },
+    LineMeanSubtract {
+        means: Box<[f64]>,
+    },
+    LineFitSubtract {
+        means: Box<[f64]>,
+        slopes: Box<[f64]>,
+    },
+}
+impl FitData {
+    fn from_raw(data: &[f64], size: [u32; 2], fit_type: FitType) -> Self {
+        assert_eq!(data.len(), fit_type.download_size(size));
+        let [width, height] = [size[0] as f64, size[1] as f64];
+        match fit_type {
+            FitType::MeanSubtract => Self::MeanSubtract {
+                mean: data[0] / (width * height),
+            },
+            FitType::PlaneFitSubtract => Self::PlaneFitSubtract {
+                mean: data[0] / (width * height),
+                x_slope: data[1] * width,
+                y_slope: data[2] * height,
+            },
+            FitType::LineMeanSubtract => Self::LineMeanSubtract {
+                means: data
+                    .iter()
+                    .map(|v| v / width)
+                    .collect_vec()
+                    .into_boxed_slice(),
+            },
+            FitType::LineFitSubtract => Self::LineFitSubtract {
+                means: data[..height as usize]
+                    .iter()
+                    .map(|v| v / width)
+                    .collect_vec()
+                    .into_boxed_slice(),
+                slopes: data[height as usize..]
+                    .iter()
+                    .map(|v| v * width)
+                    .collect_vec()
+                    .into_boxed_slice(),
+            },
+        }
     }
 }
 
@@ -292,6 +358,7 @@ pub struct ImageComputePipeline {
     write__plane_fit: ComputePipeline,
     write__line_fit: ComputePipeline,
     write__line_mean: ComputePipeline,
+    clear_texture: ComputePipeline,
     qs: QuerySet,
     qs_buf: StorageBuffer<u64>,
     scratch_buffers: ScratchBuffers,
@@ -345,6 +412,7 @@ impl ImageComputePipeline {
             write__plane_fit: shaders::plane_fit::compute::create_write__plane_fit_pipeline(device),
             write__line_fit: shaders::plane_fit::compute::create_write__line_fit_pipeline(device),
             write__line_mean: shaders::plane_fit::compute::create_write__line_mean_pipeline(device),
+            clear_texture: shaders::plane_fit::compute::create_clear_texture_pipeline(device),
             qs: device.create_query_set(&QuerySetDescriptor {
                 label: Some("plane_fitter_qs"),
                 ty: QueryType::Timestamp,
@@ -577,12 +645,40 @@ impl ImageComputePipeline {
 
         qs_n / 2
     }
+    pub fn dispatch_clear_texture(
+        &mut self,
+        device: &Device,
+        pass: &mut ComputePass,
+        image: &ImageComputeBuffers,
+    ) -> usize {
+        let mut qs_n = 0;
+        let mut wts = |pass: &mut ComputePass| {
+            pass.write_timestamp(&self.qs, qs_n as u32);
+            qs_n += 1;
+        };
+        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
+            info!("Reallocating scratch buffers to {:?}", image.size);
+            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        }
+
+        self.scratch_buffers.bg.set(pass);
+        image.image_src_bg.set(pass);
+        image.normalize_bg.set(pass);
+        let size = image.size;
+
+        pass.set_pipeline(&self.clear_texture);
+        wts(pass);
+        dispatch_linear(pass, size);
+        wts(pass);
+
+        qs_n / 2
+    }
     pub fn queue_timings_download(
         &self,
         device: &Device,
         queue: &Queue,
         num: usize,
-    ) -> Arc<OnceLock<Box<[u64]>>> {
+    ) -> Result<Arc<OnceLock<Box<[u64]>>>, QueueDownloadError> {
         self.qs_buf
             .queue_download_with(device, queue, ..num * 2, |r| {
                 r.iter()

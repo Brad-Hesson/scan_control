@@ -3,14 +3,15 @@ use std::path::Path;
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
-use crate::scan_view::{BorderRectangle, FitData, ImageEncoder, ScanImage, ScanView};
+use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
-use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Ui};
+use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Modifiers, Ui};
 use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
+use image_compute::image_compute::{FitData, FitType};
 use itertools::{izip, Itertools};
 use sxmfile::SXM;
 use tracing::{error, info, warn};
@@ -42,9 +43,9 @@ impl MyApp {
         // );
 
         let src_sxm = SXM::parse_file("20240229_075.sxm").unwrap();
-        let image_encoder = ImageEncoder::new(wgpu);
-        let mut current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
-        current_scan.image_data.clear_lines(&image_encoder);
+        let mut image_encoder = ImageEncoder::new(wgpu);
+        let current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
+        current_scan.image_data.clear(&mut image_encoder);
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
@@ -65,9 +66,7 @@ impl MyApp {
         let sxm_file = sxmfile::SXM::parse_file(path)?;
         info!("Loaded image `{}`", path.display());
         let static_image = StaticImage::load_sxm(sxm_file, &self.image_encoder)?;
-        static_image
-            .image_data
-            .write_texture_line_fit_subtract(&mut self.image_encoder);
+        static_image.update_texture(&mut self.image_encoder);
         let entry = SelectableEntry::new(static_image, image_list_item);
         self.mod_state(LoadImageModifier(Some(entry)));
         Ok(())
@@ -131,6 +130,12 @@ impl eframe::App for MyApp {
                 .write_line(&self.image_encoder, line)
                 .unwrap();
             current_scan.update_texture(&mut self.image_encoder);
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::C)) {
+            self.app_state
+                .current_scan
+                .image_data
+                .clear(&mut self.image_encoder);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -286,32 +291,23 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     let vis = &mut ui.style_mut().visuals.widgets.inactive;
     vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
     let types = [
-        (PlanarizationType::LineFitSubtract, "Line Subtract"),
-        (PlanarizationType::LineMeanSubtract, "Line Mean Subtract"),
-        (PlanarizationType::PlaneSubstract, "Plane Subtract"),
-        (PlanarizationType::MeanSubtract, "Mean Subtract"),
+        (FitType::LineFitSubtract, "Line Fit"),
+        (FitType::LineMeanSubtract, "Line Mean Subtract"),
+        (FitType::PlaneFitSubtract, "Plane Fit"),
+        (FitType::MeanSubtract, "Mean Subtract"),
     ];
-    let sub_type_selector = ComboBox::new(
-        (image.image_data.uuid(), "planarization type"),
-        "Planarization Type",
-    )
-    .selected_text(
-        types
-            .iter()
-            .find(|(t, _)| *t == image.planarization_type)
-            .unwrap()
-            .1,
-    )
-    .show_ui(ui, |ui| {
-        types
-            .iter()
-            .copied()
-            .map(|(typ, name)| {
-                ui.selectable_value(&mut image.planarization_type, typ, name)
-                    .clicked()
-            })
-            .any(|b| b)
-    });
+    let sub_type_selector = ComboBox::new((image.image_data.uuid(), "fit type"), "")
+        .selected_text(types.iter().find(|(t, _)| *t == image.fit_type).unwrap().1)
+        .show_ui(ui, |ui| {
+            types
+                .iter()
+                .copied()
+                .map(|(typ, name)| {
+                    ui.selectable_value(&mut image.fit_type, typ, name)
+                        .clicked()
+                })
+                .any(|b| b)
+        });
     if matches!(sub_type_selector.inner, Some(true)) {
         image.update_texture(image_encoder);
     }
@@ -322,7 +318,7 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     }
     if let Some(data) = image.image_data.fit_data.read().as_ref() {
         match data {
-            FitData::PlaneFit {
+            FitData::PlaneFitSubtract {
                 mean,
                 x_slope,
                 y_slope,
@@ -348,18 +344,10 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum PlanarizationType {
-    MeanSubtract,
-    PlaneSubstract,
-    LineMeanSubtract,
-    LineFitSubtract,
-}
-
 struct StaticImage {
     image_data: ScanImage,
     image_src: SXM,
-    planarization_type: PlanarizationType,
+    fit_type: FitType,
 }
 impl StaticImage {
     pub fn load_sxm(sxm_file: SXM, image_encoder: &ImageEncoder) -> Result<Self> {
@@ -377,24 +365,11 @@ impl StaticImage {
         Ok(Self {
             image_data: scan_image,
             image_src: sxm_file,
-            planarization_type: PlanarizationType::LineFitSubtract,
+            fit_type: FitType::LineFitSubtract,
         })
     }
     pub fn update_texture(&self, image_encoder: &mut ImageEncoder) {
-        match self.planarization_type {
-            PlanarizationType::MeanSubtract => {
-                self.image_data.write_texture_mean_subtract(image_encoder)
-            }
-            PlanarizationType::PlaneSubstract => self
-                .image_data
-                .write_texture_plane_fit_subtract(image_encoder),
-            PlanarizationType::LineMeanSubtract => self
-                .image_data
-                .write_texture_line_mean_subtract(image_encoder),
-            PlanarizationType::LineFitSubtract => self
-                .image_data
-                .write_texture_line_fit_subtract(image_encoder),
-        }
+        self.image_data.write_texture(image_encoder, self.fit_type);
     }
 }
 

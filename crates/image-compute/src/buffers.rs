@@ -55,13 +55,16 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
         queue: &Queue,
         range: impl RangeBounds<usize>,
         f: impl FnOnce(&[T]) -> W + Send + 'static,
-    ) -> Arc<OnceLock<W>>
+    ) -> Result<Arc<OnceLock<W>>, QueueDownloadError>
     where
         W: Sync + Send + Debug + 'static,
     {
         let buf = Arc::new(std::sync::OnceLock::new());
         let buf_clone = buf.clone();
         let range = rangebounds_map(range, |v| (*v * size_of::<T>()) as BufferAddress);
+        if range_is_empty(&range) {
+            return Err(QueueDownloadError::BufferSizeZero);
+        }
         wgpu::util::DownloadBuffer::read_buffer(
             device,
             queue,
@@ -70,14 +73,14 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
                 buf.set(f(bytemuck::cast_slice(&db.unwrap()))).unwrap();
             },
         );
-        buf_clone
+        Ok(buf_clone)
     }
     pub fn queue_download(
         &self,
         device: &Device,
         queue: &Queue,
         range: impl RangeBounds<usize>,
-    ) -> Arc<OnceLock<Box<[T]>>>
+    ) -> Result<Arc<OnceLock<Box<[T]>>>, QueueDownloadError>
     where
         T: Sync + Send + Debug,
     {
@@ -91,6 +94,12 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum QueueDownloadError {
+    #[error("the requested size of the download was zero")]
+    BufferSizeZero,
+}
+
 fn rangebounds_map<I, O>(
     range: impl RangeBounds<I>,
     mut f: impl FnMut(&I) -> O,
@@ -99,6 +108,20 @@ fn rangebounds_map<I, O>(
         range.start_bound().map(&mut f),
         range.end_bound().map(&mut f),
     )
+}
+
+fn range_is_empty(range: &impl RangeBounds<u64>) -> bool {
+    let first = match range.start_bound() {
+        std::ops::Bound::Included(n) => *n,
+        std::ops::Bound::Excluded(n) => *n + 1,
+        std::ops::Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        std::ops::Bound::Included(n) => *n + 1,
+        std::ops::Bound::Excluded(n) => *n,
+        std::ops::Bound::Unbounded => u64::MAX,
+    };
+    end <= first
 }
 
 pub struct TransformBuffer(Buffer);
