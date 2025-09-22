@@ -191,6 +191,9 @@ impl ScanImage {
         resp
     }
     pub fn write_texture(&self, image_encoder: &mut ImageEncoder, fit_type: FitType) {
+        if self.current_size()[1] == 0 {
+            return;
+        }
         let mut encoder = image_encoder
             .wgpu_state
             .device
