@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use eframe::wgpu::{DeviceDescriptor, PresentMode};
 use eyre::Context as _;
 use tracing::info;

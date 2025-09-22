@@ -123,17 +123,14 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
             && !self.app_state.current_scan.image_data.is_full()
         {
-            let [x, y] = self.app_state.current_scan.image_data.current_size();
-            let line = &self.app_state.current_scan.image_src.data[0][0][x as usize * y as usize..]
-                [..x as usize];
-            self.app_state
-                .current_scan
+            let current_scan = &mut self.app_state.current_scan;
+            let [x, y] = current_scan.image_data.current_size();
+            let line = &current_scan.image_src.data[0][0][x as usize * y as usize..][..x as usize];
+            current_scan
                 .image_data
                 .write_line(&self.image_encoder, line)
                 .unwrap();
-            self.app_state
-                .current_scan
-                .update_texture(&mut self.image_encoder);
+            current_scan.update_texture(&mut self.image_encoder);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
