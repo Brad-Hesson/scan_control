@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use crate::components::file_dialog::ViewportFileDialog;
+use crate::components::file_tree::FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
@@ -14,7 +15,7 @@ use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
 use image_compute::image_compute::{FitData, FitType};
-use itertools::{izip, Itertools};
+use itertools::{izip, FilterOk, Itertools};
 use sxmfile::SXM;
 use tracing::{error, info, warn};
 
@@ -26,12 +27,15 @@ pub struct MyApp {
     image_encoder: ImageEncoder,
     undo_queue: UndoQueue<AppState>,
     current_theme: ThemePreference,
+    folder_dialog: ViewportFileDialog,
 }
 
 pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
     current_scan: StaticImage,
+    working_folder: Option<PathBuf>,
+    file_tree: Option<FileTree>,
 }
 
 impl MyApp {
@@ -45,7 +49,7 @@ impl MyApp {
         //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
         // );
 
-        let src_sxm = SXM::parse_file("20240229_075.sxm").unwrap();
+        let src_sxm = SXM::parse_file("data/20240229_075.sxm").unwrap();
         let mut image_encoder = ImageEncoder::new(wgpu);
         let current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
         current_scan.image_data.clear(&mut image_encoder);
@@ -54,11 +58,14 @@ impl MyApp {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
                 current_scan,
+                working_folder: None,
+                file_tree: None,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(),
             current_theme: cc.egui_ctx.theme().into(),
+            folder_dialog: ViewportFileDialog::new(FileDialog::new().title("Open folder")),
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -98,6 +105,14 @@ impl eframe::App for MyApp {
             if let Err(e) = self.load_files(paths).context("file load failed") {
                 error!("{e:#}");
             }
+        }
+        if let Some(path) = self.folder_dialog.take_picked() {
+            match FileTree::load_path(&path) {
+                Ok(ft) => self.app_state.file_tree = Some(ft),
+                Err(e) => error!("{e:#}"),
+            }
+            dbg!(&self.app_state.file_tree);
+            self.app_state.working_folder = Some(path);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -312,11 +327,15 @@ impl eframe::App for MyApp {
 
 fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
-        if ui.add(Button::new("Import")).clicked() {
+        if ui.add(Button::new("Import File")).clicked() {
             app.file_dialog.pick_multiple();
+        }
+        if ui.add(Button::new("Open Folder")).clicked() {
+            app.folder_dialog.pick_directory();
         }
     });
     app.file_dialog.update(ctx);
+    app.folder_dialog.update(ctx);
 }
 fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEncoder) {
     let vis = &mut ui.style_mut().visuals.widgets.inactive;
