@@ -6,7 +6,9 @@ use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
-use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Modifiers, Ui};
+use egui::{
+    Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Modifiers, Shadow, ThemePreference, Ui,
+};
 use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
@@ -23,6 +25,7 @@ pub struct MyApp {
     app_state: AppState,
     image_encoder: ImageEncoder,
     undo_queue: UndoQueue<AppState>,
+    current_theme: ThemePreference,
 }
 
 pub struct AppState {
@@ -55,6 +58,7 @@ impl MyApp {
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(),
+            current_theme: cc.egui_ctx.theme().into(),
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -147,6 +151,15 @@ impl eframe::App for MyApp {
                 .collect_vec();
             self.mod_state(DeleteImagesModifier::new(idxs));
         }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::T)) {
+            let new_theme = match self.current_theme {
+                ThemePreference::Dark => ThemePreference::Light,
+                ThemePreference::Light => ThemePreference::Dark,
+                ThemePreference::System => unreachable!(),
+            };
+            ctx.set_theme(new_theme);
+            self.current_theme = new_theme;
+        }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
@@ -226,7 +239,11 @@ impl eframe::App for MyApp {
                     self.app_state.image_list.clear_selected();
                 };
                 egui::Window::new("Images")
-                    .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                    .frame(
+                        Frame::window(&ctx.style())
+                            .multiply_with_opacity(0.5)
+                            .shadow(Shadow::NONE),
+                    )
                     .constrain_to(ui.min_rect())
                     .anchor(Align2::LEFT_TOP, egui::Vec2::new(5., 5.))
                     .resizable(false)
@@ -236,7 +253,11 @@ impl eframe::App for MyApp {
                         self.app_state.image_list.show(ui);
                     });
                 let mut new_top = egui::Window::new("Current Scan")
-                    .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                    .frame(
+                        Frame::window(&ctx.style())
+                            .multiply_with_opacity(0.5)
+                            .shadow(Shadow::NONE),
+                    )
                     .constrain_to(ui.min_rect())
                     .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                     .resizable(false)
@@ -309,14 +330,16 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     let sub_type_selector = ComboBox::new((image.image_data.uuid(), "fit type"), "")
         .selected_text(types.iter().find(|(t, _)| *t == image.fit_type).unwrap().1)
         .show_ui(ui, |ui| {
-            types
+            ui.set_min_height(82.);
+            let changed = types
                 .iter()
                 .copied()
                 .map(|(typ, name)| {
                     ui.selectable_value(&mut image.fit_type, typ, name)
                         .clicked()
                 })
-                .any(|b| b)
+                .any(|b| b);
+            changed
         });
     if matches!(sub_type_selector.inner, Some(true)) {
         image.update_texture(image_encoder);
