@@ -196,6 +196,11 @@ impl ImageComputeBuffers {
         self.image_size_buffer.queue_write(queue, 1, &[self.lines]);
         Ok(())
     }
+    pub fn clear_lines(&mut self, queue: &Queue) {
+        let data = vec![f32::NAN; (self.size[0] * self.size[1]) as usize];
+        self.image_data_buffer.queue_write(queue, 0, &data);
+        self.lines = 0;
+    }
     pub fn current_size(&self) -> [u32; 2] {
         [self.size[0], self.lines]
     }

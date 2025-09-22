@@ -6,8 +6,8 @@ use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, FitData, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
-use egui::Color32;
 use egui::{Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Ui};
+use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
@@ -27,8 +27,7 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
-    current_scan: ScanImage,
-    current_scan_src: Box<[f32]>,
+    current_scan: StaticImage,
 }
 
 impl MyApp {
@@ -43,26 +42,14 @@ impl MyApp {
         // );
 
         let src_sxm = SXM::parse_file("20240229_075.sxm").unwrap();
-        let width = 97;
-        let mut current_scan_src = vec![];
-        let src_size = src_sxm.get_image_size().unwrap();
-        for y in 0..src_size[1] as usize {
-            let line = &src_sxm.data[0][0][y * src_size[0] as usize..][..width];
-            current_scan_src.extend_from_slice(line);
-        }
         let image_encoder = ImageEncoder::new(wgpu);
+        let mut current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
+        current_scan.image_data.clear_lines(&image_encoder);
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
-                current_scan: ScanImage::new(
-                    &image_encoder,
-                    [width as u32, 512],
-                    0,
-                    Affine2::from_scale([width as _, 512.].into()),
-                    |_| {},
-                ),
-                current_scan_src: current_scan_src.into_boxed_slice(),
+                current_scan,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -134,17 +121,19 @@ impl eframe::App for MyApp {
             self.undo_queue.redo(&mut self.app_state);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
-            && !self.app_state.current_scan.is_full()
+            && !self.app_state.current_scan.image_data.is_full()
         {
-            let [x, y] = self.app_state.current_scan.current_size();
-            let line = &self.app_state.current_scan_src[x as usize * y as usize..][..x as usize];
+            let [x, y] = self.app_state.current_scan.image_data.current_size();
+            let line = &self.app_state.current_scan.image_src.data[0][0][x as usize * y as usize..]
+                [..x as usize];
             self.app_state
                 .current_scan
+                .image_data
                 .write_line(&self.image_encoder, line)
                 .unwrap();
             self.app_state
                 .current_scan
-                .write_texture_line_fit_subtract(&mut self.image_encoder);
+                .update_texture(&mut self.image_encoder);
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -196,9 +185,9 @@ impl eframe::App for MyApp {
                                 .show(ctx);
                             }
                         }
-                        self.app_state.current_scan.show(ctx);
+                        self.app_state.current_scan.image_data.show(ctx);
                         BorderRectangle {
-                            transform: self.app_state.current_scan.transform,
+                            transform: self.app_state.current_scan.image_data.transform,
                             color: Color32::RED,
                             dashed: false,
                         }
@@ -239,12 +228,25 @@ impl eframe::App for MyApp {
                     .constrain_to(ui.min_rect())
                     .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                     .resizable(false)
-                    .show(ctx, |ui| image_menu(ui, &self.app_state.current_scan))
+                    .show(ctx, |ui| {
+                        image_menu(
+                            ui,
+                            &mut self.app_state.current_scan,
+                            &mut self.image_encoder,
+                        )
+                    })
                     .unwrap()
                     .response
                     .rect
                     .bottom();
-                for i in self.app_state.image_list.iter_selected_indexes().rev() {
+                for i in self
+                    .app_state
+                    .image_list
+                    .iter_selected_indexes()
+                    .rev()
+                    .collect_vec()
+                    .into_iter()
+                {
                     let name = match self.app_state.image_list[i].image_src.get_name() {
                         Ok(name) => name,
                         Err(e) => {
@@ -260,7 +262,11 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            image_menu(ui, &self.app_state.image_list[i].image_data)
+                            image_menu(
+                                ui,
+                                &mut self.app_state.image_list[i],
+                                &mut self.image_encoder,
+                            )
                         })
                         .unwrap()
                         .response
@@ -279,15 +285,45 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     });
     app.file_dialog.update(ctx);
 }
-fn image_menu(ui: &mut Ui, image: &ScanImage) {
+fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEncoder) {
     let vis = &mut ui.style_mut().visuals.widgets.inactive;
     vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-    if let Some(data) = image.norm_data.read().as_ref() {
+    let types = [
+        (PlanarizationType::LineFitSubtract, "Line Subtract"),
+        (PlanarizationType::LineMeanSubtract, "Line Mean Subtract"),
+        (PlanarizationType::PlaneSubstract, "Plane Subtract"),
+        (PlanarizationType::MeanSubtract, "Mean Subtract"),
+    ];
+    let sub_type_selector = ComboBox::new(
+        (image.image_data.uuid(), "planarization type"),
+        "Planarization Type",
+    )
+    .selected_text(
+        types
+            .iter()
+            .find(|(t, _)| *t == image.planarization_type)
+            .unwrap()
+            .1,
+    )
+    .show_ui(ui, |ui| {
+        types
+            .iter()
+            .copied()
+            .map(|(typ, name)| {
+                ui.selectable_value(&mut image.planarization_type, typ, name)
+                    .clicked()
+            })
+            .any(|b| b)
+    });
+    if matches!(sub_type_selector.inner, Some(true)) {
+        image.update_texture(image_encoder);
+    }
+    if let Some(data) = image.image_data.norm_data.read().as_ref() {
         ui.label(format!("Min: {:.2}", MetersFmt(data.min)));
         ui.label(format!("Max: {:.2}", MetersFmt(data.max)));
         ui.label(format!("Std Dev: {:.2}", MetersFmt(data.stddev)));
     }
-    if let Some(data) = image.fit_data.read().as_ref() {
+    if let Some(data) = image.image_data.fit_data.read().as_ref() {
         match data {
             FitData::PlaneFit {
                 mean,
@@ -315,9 +351,18 @@ fn image_menu(ui: &mut Ui, image: &ScanImage) {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PlanarizationType {
+    MeanSubtract,
+    PlaneSubstract,
+    LineMeanSubtract,
+    LineFitSubtract,
+}
+
 struct StaticImage {
     image_data: ScanImage,
     image_src: SXM,
+    planarization_type: PlanarizationType,
 }
 impl StaticImage {
     pub fn load_sxm(sxm_file: SXM, image_encoder: &ImageEncoder) -> Result<Self> {
@@ -335,7 +380,24 @@ impl StaticImage {
         Ok(Self {
             image_data: scan_image,
             image_src: sxm_file,
+            planarization_type: PlanarizationType::LineFitSubtract,
         })
+    }
+    pub fn update_texture(&self, image_encoder: &mut ImageEncoder) {
+        match self.planarization_type {
+            PlanarizationType::MeanSubtract => {
+                self.image_data.write_texture_mean_subtract(image_encoder)
+            }
+            PlanarizationType::PlaneSubstract => self
+                .image_data
+                .write_texture_plane_fit_subtract(image_encoder),
+            PlanarizationType::LineMeanSubtract => self
+                .image_data
+                .write_texture_line_mean_subtract(image_encoder),
+            PlanarizationType::LineFitSubtract => self
+                .image_data
+                .write_texture_line_fit_subtract(image_encoder),
+        }
     }
 }
 

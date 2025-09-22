@@ -155,6 +155,9 @@ impl ScanImage {
             norm_data: Arc::new(RwLock::new(None)),
         }
     }
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
+    }
     pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
         let resp = ctx
             .ui
@@ -383,6 +386,11 @@ impl ScanImage {
         self.image_data
             .write()
             .write_line(&image_encoder.wgpu_state.queue, line)
+    }
+    pub fn clear_lines(&mut self, image_encoder: &ImageEncoder) {
+        self.image_data
+            .write()
+            .clear_lines(&image_encoder.wgpu_state.queue);
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()
