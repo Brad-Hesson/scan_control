@@ -45,7 +45,7 @@ impl<S: 'static> UndoQueue<S> {
 pub trait StateModify<S>: Any {
     fn redo(&mut self, state: &mut S) -> bool;
     fn undo(&mut self, state: &mut S);
-    fn combine(&mut self, _previous: &mut dyn StateModify<S>) -> bool {
+    fn combine(&mut self, _previous: &mut dyn Any) -> bool {
         false
     }
 }

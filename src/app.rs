@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use std::path::Path;
+use std::path::PathBuf;
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
@@ -60,15 +60,19 @@ impl MyApp {
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
         self.undo_queue.push(&mut self.app_state, modifier);
     }
-    fn load_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        info!("Trying to load image `{}`", path.display());
-        let sxm_file = sxmfile::SXM::parse_file(path)?;
-        info!("Loaded image `{}`", path.display());
-        let static_image = StaticImage::load_sxm(sxm_file, &self.image_encoder)?;
-        static_image.update_texture(&mut self.image_encoder);
-        let entry = SelectableEntry::new(static_image, image_list_item);
-        self.mod_state(LoadImageModifier(Some(entry)));
+    fn load_files(&mut self, paths: Vec<PathBuf>) -> Result<()> {
+        let mut imgs = vec![];
+        for path in paths {
+            info!("Trying to load image `{}`", path.display());
+            let sxm_file = sxmfile::SXM::parse_file(&path)?;
+            info!("Loaded image `{}`", path.display());
+            let static_image = StaticImage::load_sxm(sxm_file, &self.image_encoder)?;
+            static_image.update_texture(&mut self.image_encoder);
+            let entry = SelectableEntry::new(static_image, image_list_item);
+            imgs.push(entry);
+        }
+        imgs.sort_by_cached_key(|img| img.image_src.get_datetime().unwrap());
+        self.mod_state(LoadImagesModifier::new(imgs));
         Ok(())
     }
     // fn update_gradient(&mut self) {
@@ -87,10 +91,8 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
-            for path in paths {
-                if let Err(e) = self.load_file(path).context("file load failed") {
-                    error!("{e:#}");
-                }
+            if let Err(e) = self.load_files(paths).context("file load failed") {
+                error!("{e:#}");
             }
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
@@ -136,6 +138,14 @@ impl eframe::App for MyApp {
                 .current_scan
                 .image_data
                 .clear(&mut self.image_encoder);
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::Delete)) {
+            let idxs = self
+                .app_state
+                .image_list
+                .iter_selected_indexes()
+                .collect_vec();
+            self.mod_state(DeleteImagesModifier::new(idxs));
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
@@ -388,17 +398,55 @@ fn image_list_item(image: &StaticImage) -> Atoms<'_> {
         .into_atoms()
 }
 
-struct LoadImageModifier(Option<SelectableEntry<StaticImage>>);
-impl StateModify<AppState> for LoadImageModifier {
+struct DeleteImagesModifier {
+    imgs: Vec<SelectableEntry<StaticImage>>,
+    idxs: Vec<usize>,
+}
+impl DeleteImagesModifier {
+    pub fn new(idxs: Vec<usize>) -> Self {
+        Self {
+            imgs: Vec::with_capacity(idxs.len()),
+            idxs,
+        }
+    }
+}
+impl StateModify<AppState> for DeleteImagesModifier {
     fn redo(&mut self, state: &mut AppState) -> bool {
-        state.image_list.push(self.0.take().unwrap());
+        for idx in self.idxs.iter().rev() {
+            self.imgs.push(state.image_list.remove(*idx));
+        }
         true
     }
-
     fn undo(&mut self, state: &mut AppState) {
-        let mut entry = state.image_list.pop().unwrap();
-        entry.selected = false;
-        self.0 = Some(entry);
+        for (idx, img) in izip!(&self.idxs, self.imgs.drain(..).rev()) {
+            state.image_list.insert(*idx, img);
+        }
+    }
+}
+
+struct LoadImagesModifier {
+    imgs: Vec<SelectableEntry<StaticImage>>,
+    num: usize,
+}
+impl LoadImagesModifier {
+    pub fn new(imgs: Vec<SelectableEntry<StaticImage>>) -> Self {
+        Self {
+            num: imgs.len(),
+            imgs,
+        }
+    }
+}
+impl StateModify<AppState> for LoadImagesModifier {
+    fn redo(&mut self, state: &mut AppState) -> bool {
+        state.image_list.extend(self.imgs.drain(..));
+        true
+    }
+    fn undo(&mut self, state: &mut AppState) {
+        let start = state.image_list.len() - self.num;
+        self.imgs.extend(state.image_list.drain(start..));
+        for img in &mut self.imgs {
+            img.selected = false;
+        }
     }
 }
 
