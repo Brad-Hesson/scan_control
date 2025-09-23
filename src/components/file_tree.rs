@@ -1,9 +1,7 @@
 use std::{
-    collections::BTreeSet,
-    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     sync::{
-        mpsc::{self, Receiver, RecvError, RecvTimeoutError},
+        mpsc::{self, Receiver, RecvTimeoutError},
         Arc, Mutex,
     },
     time::Duration,
@@ -11,14 +9,10 @@ use std::{
 
 use egui::{Button, CollapsingHeader, Context, Image, Ui};
 use eyre::{bail, Context as _, ContextCompat, Result};
-use itertools::{izip, Itertools};
-use notify::{
-    event::{ModifyKind, RenameMode},
-    Event, EventKind, RecommendedWatcher, Watcher,
-};
-use notify_debouncer_mini::{DebouncedEvent, Debouncer};
+use itertools::Itertools;
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, Watcher};
 use sxmfile::SXM;
-use tracing::{error, event, trace};
+use tracing::{error, trace};
 
 pub struct FileTree {
     working_path: PathBuf,
