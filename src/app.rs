@@ -8,7 +8,8 @@ use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::{
-    Align2, Atoms, Button, Frame, Image, IntoAtoms, MenuBar, Modifiers, Shadow, ThemePreference, Ui,
+    widgets, Align2, Atoms, Button, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers, Shadow,
+    ThemePreference, Ui,
 };
 use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
@@ -107,11 +108,10 @@ impl eframe::App for MyApp {
             }
         }
         if let Some(path) = self.folder_dialog.take_picked() {
-            match FileTree::load_path(&path) {
+            match FileTree::load_path(ctx, &path) {
                 Ok(ft) => self.app_state.file_tree = Some(ft),
                 Err(e) => error!("{e:#}"),
             }
-            dbg!(&self.app_state.file_tree);
             self.app_state.working_folder = Some(path);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
@@ -178,6 +178,9 @@ impl eframe::App for MyApp {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
                 file_menu_button(ui, ctx, self);
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    widgets::global_theme_preference_switch(ui);
+                });
             });
         });
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
@@ -265,7 +268,10 @@ impl eframe::App for MyApp {
                     .show(ctx, |ui| {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-                        self.app_state.image_list.show(ui);
+                        // self.app_state.image_list.show(ui);
+                        if let Some(tree) = &mut self.app_state.file_tree {
+                            tree.show(ui);
+                        }
                     });
                 let mut new_top = egui::Window::new("Current Scan")
                     .frame(
@@ -535,10 +541,10 @@ impl Display for MetersFmt {
             _ => None,
         };
         if let Some(suf) = suf {
-            warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
             f64::fmt(&scaled, f)?;
             write!(f, " {}", suf)?;
         } else {
+            warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
             f64::fmt(&self.0, f)?;
             write!(f, " m")?;
         }
