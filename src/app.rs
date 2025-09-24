@@ -112,6 +112,9 @@ impl eframe::App for MyApp {
                 Ok(ft) => self.app_state.file_tree = Some(ft),
                 Err(e) => error!("{e:#}"),
             }
+            for item in self.app_state.file_tree.as_ref().unwrap() {
+                println!("{}", item.path().display());
+            }
             self.app_state.working_folder = Some(path);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
@@ -264,7 +267,9 @@ impl eframe::App for MyApp {
                     )
                     .constrain_to(ui.min_rect())
                     .anchor(Align2::LEFT_TOP, egui::Vec2::new(5., 5.))
-                    .resizable(false)
+                    .default_size([200., 400.])
+                    .resizable(true)
+                    .scroll([false, true])
                     .show(ctx, |ui| {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);

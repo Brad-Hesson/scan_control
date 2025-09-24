@@ -1,195 +1,93 @@
 use std::{
-    path::{Path, PathBuf},
-    sync::{
-        mpsc::{self, Receiver, RecvTimeoutError},
-        Arc, Mutex,
-    },
-    time::Duration,
+    path::{Display, Path, PathBuf},
+    sync::mpsc,
 };
 
 use egui::{Button, CollapsingHeader, Context, Image, Ui};
 use eyre::{bail, Context as _, ContextCompat, Result};
 use itertools::Itertools;
-use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, Watcher};
 use sxmfile::SXM;
 use tracing::{error, trace};
 
+use crate::components::modification_watcher::{Modification, ModificationWatcher};
+
 pub struct FileTree {
-    working_path: PathBuf,
-    top: Arc<Mutex<DirItem>>,
-    watcher: RecommendedWatcher,
+    top: DirItem,
+    _watcher: ModificationWatcher,
+    rx: mpsc::Receiver<Modification>,
 }
 impl FileTree {
     pub fn load_path(ctx: &Context, path: impl AsRef<Path>) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
-        let top = Arc::new(Mutex::new(DirItem::load_dir(&path)?));
-        let mut watcher = notify::recommended_watcher(tx)?;
-        watcher.watch(path.as_ref(), notify::RecursiveMode::Recursive)?;
-        std::thread::spawn(watcher_job(rx, &top, ctx.clone()));
+        let mut _watcher = ModificationWatcher::new(tx, ctx.clone())?;
+        _watcher.watch(&path, notify::RecursiveMode::Recursive)?;
         Ok(Self {
-            working_path: path
-                .as_ref()
-                .canonicalize()
-                .context("failed to canonicalize path")?,
-            top,
-            watcher, // eb,
+            top: DirItem::load_dir(&path)?,
+            _watcher,
+            rx,
         })
     }
     pub fn show(&mut self, ui: &mut Ui) {
-        let DirItem::Folder { items, .. } = &*self.top.lock().unwrap() else {
+        self.update();
+        let DirItem::Folder { items, .. } = &self.top else {
             unreachable!()
         };
         for item in items {
             item.show(ui);
         }
     }
-}
-fn watcher_job(
-    rx: Receiver<notify::Result<Event>>,
-    top: &Arc<Mutex<DirItem>>,
-    ctx: Context,
-) -> impl FnOnce() {
-    let top = top.clone();
-    move || {
-        for modification in ModificationIter::new(rx) {
-            let top = &mut *top.lock().unwrap();
-            match modification {
-                Modification::Rename { from, to } => {
-                    trace!("Rename {} to {}", from.display(), to.display());
-                    *top.get_by_path_mut(from).unwrap().path_mut() = to;
-                }
-                Modification::Move { from, to } => {
-                    trace!("Move {} to {}", from.display(), to.display());
-                    let mut item = top.remove_by_path(from).unwrap();
-                    *item.path_mut() = to;
-                    top.insert(item).unwrap();
-                }
-                Modification::Create { path } => {
-                    trace!("Create {}", path.display());
-                    if let Some(entry) = DirItem::load_entry(path).unwrap() {
-                        top.insert(entry).unwrap();
+    pub fn update(&mut self) {
+        for modification in self.rx.try_iter() {
+            if let Err(e) = || -> Result<()> {
+                let top_path = self.top.path().to_path_buf();
+                let shortened: &dyn for<'a> Fn(&'a PathBuf) -> Result<Display<'a>> =
+                    &move |path: &PathBuf| Ok(path.strip_prefix(&top_path)?.display());
+                match modification {
+                    Modification::Rename { from, to } => {
+                        trace!("Rename `{}` to `{}`", shortened(&from)?, shortened(&to)?);
+                        *self.top.get_by_path_mut(from)?.path_mut() = to;
+                    }
+                    Modification::Move { from, to } => {
+                        trace!("Move `{}` to `{}`", shortened(&from)?, shortened(&to)?);
+                        let mut item = self.top.remove_by_path(from)?;
+                        *item.path_mut() = to;
+                        self.top.insert(item)?;
+                    }
+                    Modification::Create { path } => {
+                        trace!("Create `{}`", shortened(&path)?);
+                        if let Some(entry) = DirItem::load_entry(path)? {
+                            self.top.insert(entry)?;
+                        }
+                    }
+                    Modification::Delete { path } => {
+                        trace!("Delete `{}`", shortened(&path)?);
+                        self.top.remove_by_path(path)?;
                     }
                 }
-                Modification::Delete { path } => {
-                    trace!("Delete {}", path.display());
-                    top.remove_by_path(path).unwrap();
-                }
-            }
-            ctx.request_repaint();
+                Ok(())
+            }() {
+                error!("{e:#}")
+            };
         }
-        trace!("Exiting watcher thread");
     }
 }
+impl<'a> IntoIterator for &'a FileTree {
+    type Item = &'a DirItem;
 
-struct ModificationIter {
-    rx: Receiver<notify::Result<Event>>,
-    buffered: Option<Event>,
-}
-impl ModificationIter {
-    fn new(rx: Receiver<notify::Result<Event>>) -> Self {
-        Self { rx, buffered: None }
+    type IntoIter = Box<dyn DoubleEndedIterator<Item = Self::Item> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top.iter()
     }
 }
-impl Iterator for ModificationIter {
-    type Item = Modification;
+impl<'a> IntoIterator for &'a mut FileTree {
+    type Item = &'a mut DirItem;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut event = match self.buffered.take() {
-            Some(event) => event,
-            None => match self.rx.recv().ok()? {
-                Ok(event) => event,
-                Err(e) => {
-                    error!("{e:#}");
-                    return self.next();
-                }
-            },
-        };
-        let modification = match event.kind {
-            EventKind::Create(_) => {
-                let Some(path) = event.paths.pop() else {
-                    error!("got event with no paths");
-                    return self.next();
-                };
-                Some(Modification::Create { path })
-            }
-            EventKind::Modify(ModifyKind::Name(_)) => {
-                let Some(from) = event.paths.pop() else {
-                    error!("got event with no paths");
-                    return self.next();
-                };
-                let mut event = match self.rx.recv().ok()? {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!("{e:#}");
-                        return self.next();
-                    }
-                };
-                let modification = match event.kind {
-                    EventKind::Modify(ModifyKind::Name(_)) => {
-                        let Some(to) = event.paths.pop() else {
-                            error!("got event with no paths");
-                            return self.next();
-                        };
-                        Some(Modification::Rename { from, to })
-                    }
-                    _ => {
-                        error!("expected EventKind::Modify(ModifyKind::Name(_) got {event:?}");
-                        self.next()
-                    }
-                };
-                if event.paths.len() != 0 {
-                    error!("Extra paths in event");
-                }
-                modification
-            }
-            EventKind::Remove(_) => {
-                let Some(from) = event.paths.pop() else {
-                    error!("got event with no paths");
-                    return self.next();
-                };
-                let mut event = match self.rx.recv_timeout(Duration::from_millis(10)) {
-                    Ok(Ok(event)) => event,
-                    Ok(Err(e)) => {
-                        error!("{e:#}");
-                        return self.next();
-                    }
-                    Err(RecvTimeoutError::Disconnected) => return None,
-                    Err(RecvTimeoutError::Timeout) => {
-                        return Some(Modification::Delete { path: from })
-                    }
-                };
-                let modification = match event.kind {
-                    EventKind::Create(_) => {
-                        let Some(to) = event.paths.pop() else {
-                            error!("got event with no paths");
-                            return self.next();
-                        };
-                        Some(Modification::Move { from, to })
-                    }
-                    _ => {
-                        self.buffered = Some(event.clone());
-                        Some(Modification::Delete { path: from })
-                    }
-                };
-                if event.paths.len() != 0 {
-                    error!("Extra paths in event");
-                }
-                modification
-            }
-            _ => self.next(),
-        };
-        if event.paths.len() != 0 {
-            error!("Extra paths in event");
-        }
-        modification
+    type IntoIter = Box<dyn DoubleEndedIterator<Item = Self::Item> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.top.iter_mut()
     }
-}
-
-enum Modification {
-    Rename { from: PathBuf, to: PathBuf },
-    Move { from: PathBuf, to: PathBuf },
-    Create { path: PathBuf },
-    Delete { path: PathBuf },
 }
 
 pub enum DirItem {
@@ -197,10 +95,6 @@ pub enum DirItem {
     File { path: PathBuf, src: Option<SXM> },
 }
 impl DirItem {
-    fn refresh(&mut self) -> Result<()> {
-        *self = Self::load_entry(self.path())?.unwrap();
-        Ok(())
-    }
     fn insert(&mut self, item: DirItem) -> Result<()> {
         let path = item.path();
         let parent = self.get_by_path_mut(path.parent().context("path had no parent")?)?;
@@ -219,8 +113,13 @@ impl DirItem {
         Ok(items
             .extract_if(.., |item| item.path() == path)
             .exactly_one()
-            .ok()
-            .expect("only one item with the same path"))
+            .map_err(|mut items| match items.next() {
+                Some(item) => eyre::Report::msg(format!(
+                    "got multiple matches for `{}`",
+                    item.path().display()
+                )),
+                None => eyre::Report::msg(format!("path not found: `{}`", path.display())),
+            })?)
     }
     fn get_by_path_mut(&mut self, path: impl AsRef<Path>) -> Result<&mut DirItem> {
         let path = path.as_ref();
@@ -244,23 +143,37 @@ impl DirItem {
             DirItem::File { path, .. } => path,
         }
     }
-    fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         match self {
             DirItem::Folder { path, .. } => path,
             DirItem::File { path, .. } => path,
         }
     }
-    fn iter_children(&self) -> impl DoubleEndedIterator<Item = &DirItem> {
+    pub fn iter_children<'a>(&'a self) -> Box<dyn DoubleEndedIterator<Item = &'a DirItem> + 'a> {
         match self {
-            DirItem::Folder { items, .. } => items.iter(),
-            DirItem::File { .. } => (&[]).iter(),
+            DirItem::Folder { items, .. } => Box::new(items.iter()),
+            DirItem::File { .. } => Box::new(std::iter::once(self)),
         }
     }
-    fn iter_children_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut DirItem> {
+    fn iter<'a>(&'a self) -> Box<dyn DoubleEndedIterator<Item = &'a DirItem> + 'a> {
+        Box::new(self.iter_children().flat_map(|item| match item {
+            DirItem::Folder { .. } => item.iter(),
+            DirItem::File { .. } => Box::new(std::iter::once(item)),
+        }))
+    }
+    fn iter_children_mut<'a>(
+        &'a mut self,
+    ) -> Box<dyn DoubleEndedIterator<Item = &'a mut DirItem> + 'a> {
         match self {
-            DirItem::Folder { items, .. } => items.iter_mut(),
-            DirItem::File { .. } => (&mut []).iter_mut(),
+            DirItem::Folder { items, .. } => Box::new(items.iter_mut()),
+            DirItem::File { .. } => Box::new(std::iter::once(self)),
         }
+    }
+    fn iter_mut<'a>(&'a mut self) -> Box<dyn DoubleEndedIterator<Item = &'a mut DirItem> + 'a> {
+        Box::new(self.iter_children_mut().flat_map(|item| match item {
+            DirItem::Folder { .. } => item.iter_mut(),
+            DirItem::File { .. } => Box::new(std::iter::once(item)),
+        }))
     }
     fn show(&self, ui: &mut Ui) {
         match self {
@@ -272,11 +185,13 @@ impl DirItem {
         let Self::Folder { path, items } = self else {
             unreachable!()
         };
-        CollapsingHeader::new(path.file_stem().unwrap().to_string_lossy()).show(ui, |ui| {
-            for item in items {
-                item.show(ui);
-            }
-        });
+        CollapsingHeader::new(path.file_stem().unwrap().to_string_lossy())
+            .default_open(true)
+            .show(ui, |ui| {
+                for item in items {
+                    item.show(ui);
+                }
+            });
     }
     fn show_file(&self, ui: &mut Ui) {
         let Self::File { path, .. } = self else {
@@ -291,6 +206,7 @@ impl DirItem {
                 Some(egui::WidgetText::Text(name.to_string())),
             )
             .image_tint_follows_text_color(true)
+            .wrap_mode(egui::TextWrapMode::Truncate)
             .frame_when_inactive(false),
         );
     }
@@ -332,5 +248,23 @@ impl DirItem {
             src: None,
             path: path.as_ref().into(),
         }))
+    }
+}
+impl<'a> IntoIterator for &'a DirItem {
+    type Item = &'a DirItem;
+
+    type IntoIter = Box<dyn Iterator<Item = &'a DirItem> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+impl<'a> IntoIterator for &'a mut DirItem {
+    type Item = &'a mut DirItem;
+
+    type IntoIter = Box<dyn Iterator<Item = &'a mut DirItem> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
