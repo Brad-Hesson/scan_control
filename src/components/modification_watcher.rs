@@ -33,6 +33,9 @@ impl ModificationWatcher {
     pub fn watch(&mut self, path: impl AsRef<Path>, recursive_mode: RecursiveMode) -> Result<()> {
         Ok(self.watcher.watch(path.as_ref(), recursive_mode)?)
     }
+    pub fn unwatch(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        Ok(self.watcher.unwatch(path.as_ref())?)
+    }
 }
 
 struct ModificationIter {

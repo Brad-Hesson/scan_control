@@ -12,24 +12,35 @@ use tracing::{error, trace};
 use crate::components::modification_watcher::{Modification, ModificationWatcher};
 
 pub struct FileTree {
-    top: DirItem,
+    top: Option<DirItem>,
     _watcher: ModificationWatcher,
     rx: mpsc::Receiver<Modification>,
 }
 impl FileTree {
-    pub fn load_path(ctx: &Context, path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(ctx: &Context) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         let mut _watcher = ModificationWatcher::new(tx, ctx.clone())?;
-        _watcher.watch(&path, notify::RecursiveMode::Recursive)?;
         Ok(Self {
-            top: DirItem::load_dir(&path)?,
+            top: None,
             _watcher,
             rx,
         })
     }
+    pub fn load_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        if let Some(top) = self.top.take() {
+            self._watcher.unwatch(top.path())?;
+        }
+        self.top = Some(DirItem::load_dir(&path)?);
+        self._watcher
+            .watch(&path, notify::RecursiveMode::Recursive)?;
+        Ok(())
+    }
     pub fn show(&mut self, ui: &mut Ui) {
         self.update();
-        let DirItem::Folder { items, .. } = &self.top else {
+        let Some(top) = &mut self.top else {
+            return;
+        };
+        let DirItem::Folder { items, .. } = &top else {
             unreachable!()
         };
         for item in items {
@@ -37,31 +48,34 @@ impl FileTree {
         }
     }
     pub fn update(&mut self) {
+        let Some(top) = &mut self.top else {
+            return;
+        };
         for modification in self.rx.try_iter() {
             if let Err(e) = || -> Result<()> {
-                let top_path = self.top.path().to_path_buf();
+                let top_path = top.path().to_path_buf();
                 let shortened: &dyn for<'a> Fn(&'a PathBuf) -> Result<Display<'a>> =
                     &move |path: &PathBuf| Ok(path.strip_prefix(&top_path)?.display());
                 match modification {
                     Modification::Rename { from, to } => {
                         trace!("Rename `{}` to `{}`", shortened(&from)?, shortened(&to)?);
-                        *self.top.get_by_path_mut(from)?.path_mut() = to;
+                        *top.get_by_path_mut(from)?.path_mut() = to;
                     }
                     Modification::Move { from, to } => {
                         trace!("Move `{}` to `{}`", shortened(&from)?, shortened(&to)?);
-                        let mut item = self.top.remove_by_path(from)?;
+                        let mut item = top.remove_by_path(from)?;
                         *item.path_mut() = to;
-                        self.top.insert(item)?;
+                        top.insert(item)?;
                     }
                     Modification::Create { path } => {
                         trace!("Create `{}`", shortened(&path)?);
                         if let Some(entry) = DirItem::load_entry(path)? {
-                            self.top.insert(entry)?;
+                            top.insert(entry)?;
                         }
                     }
                     Modification::Delete { path } => {
                         trace!("Delete `{}`", shortened(&path)?);
-                        self.top.remove_by_path(path)?;
+                        top.remove_by_path(path)?;
                     }
                 }
                 Ok(())
@@ -77,7 +91,10 @@ impl<'a> IntoIterator for &'a FileTree {
     type IntoIter = Box<dyn DoubleEndedIterator<Item = Self::Item> + 'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.top.iter()
+        match &self.top {
+            Some(top) => top.iter(),
+            None => Box::new(std::iter::empty()),
+        }
     }
 }
 impl<'a> IntoIterator for &'a mut FileTree {
@@ -86,7 +103,10 @@ impl<'a> IntoIterator for &'a mut FileTree {
     type IntoIter = Box<dyn DoubleEndedIterator<Item = Self::Item> + 'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.top.iter_mut()
+        match &mut self.top {
+            Some(top) => top.iter_mut(),
+            None => Box::new(std::iter::empty()),
+        }
     }
 }
 

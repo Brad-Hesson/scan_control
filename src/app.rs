@@ -35,9 +35,17 @@ pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
     current_scan: StaticImage,
-    working_folder: Option<PathBuf>,
-    file_tree: Option<FileTree>,
+    file_tree: FileTree,
 }
+
+// trait UnwrapTraceExt{
+//     fn unwrap_trace<T>(self) -> Option<T>;
+// }
+// impl<T> UnwrapTraceExt for Result<T>{
+//     fn unwrap_trace<T>(self) -> Option<T> {
+//         todo!()
+//     }
+// }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -59,8 +67,7 @@ impl MyApp {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
                 current_scan,
-                working_folder: None,
-                file_tree: None,
+                file_tree: FileTree::new(&cc.egui_ctx).unwrap(),
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -108,14 +115,9 @@ impl eframe::App for MyApp {
             }
         }
         if let Some(path) = self.folder_dialog.take_picked() {
-            match FileTree::load_path(ctx, &path) {
-                Ok(ft) => self.app_state.file_tree = Some(ft),
-                Err(e) => error!("{e:#}"),
+            if let Err(e) = self.app_state.file_tree.load_path(&path) {
+                error!("{e:#}")
             }
-            for item in self.app_state.file_tree.as_ref().unwrap() {
-                println!("{}", item.path().display());
-            }
-            self.app_state.working_folder = Some(path);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -274,9 +276,7 @@ impl eframe::App for MyApp {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
                         // self.app_state.image_list.show(ui);
-                        if let Some(tree) = &mut self.app_state.file_tree {
-                            tree.show(ui);
-                        }
+                        self.app_state.file_tree.show(ui);
                     });
                 let mut new_top = egui::Window::new("Current Scan")
                     .frame(
