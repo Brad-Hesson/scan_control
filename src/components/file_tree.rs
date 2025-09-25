@@ -105,12 +105,12 @@ impl<'a> IntoIterator for &'a FileTree {
 impl<'a> IntoIterator for &'a mut FileTree {
     type Item = &'a mut DirItem;
 
-    type IntoIter = Box<dyn DoubleEndedIterator<Item = Self::Item> + 'a>;
+    type IntoIter = FileTreeIterMut<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         match &mut self.top {
             Some(top) => top.iter_mut(),
-            None => Box::new(std::iter::empty()),
+            None => FileTreeIterMut::empty(),
         }
     }
 }
@@ -183,11 +183,8 @@ impl DirItem {
     fn iter_children_mut<'a>(&'a mut self) -> ChildIterMut<'a> {
         ChildIterMut::new(self)
     }
-    fn iter_mut<'a>(&'a mut self) -> Box<dyn DoubleEndedIterator<Item = &'a mut DirItem> + 'a> {
-        Box::new(self.iter_children_mut().flat_map(|item| match item {
-            DirItem::Folder { .. } => item.iter_mut(),
-            DirItem::File { .. } => Box::new(std::iter::once(item)),
-        }))
+    fn iter_mut<'a>(&'a mut self) -> FileTreeIterMut<'a> {
+        FileTreeIterMut::new(self)
     }
     fn show(&self, ui: &mut Ui) {
         match self {
@@ -276,7 +273,7 @@ impl<'a> IntoIterator for &'a DirItem {
 impl<'a> IntoIterator for &'a mut DirItem {
     type Item = &'a mut DirItem;
 
-    type IntoIter = Box<dyn Iterator<Item = &'a mut DirItem> + 'a>;
+    type IntoIter = FileTreeIterMut<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
@@ -407,6 +404,65 @@ impl<'a> DoubleEndedIterator for FileTreeIterType<'a> {
         match self {
             FileTreeIterType::File(once) => once.next_back(),
             FileTreeIterType::Folder(iter) => iter.next_back(),
+        }
+    }
+}
+
+pub struct FileTreeIterMut<'a> {
+    iter: FlatMap<ChildIterMut<'a>, FileTreeIterMutType<'a>, fn(&'a mut DirItem) -> FileTreeIterMutType<'a>>,
+}
+impl<'a> FileTreeIterMut<'a> {
+    fn new(item: &'a mut DirItem) -> Self {
+        let map: fn(&'a mut DirItem) -> FileTreeIterMutType<'a> = |item| match item {
+            DirItem::Folder { .. } => FileTreeIterMutType::Folder(Box::new(item.iter_mut())),
+            DirItem::File { .. } => FileTreeIterMutType::File(std::iter::once(item)),
+        };
+        let iter = item.iter_children_mut().flat_map(map);
+        Self { iter }
+    }
+    fn empty() -> Self {
+        let children = ChildIterMut {
+            iter: ChildIterMutType::Folder((&mut []).iter_mut()),
+        };
+        let map: fn(&'a mut DirItem) -> FileTreeIterMutType<'a> = |item| match item {
+            DirItem::Folder { .. } => FileTreeIterMutType::Folder(Box::new(item.iter_mut())),
+            DirItem::File { .. } => FileTreeIterMutType::File(std::iter::once(item)),
+        };
+        let iter = children.flat_map(map);
+        Self { iter }
+    }
+}
+impl<'a> Iterator for FileTreeIterMut<'a> {
+    type Item = &'a mut DirItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+impl<'a> DoubleEndedIterator for FileTreeIterMut<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back()
+    }
+}
+enum FileTreeIterMutType<'a> {
+    File(core::iter::Once<&'a mut DirItem>),
+    Folder(Box<FileTreeIterMut<'a>>),
+}
+impl<'a> Iterator for FileTreeIterMutType<'a> {
+    type Item = &'a mut DirItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            FileTreeIterMutType::File(once) => once.next(),
+            FileTreeIterMutType::Folder(iter) => iter.next(),
+        }
+    }
+}
+impl<'a> DoubleEndedIterator for FileTreeIterMutType<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            FileTreeIterMutType::File(once) => once.next_back(),
+            FileTreeIterMutType::Folder(iter) => iter.next_back(),
         }
     }
 }
