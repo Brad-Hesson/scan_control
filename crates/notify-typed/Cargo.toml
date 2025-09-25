@@ -1,0 +1,10 @@
+[package]
+name = "notify-typed"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+itertools = { workspace = true }
+tracing = { workspace = true }
+eyre = { workspace = true }
+notify = "8.2.0"

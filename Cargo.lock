@@ -2206,6 +2206,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "notify-typed"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "itertools",
+ "notify",
+ "tracing",
+]
+
+[[package]]
 name = "notify-types"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3042,7 +3052,7 @@ dependencies = [
  "image-compute",
  "itertools",
  "mint",
- "notify",
+ "notify-typed",
  "pollster",
  "serde",
  "smol",

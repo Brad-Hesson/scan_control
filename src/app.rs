@@ -16,7 +16,7 @@ use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
 use image_compute::image_compute::{FitData, FitType};
-use itertools::{izip, FilterOk, Itertools};
+use itertools::{izip, Itertools};
 use sxmfile::SXM;
 use tracing::{error, info, warn};
 
