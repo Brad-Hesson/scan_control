@@ -18,13 +18,14 @@ impl EventWatcher {
     pub fn new(mut handler: impl EventHandler) -> Result<Self> {
         let (thread_tx, thread_rx) = mpsc::channel();
         let watcher = notify::recommended_watcher(move |event| {
-            if let Some(event) = WindowsEvent::try_map(event) {
+            if let Some(event) = SystemEvent::try_map(event) {
                 thread_tx.send(event).ok();
             }
         })?;
         std::thread::spawn(move || {
-            for modification in WindowsEventParser::new(thread_rx) {
-                handler.handle_event(modification);
+            for event in EventParser::new(thread_rx) {
+                trace!("{event:?}");
+                handler.handle_event(event);
             }
             trace!("Exiting EventWatcher thread")
         });
@@ -69,18 +70,19 @@ impl EventHandler for mpsc::Sender<Event> {
     }
 }
 
-struct WindowsEventParser {
-    rx: mpsc::Receiver<WindowsEvent>,
-    buffered: Option<WindowsEvent>,
+struct EventParser {
+    rx: mpsc::Receiver<SystemEvent>,
+    buffered: Option<SystemEvent>,
 }
-impl WindowsEventParser {
-    fn new(rx: mpsc::Receiver<WindowsEvent>) -> Self {
+impl EventParser {
+    fn new(rx: mpsc::Receiver<SystemEvent>) -> Self {
         Self { rx, buffered: None }
     }
 }
-impl Iterator for WindowsEventParser {
+impl Iterator for EventParser {
     type Item = Event;
 
+    #[cfg(target_os = "windows")]
     fn next(&mut self) -> Option<Self::Item> {
         let event = match self.buffered.take() {
             Some(event) => event,
@@ -90,20 +92,20 @@ impl Iterator for WindowsEventParser {
             },
         };
         match event {
-            WindowsEvent::Create { path } => Some(Event::Create { path }),
-            WindowsEvent::RenameFrom { path: from } => match self.rx.recv() {
+            SystemEvent::Create { path } => Some(Event::Create { path }),
+            SystemEvent::RenameFrom { path: from } => match self.rx.recv() {
                 Err(RecvError) => None,
-                Ok(WindowsEvent::RenameTo { path: to }) => Some(Event::Rename { from, to }),
+                Ok(SystemEvent::RenameTo { path: to }) => Some(Event::Rename { from, to }),
                 Ok(other_event) => {
                     error!("expected `RenameTo {{ to: _ }}` got `{other_event:?}`");
                     self.buffered = Some(other_event);
                     self.next()
                 }
             },
-            WindowsEvent::Remove { path: from } => {
+            SystemEvent::Remove { path: from } => {
                 match self.rx.recv_timeout(Duration::from_millis(100)) {
                     Err(RecvTimeoutError::Disconnected) => None,
-                    Ok(WindowsEvent::Create { path: to }) => Some(Event::Move { from, to }),
+                    Ok(SystemEvent::Create { path: to }) => Some(Event::Move { from, to }),
                     other_event_or_timeout => {
                         if let Ok(other_event) = other_event_or_timeout {
                             self.buffered = Some(other_event);
@@ -112,6 +114,36 @@ impl Iterator for WindowsEventParser {
                     }
                 }
             }
+            other_event => {
+                error!("got out of sequence event `{other_event:?}`");
+                self.next()
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    fn next(&mut self) -> Option<Self::Item> {
+        let event = match self.buffered.take() {
+            Some(event) => event,
+            None => match self.rx.recv() {
+                Err(RecvError) => return None,
+                Ok(event) => event,
+            },
+        };
+        match event {
+            SystemEvent::Create { path } => Some(Event::Create { path }),
+            SystemEvent::RenameFrom { path: from } => match self.rx.recv() {
+                Err(RecvError) => None,
+                Ok(SystemEvent::RenameTo { path: to }) if from.parent() == to.parent() => {
+                    Some(Event::Rename { from, to })
+                }
+                Ok(SystemEvent::RenameTo { path: to }) => Some(Event::Move { from, to }),
+                Ok(other_event) => {
+                    error!("expected `RenameTo {{ to: _ }}` got `{other_event:?}`");
+                    self.buffered = Some(other_event);
+                    self.next()
+                }
+            },
+            SystemEvent::Remove { path } => Some(Event::Delete { path }),
             other_event => {
                 error!("got out of sequence event `{other_event:?}`");
                 self.next()
@@ -129,19 +161,20 @@ pub enum Event {
 }
 
 #[derive(Debug)]
-enum WindowsEvent {
+enum SystemEvent {
     Create { path: PathBuf },
     Remove { path: PathBuf },
     RenameFrom { path: PathBuf },
     RenameTo { path: PathBuf },
 }
-impl WindowsEvent {
+impl SystemEvent {
     fn try_map(event: notify::Result<RawEvent>) -> Option<Self> {
-        let event = event.inspect_err(|e| error!("{e:#}")).ok()?;
-        let [path] = event
+        let mut event = event.inspect_err(|e| error!("{e:#}")).ok()?;
+        let path = event
             .paths
-            .try_into()
-            .expect("windows events only have one path");
+            .drain(..)
+            .next()
+            .expect("no events without a path");
         match event.kind {
             EventKind::Create(_) => Some(Self::Create { path }),
             EventKind::Remove(_) => Some(Self::Remove { path }),
