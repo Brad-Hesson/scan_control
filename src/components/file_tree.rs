@@ -6,37 +6,37 @@ use std::{
 };
 
 use egui::{Button, CollapsingHeader, Context, Image, Ui};
-use eyre::{Context as _, ContextCompat, Result, bail};
+use eyre::{bail, Context as _, ContextCompat, Result};
 use itertools::Itertools;
 use notify_typed::{Event, EventWatcher, RecursiveMode};
 use sxmfile::SXM;
-use tracing::{error, trace, info};
+use tracing::{error, info, trace};
 
 pub struct FileTree {
     top: Option<DirItem>,
     rx: mpsc::Receiver<Event>,
-    _watcher: EventWatcher,
+    watcher: EventWatcher,
 }
 impl FileTree {
     pub fn new(ctx: &Context) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
-        let mut _watcher = EventWatcher::new(move |event| {
+        let watcher = EventWatcher::new(move |event| {
             tx.send(event).ok();
-            ctx.request_repaint_after(Duration::from_millis(100));
+            ctx.request_repaint();
         })?;
         Ok(Self {
             top: None,
-            _watcher,
+            watcher,
             rx,
         })
     }
     pub fn load_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
         if let Some(top) = self.top.take() {
-            self._watcher.unwatch(top.path())?;
+            self.watcher.unwatch(top.path())?;
         }
         self.top = Some(DirItem::load_dir(&path)?);
-        self._watcher.watch(&path, RecursiveMode::Recursive)?;
+        self.watcher.watch(&path, RecursiveMode::Recursive)?;
         Ok(())
     }
     pub fn show(&mut self, ui: &mut Ui) {
@@ -409,7 +409,11 @@ impl<'a> DoubleEndedIterator for FileTreeIterType<'a> {
 }
 
 pub struct FileTreeIterMut<'a> {
-    iter: FlatMap<ChildIterMut<'a>, FileTreeIterMutType<'a>, fn(&'a mut DirItem) -> FileTreeIterMutType<'a>>,
+    iter: FlatMap<
+        ChildIterMut<'a>,
+        FileTreeIterMutType<'a>,
+        fn(&'a mut DirItem) -> FileTreeIterMutType<'a>,
+    >,
 }
 impl<'a> FileTreeIterMut<'a> {
     fn new(item: &'a mut DirItem) -> Self {
