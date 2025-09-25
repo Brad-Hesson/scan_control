@@ -209,27 +209,22 @@ fn generate_normalization__plane_fit(
         let s_xx = sums.x;
         let s_yy = sums.y;
         x_slope = s_xz / s_xx;
-        y_slope = s_yz / s_yy;
+        if s_yy == 0 {
+            y_slope = 0;
+        } else {
+            y_slope = s_yz / s_yy;
+        }
     }
     workgroupBarrier();
     let basis = calc_basis(i);
-    var plane: f64;
-    if isNan(y_slope) {
-        plane = x_slope * basis.x;
-    } else {
-        plane = x_slope * basis.x + y_slope * basis.y;
-    }
+    let plane = x_slope * basis.x + y_slope * basis.y;
     let value = basis.z - plane;
     xz[i] = value;
     yz[i] = value;
     std_dev[i] = value * value;
     if i == 0u {
         planarize_out[1] = x_slope;
-        if isNan(y_slope) {
-            planarize_out[2] = 0;
-        } else {
-            planarize_out[2] = y_slope;
-        }
+        planarize_out[2] = y_slope;
     }
 }
 
@@ -482,19 +477,4 @@ fn f32_nan() -> f32 {
     let bits: u32 = (sign << 31u) | (exp << 23u) | mantissa;
 
     return bitcast<f32>(bits);
-}
-
-fn isNan(x: f64) -> bool {
-    let bits: u64 = bitcast<u64>(x);
-
-    // Build masks without any u64 literals and using u32 shift counts.
-    let mask11: u64 = u64((1u << 11u) - 1u);            // 0x7ff as u64
-
-    // 52 ones as u64: low 32 ones + high 20 ones shifted by 32
-    let mask52: u64 = u64(0xffffffffu) | (u64((1u << 20u) - 1u) << 32u);
-
-    let exponent: u64 = (bits >> 52u) & mask11;         // bits 62..52
-    let mantissa: u64 = bits & mask52;                  // bits 51..0
-
-    return (exponent == mask11) && (mantissa != u64(0u));
 }
