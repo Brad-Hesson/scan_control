@@ -225,7 +225,11 @@ fn generate_normalization__plane_fit(
     std_dev[i] = value * value;
     if i == 0u {
         planarize_out[1] = x_slope;
-        planarize_out[2] = y_slope;
+        if isNan(y_slope) {
+            planarize_out[2] = 0;
+        } else {
+            planarize_out[2] = y_slope;
+        }
     }
 }
 
@@ -330,12 +334,7 @@ fn write__plane_fit(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
     if i >= image_len() { return; }
     let basis = calc_basis(i);
-    var plane: f64;
-    if isNan(planarize_out[2]) {
-        plane = planarize_out[1] * basis.x;
-    } else {
-        plane = planarize_out[1] * basis.x + planarize_out[2] * basis.y;
-    }
+    let plane = planarize_out[1] * basis.x + planarize_out[2] * basis.y;
     let value = f32(basis.z - plane);
     textureStore(texture_out, vec2(global_id.x % image_size.x, global_id.x / image_size.x), vec4(value, 0.0, 0.0, 0.0));
     if i == 0u {
