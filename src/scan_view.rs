@@ -236,8 +236,7 @@ impl ScanImage {
                         &mut pass,
                         &self.image_data.read(),
                     ),
-                };
-                info!("wrote to  texture");
+            };
         }
         image_encoder.wgpu_state.queue.submit([encoder.finish()]);
         {
