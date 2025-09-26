@@ -274,6 +274,7 @@ impl Debug for Indexer {
 
 pub struct File<T> {
     path: PathBuf,
+    uuid: uuid::Uuid,
     pub data: T,
     pub selected: bool,
     pub resp_group: ResponseGroup,
@@ -291,6 +292,7 @@ impl<T> File<T> {
     ) -> Option<Self> {
         let path = path.as_ref();
         load_callback(path).map(|data| Self {
+            uuid: uuid::Uuid::new_v4(),
             path: path.into(),
             data,
             selected: false,
@@ -616,22 +618,22 @@ impl<'a, T> DoubleEndedIterator for FilesIterMut<'a, T> {
     }
 }
 
-fn list_item<'a, T>(ui: &mut Ui, item: &'a File<T>) -> Response {
-    let name = item.path().file_stem().unwrap().to_string_lossy();
+fn list_item<'a, T>(ui: &mut Ui, file: &'a File<T>) -> Response {
+    let name = file.path().file_stem().unwrap().to_string_lossy();
     let atoms = (
         Image::new(egui::include_image!("../../assets/scan_image_icon.png")),
         egui::WidgetText::Text(name.to_string()),
     )
         .into_atoms();
 
-    let id = egui::Id::new(atoms.text());
+    let id = egui::Id::new(file.uuid);
     let mut layout = AtomLayout::new(atoms)
         .id(id)
         .sense(Sense::click())
         .wrap_mode(egui::TextWrapMode::Extend)
         .fallback_font(TextStyle::Button);
 
-    let selected = item.selected;
+    let selected = file.selected;
     let min_size = egui::Vec2::new(0., ui.spacing().interact_size.y);
 
     layout.map_atoms(|atom| {
