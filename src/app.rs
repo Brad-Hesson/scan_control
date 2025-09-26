@@ -214,7 +214,8 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let file_tree = &mut self.app_state.file_tree;
-                        for i in file_tree.iter_indexers() {
+                        let indexers = file_tree.iter_indexers().collect_vec();
+                        for i in indexers {
                             let resp = file_tree[i]
                                 .image_data
                                 .show(ctx)

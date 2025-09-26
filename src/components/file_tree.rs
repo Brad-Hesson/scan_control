@@ -196,16 +196,14 @@ impl<T> FileTree<T> {
             None
         }
     }
-    pub fn iter_indexers(&self) -> impl DoubleEndedIterator<Item = Indexer> {
-        let indexers = self
-            .top
-            .as_ref()
-            .map(|top| top.generate_indexers())
-            .unwrap_or_default();
-        indexers.into_iter()
+    pub fn iter_indexers(&self) -> Box<dyn DoubleEndedIterator<Item = Indexer> + '_> {
+        match self.top.as_ref() {
+            Some(top) => Box::new(top.generate_indexers()),
+            None => Box::new(std::iter::empty()),
+        }
     }
-    pub fn iter_selected_indexes(&self) -> impl DoubleEndedIterator<Item = Indexer>{
-        self.iter_indexers().filter(|ind| self[*ind].selected).collect_vec().into_iter()
+    pub fn iter_selected_indexes(&self) -> impl DoubleEndedIterator<Item = Indexer> + '_ {
+        self.iter_indexers().filter(|ind| self[*ind].selected)
     }
 }
 impl<'a, T> IntoIterator for &'a FileTree<T> {
@@ -356,21 +354,19 @@ impl<T> DirItem<T> {
             } => selected,
         }
     }
-    fn generate_indexers(&self) -> Vec<Indexer> {
+    fn generate_indexers(&self) -> Box<dyn DoubleEndedIterator<Item = Indexer> + '_> {
         match self {
-            DirItem::File { .. } => vec![Indexer::new()],
-            DirItem::Folder { items, .. } => items
-                .iter()
-                .enumerate()
-                .flat_map(|(i, item)| {
+            DirItem::File { .. } => Box::new(once(Indexer::new())),
+            DirItem::Folder { items, .. } => {
+                Box::new(items.iter().enumerate().flat_map(|(i, item)| {
                     item.generate_indexers()
                         .into_iter()
                         .map(move |mut indexer| {
                             indexer.push(i);
                             indexer
                         })
-                })
-                .collect(),
+                }))
+            }
         }
     }
     fn get(&self, mut indexer: Indexer) -> Option<&Self> {
