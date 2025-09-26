@@ -131,23 +131,23 @@ impl Iterator for EventParser {
         };
         match event {
             SystemEvent::Create { path } => Some(Event::Create { path }),
-            SystemEvent::RenameFrom { path: from } => match self.rx.recv() {
-                Err(RecvError) => None,
-                Ok(SystemEvent::RenameTo { path: to }) if from.parent() == to.parent() => {
-                    Some(Event::Rename { from, to })
+            SystemEvent::RenameFrom { path: from } => {
+                match self.rx.recv_timeout(Duration::from_millis(100)) {
+                    Err(RecvTimeoutError::Disconnected) => None,
+                    Ok(SystemEvent::RenameTo { path: to }) if from.parent() == to.parent() => {
+                        Some(Event::Rename { from, to })
+                    }
+                    Ok(SystemEvent::RenameTo { path: to }) => Some(Event::Move { from, to }),
+                    other_event_or_timeout => {
+                        if let Ok(other_event) = other_event_or_timeout {
+                            self.buffered = Some(other_event);
+                        }
+                        Some(Event::Delete { path: from })
+                    }
                 }
-                Ok(SystemEvent::RenameTo { path: to }) => Some(Event::Move { from, to }),
-                Ok(other_event) => {
-                    error!("expected `RenameTo {{ to: _ }}` got `{other_event:?}`");
-                    self.buffered = Some(other_event);
-                    self.next()
-                }
-            },
-            SystemEvent::Remove { path } => Some(Event::Delete { path }),
-            other_event => {
-                error!("got out of sequence event `{other_event:?}`");
-                self.next()
             }
+            SystemEvent::Remove { path } => Some(Event::Delete { path }),
+            SystemEvent::RenameTo { path } => Some(Event::Create { path }),
         }
     }
 }
