@@ -1,5 +1,5 @@
 use core::f32;
-use std::{mem::MaybeUninit, sync::Arc};
+use std::{cell::RefCell, mem::MaybeUninit, rc::Rc, sync::Arc};
 
 use eframe::{
     egui_wgpu::{self, Callback, RenderState},
@@ -16,6 +16,7 @@ use image::ImageCallback;
 use image_compute::image_compute::{
     FitData, FitType, ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
 };
+use tracing::info;
 use uuid::Uuid;
 
 use crate::app::COLOR_MAP_SIZE;
@@ -190,7 +191,7 @@ impl ScanImage {
         ctx.ui.painter().add(callback);
         resp
     }
-    pub fn write_texture(&self, image_encoder: &mut ImageEncoder, fit_type: FitType) {
+    pub fn write_texture(&self, image_encoder: &ImageEncoder, fit_type: FitType) {
         if self.current_size()[1] == 0 {
             return;
         }
@@ -204,27 +205,39 @@ impl ScanImage {
                 timestamp_writes: None,
             });
             match fit_type {
-                FitType::MeanSubtract => image_encoder.pipeline.dispatch_mean_subtract(
-                    &image_encoder.wgpu_state.device,
-                    &mut pass,
-                    &self.image_data.read(),
-                ),
-                FitType::PlaneFitSubtract => image_encoder.pipeline.dispatch_plane_fit_subtract(
-                    &image_encoder.wgpu_state.device,
-                    &mut pass,
-                    &self.image_data.read(),
-                ),
-                FitType::LineMeanSubtract => image_encoder.pipeline.dispatch_line_mean_subtract(
-                    &image_encoder.wgpu_state.device,
-                    &mut pass,
-                    &self.image_data.read(),
-                ),
-                FitType::LineFitSubtract => image_encoder.pipeline.dispatch_line_fit_subtract(
-                    &image_encoder.wgpu_state.device,
-                    &mut pass,
-                    &self.image_data.read(),
-                ),
-            };
+                FitType::MeanSubtract => {
+                    image_encoder.pipeline.borrow_mut().dispatch_mean_subtract(
+                        &image_encoder.wgpu_state.device,
+                        &mut pass,
+                        &self.image_data.read(),
+                    )
+                }
+                FitType::PlaneFitSubtract => image_encoder
+                    .pipeline
+                    .borrow_mut()
+                    .dispatch_plane_fit_subtract(
+                        &image_encoder.wgpu_state.device,
+                        &mut pass,
+                        &self.image_data.read(),
+                    ),
+                FitType::LineMeanSubtract => image_encoder
+                    .pipeline
+                    .borrow_mut()
+                    .dispatch_line_mean_subtract(
+                        &image_encoder.wgpu_state.device,
+                        &mut pass,
+                        &self.image_data.read(),
+                    ),
+                FitType::LineFitSubtract => image_encoder
+                    .pipeline
+                    .borrow_mut()
+                    .dispatch_line_fit_subtract(
+                        &image_encoder.wgpu_state.device,
+                        &mut pass,
+                        &self.image_data.read(),
+                    ),
+                };
+                info!("wrote to  texture");
         }
         image_encoder.wgpu_state.queue.submit([encoder.finish()]);
         {
@@ -261,7 +274,7 @@ impl ScanImage {
                 label: None,
                 timestamp_writes: None,
             });
-            image_encoder.pipeline.dispatch_clear_texture(
+            image_encoder.pipeline.borrow_mut().dispatch_clear_texture(
                 &image_encoder.wgpu_state.device,
                 &mut pass,
                 &self.image_data.read(),
@@ -287,13 +300,14 @@ impl ScanImage {
         self.current_size() == self.image_data.read().capacity()
     }
 }
+#[derive(Clone)]
 pub struct ImageEncoder {
-    pipeline: ImageComputePipeline,
+    pipeline: Rc<RefCell<ImageComputePipeline>>,
     wgpu_state: RenderState,
 }
 impl ImageEncoder {
     pub fn new(wgpu_state: &RenderState) -> Self {
-        let pipeline = ImageComputePipeline::new(&wgpu_state.device);
+        let pipeline = Rc::new(RefCell::new(ImageComputePipeline::new(&wgpu_state.device)));
         Self {
             pipeline,
             wgpu_state: wgpu_state.clone(),

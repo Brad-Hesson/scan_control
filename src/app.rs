@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree::FileTree;
@@ -35,7 +35,7 @@ pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
     current_scan: StaticImage,
-    file_tree: FileTree,
+    file_tree: FileTree<StaticImage>,
 }
 
 // trait UnwrapTraceExt{
@@ -62,12 +62,25 @@ impl MyApp {
         let mut image_encoder = ImageEncoder::new(wgpu);
         let current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
         current_scan.image_data.clear(&mut image_encoder);
+        let enc = image_encoder.clone();
+        let load_fn = move |path: &Path| {
+            if !path.extension().is_some_and(|ext| ext == "sxm") {
+                return None;
+            }
+            let sxm = SXM::parse_file(path)
+                .with_context(|| format!("failed to load `{}`", path.display()))
+                .ok_trace()?;
+            let out = StaticImage::load_sxm(sxm, &enc).ok_trace()?;
+            out.update_texture(&enc);
+            Some(out)
+        };
+        let file_tree = FileTree::new(&cc.egui_ctx, load_fn).unwrap();
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
                 current_scan,
-                file_tree: FileTree::new(&cc.egui_ctx).unwrap(),
+                file_tree,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -110,14 +123,12 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
-            if let Err(e) = self.load_files(paths).context("file load failed") {
-                error!("{e:#}");
-            }
+            self.load_files(paths)
+                .context("file load failed")
+                .ok_trace();
         }
         if let Some(path) = self.folder_dialog.take_picked() {
-            if let Err(e) = self.app_state.file_tree.load_path(&path) {
-                error!("{e:#}")
-            }
+            self.app_state.file_tree.load_path(&path).ok_trace();
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -202,31 +213,31 @@ impl eframe::App for MyApp {
                     .app_state
                     .scan_view
                     .show(ui, |ctx| {
-                        let image_list = &mut self.app_state.image_list;
-                        for i in 0..image_list.len() {
-                            let resp = image_list[i]
+                        let file_tree = &mut self.app_state.file_tree;
+                        for i in file_tree.iter_indexers().rev() {
+                            let resp = file_tree[i]
                                 .image_data
                                 .show(ctx)
-                                .synchronize(&mut image_list[i].resp_group);
+                                .synchronize(&mut file_tree[i].resp_group);
                             if resp.orig.clicked() {
                                 if ctx.ui.input(|i| i.modifiers.ctrl) {
-                                    image_list[i].selected = !image_list[i].selected;
+                                    file_tree[i].selected = !file_tree[i].selected;
                                 } else {
-                                    image_list.clear_selected();
-                                    image_list[i].selected = true;
+                                    file_tree.clear_selected();
+                                    file_tree[i].selected = true;
                                 }
                             }
                             if resp.sync.hovered() {
                                 BorderRectangle {
-                                    transform: image_list[i].image_data.transform,
+                                    transform: file_tree[i].image_data.transform,
                                     color: Color32::LIGHT_BLUE,
                                     dashed: false,
                                 }
                                 .show(ctx);
                             }
-                            if image_list[i].selected {
+                            if file_tree[i].selected {
                                 BorderRectangle {
-                                    transform: image_list[i].image_data.transform,
+                                    transform: file_tree[i].image_data.transform,
                                     color: Color32::GREEN,
                                     dashed: false,
                                 }
@@ -240,7 +251,7 @@ impl eframe::App for MyApp {
                             dashed: false,
                         }
                         .show(ctx);
-                        if let Some(image) = image_list.get_hovered(ctx.ui.ctx()) {
+                        if let Some(image) = file_tree.get_hovered(ctx.ui.ctx()) {
                             BorderRectangle {
                                 transform: image.image_data.transform,
                                 color: Color32::LIGHT_BLUE,
@@ -248,7 +259,7 @@ impl eframe::App for MyApp {
                             }
                             .show(ctx);
                         }
-                        for image in image_list.iter_selected() {
+                        for image in file_tree.iter_selected() {
                             BorderRectangle {
                                 transform: image.image_data.transform,
                                 color: Color32::GREEN,
@@ -259,7 +270,7 @@ impl eframe::App for MyApp {
                     })
                     .clicked()
                 {
-                    self.app_state.image_list.clear_selected();
+                    self.app_state.file_tree.clear_selected();
                 };
                 egui::Window::new("Images")
                     .frame(
@@ -306,13 +317,11 @@ impl eframe::App for MyApp {
                     .collect_vec()
                     .into_iter()
                 {
-                    let name = match self.app_state.image_list[i].image_src.get_name() {
-                        Ok(name) => name,
-                        Err(e) => {
-                            error!("{e:#}");
-                            "unnamed"
-                        }
-                    };
+                    let name = self.app_state.image_list[i]
+                        .image_src
+                        .get_name()
+                        .ok_trace()
+                        .unwrap_or("unnamed");
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
                     new_top = egui::Window::new(name)
@@ -431,19 +440,13 @@ impl StaticImage {
             fit_type: FitType::LineFitSubtract,
         })
     }
-    pub fn update_texture(&self, image_encoder: &mut ImageEncoder) {
+    pub fn update_texture(&self, image_encoder: &ImageEncoder) {
         self.image_data.write_texture(image_encoder, self.fit_type);
     }
 }
 
 fn image_list_item(image: &StaticImage) -> Atoms<'_> {
-    let name = match image.image_src.get_name() {
-        Ok(name) => name,
-        Err(e) => {
-            error!("{e:#}");
-            "unnamed"
-        }
-    };
+    let name = image.image_src.get_name().ok_trace().unwrap_or("unnamed");
     (
         Image::new(egui::include_image!("../assets/scan_image_icon.png")),
         name,
@@ -554,5 +557,14 @@ impl Display for MetersFmt {
             write!(f, " m")?;
         }
         Ok(())
+    }
+}
+
+trait OkTraceExt<T> {
+    fn ok_trace(self) -> Option<T>;
+}
+impl<T, E: std::fmt::Display> OkTraceExt<T> for std::result::Result<T, E> {
+    fn ok_trace(self) -> Option<T> {
+        self.inspect_err(|e| error!("{e:#}")).ok()
     }
 }
