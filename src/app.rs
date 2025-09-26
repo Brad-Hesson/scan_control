@@ -551,6 +551,9 @@ impl Display for MetersFmt {
         if let Some(suf) = suf {
             f64::fmt(&scaled, f)?;
             write!(f, " {}", suf)?;
+        } else if self.0 == 0. {
+            f64::fmt(&self.0, f)?;
+            write!(f, " m")?;
         } else {
             warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
             f64::fmt(&self.0, f)?;
