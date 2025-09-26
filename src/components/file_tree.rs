@@ -204,6 +204,9 @@ impl<T> FileTree<T> {
             .unwrap_or_default();
         indexers.into_iter()
     }
+    pub fn iter_selected_indexes(&self) -> impl DoubleEndedIterator<Item = Indexer>{
+        self.iter_indexers().filter(|ind| self[*ind].selected).collect_vec().into_iter()
+    }
 }
 impl<'a, T> IntoIterator for &'a FileTree<T> {
     type Item = &'a File<T>;

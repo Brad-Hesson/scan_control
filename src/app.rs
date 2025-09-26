@@ -214,7 +214,7 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let file_tree = &mut self.app_state.file_tree;
-                        for i in file_tree.iter_indexers().rev() {
+                        for i in file_tree.iter_indexers() {
                             let resp = file_tree[i]
                                 .image_data
                                 .show(ctx)
@@ -311,13 +311,13 @@ impl eframe::App for MyApp {
                     .bottom();
                 for i in self
                     .app_state
-                    .image_list
+                    .file_tree
                     .iter_selected_indexes()
                     .rev()
                     .collect_vec()
                     .into_iter()
                 {
-                    let name = self.app_state.image_list[i]
+                    let name = self.app_state.file_tree[i]
                         .image_src
                         .get_name()
                         .ok_trace()
@@ -332,7 +332,7 @@ impl eframe::App for MyApp {
                         .show(ctx, |ui| {
                             image_menu(
                                 ui,
-                                &mut self.app_state.image_list[i],
+                                &mut self.app_state.file_tree[i],
                                 &mut self.image_encoder,
                             )
                         })
