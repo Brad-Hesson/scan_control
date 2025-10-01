@@ -19,7 +19,7 @@ use tracing::{error, info, trace};
 use crate::utils::response_group::{ResponseGroup, ResponseGroupExt as _, SyncResponse};
 
 pub struct FileTree<T> {
-    top: Option<DirItem<T>>,
+    top: Option<Item<T>>,
     rx: mpsc::Receiver<Event>,
     watcher: EventWatcher,
     load_callback: Box<dyn Fn(&Path) -> Option<T>>,
@@ -44,7 +44,7 @@ impl<T> FileTree<T> {
     }
     pub fn load_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let new_top = DirItem::load_dir(&path, &self.load_callback)
+        let new_top = Item::load_dir(&path, &self.load_callback)
             .with_context(|| format!("failed to load path `{}`", path.display()))?;
         self.top
             .as_ref()
@@ -70,7 +70,7 @@ impl<T> FileTree<T> {
     fn show_item(&mut self, ui: &mut Ui, mut i: Indexer) -> SyncResponse {
         let top = self.top.as_ref().unwrap();
         match &top[i] {
-            folder @ DirItem::Folder { .. } => {
+            folder @ Item::Folder { .. } => {
                 let name = folder.path().file_stem().unwrap().to_string_lossy();
                 let resp = CollapsingHeader::new(name)
                     .default_open(true)
@@ -83,7 +83,7 @@ impl<T> FileTree<T> {
                     sync: resp,
                 }
             }
-            DirItem::File { .. } => self[i].show(ui),
+            Item::File { .. } => self[i].show(ui),
         }
     }
     fn show_list(&mut self, ui: &mut Ui, ind: Indexer) {
@@ -143,7 +143,7 @@ impl<T> FileTree<T> {
                     }
                     Event::Create { path } => {
                         info!("Create `{}`", shortened(&path)?);
-                        if let Some(entry) = DirItem::load_entry(path, &self.load_callback)? {
+                        if let Some(entry) = Item::load_entry(path, &self.load_callback)? {
                             top.insert(entry)?;
                         }
                     }
@@ -183,14 +183,14 @@ impl<T> FileTree<T> {
             .find_map(|file| file.resp_group.response(ctx)?.hovered().then_some(file))
     }
     pub fn get(&self, indexer: Indexer) -> Option<&File<T>> {
-        if let DirItem::File { inner } = self.top.as_ref()?.get(indexer)? {
+        if let Item::File { inner } = self.top.as_ref()?.get(indexer)? {
             Some(inner)
         } else {
             None
         }
     }
     pub fn get_mut(&mut self, indexer: Indexer) -> Option<&mut File<T>> {
-        if let DirItem::File { inner } = self.top.as_mut()?.get_mut(indexer)? {
+        if let Item::File { inner } = self.top.as_mut()?.get_mut(indexer)? {
             Some(inner)
         } else {
             None
@@ -313,7 +313,7 @@ impl<T> DerefMut for File<T> {
     }
 }
 
-enum DirItem<T> {
+enum Item<T> {
     Folder {
         path: PathBuf,
         items: Vec<Self>,
@@ -323,7 +323,7 @@ enum DirItem<T> {
         inner: File<T>,
     },
 }
-impl<T> DirItem<T> {
+impl<T> Item<T> {
     fn is_file(&self) -> bool {
         match self {
             Self::Folder { .. } => false,
@@ -338,28 +338,28 @@ impl<T> DirItem<T> {
     }
     fn items(&mut self) -> &mut [Self] {
         match self {
-            DirItem::Folder { items, .. } => items,
-            DirItem::File { .. } => panic!(),
+            Item::Folder { items, .. } => items,
+            Item::File { .. } => panic!(),
         }
     }
     fn last_selected(&mut self) -> &mut Option<usize> {
         match self {
-            DirItem::Folder { last_selected, .. } => last_selected,
-            DirItem::File { .. } => panic!(),
+            Item::Folder { last_selected, .. } => last_selected,
+            Item::File { .. } => panic!(),
         }
     }
     fn selected(&mut self) -> &mut bool {
         match self {
-            DirItem::Folder { .. } => panic!(),
-            DirItem::File {
+            Item::Folder { .. } => panic!(),
+            Item::File {
                 inner: File { selected, .. },
             } => selected,
         }
     }
     fn generate_indexers(&self) -> Box<dyn DoubleEndedIterator<Item = Indexer> + '_> {
         match self {
-            DirItem::File { .. } => Box::new(once(Indexer::new())),
-            DirItem::Folder { items, .. } => {
+            Item::File { .. } => Box::new(once(Indexer::new())),
+            Item::Folder { items, .. } => {
                 Box::new(items.iter().enumerate().flat_map(|(i, item)| {
                     item.generate_indexers()
                         .into_iter()
@@ -377,8 +377,8 @@ impl<T> DirItem<T> {
         } else {
             let i = indexer.pop();
             match self {
-                DirItem::Folder { items, .. } => items[i].get(indexer),
-                DirItem::File { .. } => None,
+                Item::Folder { items, .. } => items[i].get(indexer),
+                Item::File { .. } => None,
             }
         }
     }
@@ -388,15 +388,15 @@ impl<T> DirItem<T> {
         } else {
             let i = indexer.pop();
             match self {
-                DirItem::Folder { items, .. } => items[i].get_mut(indexer),
-                DirItem::File { .. } => None,
+                Item::Folder { items, .. } => items[i].get_mut(indexer),
+                Item::File { .. } => None,
             }
         }
     }
     fn insert(&mut self, item: Self) -> Result<()> {
         let path = item.path();
         let parent = self.get_by_path_mut(path.parent().context("path had no parent")?)?;
-        let DirItem::Folder { items, .. } = parent else {
+        let Item::Folder { items, .. } = parent else {
             bail!("parent was not a folder");
         };
         items.push(item);
@@ -405,7 +405,7 @@ impl<T> DirItem<T> {
     fn remove_by_path(&mut self, path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let parent = self.get_by_path_mut(path.parent().context("path had no parent")?)?;
-        let DirItem::Folder { items, .. } = parent else {
+        let Item::Folder { items, .. } = parent else {
             bail!("parent was not a folder");
         };
         Ok(items
@@ -437,24 +437,24 @@ impl<T> DirItem<T> {
     }
     fn path_mut(&mut self) -> &mut PathBuf {
         match self {
-            DirItem::Folder { path, .. } => path,
-            DirItem::File {
+            Item::Folder { path, .. } => path,
+            Item::File {
                 inner: File { path, .. },
             } => path,
         }
     }
     fn path(&self) -> &Path {
         match self {
-            DirItem::Folder { path, .. } => path,
-            DirItem::File {
+            Item::Folder { path, .. } => path,
+            Item::File {
                 inner: File { path, .. },
             } => path,
         }
     }
-    fn iter_children<'a>(&'a self) -> slice::Iter<'a, DirItem<T>> {
+    fn iter_children<'a>(&'a self) -> slice::Iter<'a, Item<T>> {
         match self {
-            DirItem::Folder { items, .. } => items.iter(),
-            DirItem::File { .. } => (&[]).iter(),
+            Item::Folder { items, .. } => items.iter(),
+            Item::File { .. } => (&[]).iter(),
         }
     }
     fn iter_files<'a>(&'a self) -> FilesIter<'a, T> {
@@ -463,10 +463,10 @@ impl<T> DirItem<T> {
     fn iter_files_mut<'a>(&'a mut self) -> FilesIterMut<'a, T> {
         FilesIterMut::new(self)
     }
-    fn iter_children_mut<'a>(&'a mut self) -> slice::IterMut<'a, DirItem<T>> {
+    fn iter_children_mut<'a>(&'a mut self) -> slice::IterMut<'a, Item<T>> {
         match self {
-            DirItem::Folder { items, .. } => items.iter_mut(),
-            DirItem::File { .. } => (&mut []).iter_mut(),
+            Item::Folder { items, .. } => items.iter_mut(),
+            Item::File { .. } => (&mut []).iter_mut(),
         }
     }
     fn load_entry(
@@ -501,14 +501,14 @@ impl<T> DirItem<T> {
         })
     }
 }
-impl<T> Index<Indexer> for DirItem<T> {
-    type Output = DirItem<T>;
+impl<T> Index<Indexer> for Item<T> {
+    type Output = Item<T>;
 
     fn index(&self, index: Indexer) -> &Self::Output {
         self.get(index).unwrap()
     }
 }
-impl<T> IndexMut<Indexer> for DirItem<T> {
+impl<T> IndexMut<Indexer> for Item<T> {
     fn index_mut(&mut self, index: Indexer) -> &mut Self::Output {
         self.get_mut(index).unwrap()
     }
@@ -523,19 +523,19 @@ enum FilesIterInner<'a, T> {
     Folder(
         Box<
             FlatMap<
-                slice::Iter<'a, DirItem<T>>,
+                slice::Iter<'a, Item<T>>,
                 FilesIter<'a, T>,
-                fn(&'a DirItem<T>) -> FilesIter<'a, T>,
+                fn(&'a Item<T>) -> FilesIter<'a, T>,
             >,
         >,
     ),
 }
 impl<'a, T> FilesIter<'a, T> {
-    fn new(item: &'a DirItem<T>) -> Self {
+    fn new(item: &'a Item<T>) -> Self {
         let inner = match item {
-            DirItem::File { inner } => FilesIterInner::File(once(inner)),
-            DirItem::Folder { items, .. } => {
-                FilesIterInner::Folder(Box::new(items.iter().flat_map(DirItem::iter_files)))
+            Item::File { inner } => FilesIterInner::File(once(inner)),
+            Item::Folder { items, .. } => {
+                FilesIterInner::Folder(Box::new(items.iter().flat_map(Item::iter_files)))
             }
         };
         Self { inner }
@@ -575,19 +575,19 @@ enum FilesIterMutInner<'a, T> {
     Folder(
         Box<
             FlatMap<
-                slice::IterMut<'a, DirItem<T>>,
+                slice::IterMut<'a, Item<T>>,
                 FilesIterMut<'a, T>,
-                fn(&'a mut DirItem<T>) -> FilesIterMut<'a, T>,
+                fn(&'a mut Item<T>) -> FilesIterMut<'a, T>,
             >,
         >,
     ),
 }
 impl<'a, T> FilesIterMut<'a, T> {
-    fn new(item: &'a mut DirItem<T>) -> Self {
+    fn new(item: &'a mut Item<T>) -> Self {
         let inner = match item {
-            DirItem::File { inner } => FilesIterMutInner::File(once(inner)),
-            DirItem::Folder { items, .. } => FilesIterMutInner::Folder(Box::new(
-                items.iter_mut().flat_map(DirItem::iter_files_mut),
+            Item::File { inner } => FilesIterMutInner::File(once(inner)),
+            Item::Folder { items, .. } => FilesIterMutInner::Folder(Box::new(
+                items.iter_mut().flat_map(Item::iter_files_mut),
             )),
         };
         Self { inner }

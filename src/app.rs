@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
 use crate::components::file_dialog::ViewportFileDialog;
-use crate::components::file_tree::FileTree;
+use crate::components::file_tree_new::FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
@@ -214,8 +214,7 @@ impl eframe::App for MyApp {
                     .scan_view
                     .show(ui, |ctx| {
                         let file_tree = &mut self.app_state.file_tree;
-                        let indexers = file_tree.iter_indexers().collect_vec();
-                        for i in indexers {
+                        for i in (0..file_tree.len()).rev() {
                             let resp = file_tree[i]
                                 .image_data
                                 .show(ctx)
@@ -310,14 +309,13 @@ impl eframe::App for MyApp {
                     .response
                     .rect
                     .bottom();
-                for i in self
+                let selected = self
                     .app_state
                     .file_tree
                     .iter_selected_indexes()
                     .rev()
-                    .collect_vec()
-                    .into_iter()
-                {
+                    .collect_vec();
+                for i in selected {
                     let name = self.app_state.file_tree[i]
                         .image_src
                         .get_name()
@@ -564,7 +562,7 @@ impl Display for MetersFmt {
     }
 }
 
-trait OkTraceExt<T> {
+pub trait OkTraceExt<T> {
     fn ok_trace(self) -> Option<T>;
 }
 impl<T, E: std::fmt::Display> OkTraceExt<T> for std::result::Result<T, E> {
