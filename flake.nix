@@ -34,14 +34,15 @@
         fenix.stable.rust-src
       ]);
       runtimeDeps = with pkgs; [
+        udev
+        alsa-lib
+        vulkan-loader
         libxkbcommon
         wayland
         xorg.libX11
         xorg.libXcursor
         xorg.libXrandr
         xorg.libXi
-        alsa-lib
-        vulkan-loader
         libGL
         libGLU
       ];
@@ -59,21 +60,21 @@
           --set LD_LIBRARY_PATH ${pkgs.lib.makeLibraryPath runtimeDeps}
         '';
       });
-      #wgsl-analyzer = flakes.wgsl-analyzer.packages.${system}.default;
+      # wgsl-analyzer = flakes.wgsl-analyzer.packages.${system}.default;
     in
     {
       packages.default = crate;
       apps.default = (flakes.flake-utils.lib.mkApp { drv = crate; }) // {
         meta.description = "Control software for atomic stm lithography";
       };
-      devShell = crane.devShell rec {
+      devShell = crane.devShell {
         inputsFrom = [ crate ];
         packages = [ pkgs.renderdoc ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
         shellHook = ''
           ${brad-utils.vscodeDefaultHook}
         '';
-        # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
+          # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
       };
     }
   );
