@@ -26,6 +26,7 @@ pub struct FileTree<T> {
     rx: mpsc::Receiver<Event>,
     watcher: EventWatcher,
     load_callback: Box<dyn Fn(&Path) -> Option<T>>,
+    last_selected: Option<usize>,
 }
 impl<T> FileTree<T> {
     pub fn new(
@@ -43,6 +44,7 @@ impl<T> FileTree<T> {
             watcher,
             rx,
             load_callback: Box::new(load_callback),
+            last_selected: None,
         })
     }
     pub fn load_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
@@ -77,17 +79,18 @@ impl<T> FileTree<T> {
     }
     #[inline]
     pub fn show(&mut self, ui: &mut Ui) {
-        if self.tree.children.is_empty() {
-            return;
-        }
         self.show_list(
             ui,
-            ItemIndex(0),
-            self[ItemIndex(0)].as_folder().unwrap().children.len(),
+            0,
+            self.tree
+                .get_item(0)
+                .and_then(|item| item.as_folder())
+                .and_then(|folder| Some(folder.children.len()))
+                .unwrap_or_default(),
         );
     }
-    fn show_item(&mut self, ui: &mut Ui, i: ItemIndex) -> SyncResponse {
-        match &mut self[i] {
+    fn show_item(&mut self, ui: &mut Ui, i: usize) -> SyncResponse {
+        match self.tree.get_item_mut(i).unwrap() {
             Item::Folder { folder } => {
                 let name = folder.path.file_stem().unwrap().to_string_lossy();
                 let len = folder.children.len();
@@ -105,35 +108,47 @@ impl<T> FileTree<T> {
             Item::File { file } => list_item(ui, file).synchronize(&mut file.resp_group),
         }
     }
-    fn show_list(&mut self, ui: &mut Ui, start: ItemIndex, len: usize) {
+    fn show_list(&mut self, ui: &mut Ui, start: usize, len: usize) {
+        macro_rules! item {
+            ($i:expr) => {
+                self.tree.get_item_mut($i).unwrap()
+            };
+            ($i:expr; file) => {
+                item!($i).as_file_mut().unwrap()
+            };
+            ($i:expr; folder) => {
+                item!($i).as_folder_mut().unwrap()
+            };
+        }
         let mut i = start + 1;
         for _ in 0..len {
             let mut resp = self.show_item(ui, i);
-
             if resp.sync.hovered() {
                 resp.orig = resp.orig.highlight();
             }
-            if resp.orig.clicked() && self[i].as_folder().is_none() {
-                if ui.input(|i| i.modifiers.shift) && self[start].fldr().last_selected.is_some() {
-                    let mut i = i.0 as isize;
-                    let last = self[start].fldr().last_selected.unwrap() as isize;
+            if resp.orig.clicked() && item!(i).as_folder().is_none() {
+                if ui.input(|i| i.modifiers.shift) && self.last_selected.is_some() {
+                    let mut i = i as isize;
+                    let last = self.last_selected.unwrap() as isize;
                     let add = ((i < last) as isize) * 2 - 1;
-                    while i != last {
-                        self[ItemIndex(i as usize)].file().selected = true;
+                    self.clear_selected();
+                    while i != last + add {
+                        if let Some(file) = item!(i as usize).as_file_mut() {
+                            file.selected = true;
+                        }
                         i += add;
                     }
                 } else if ui.input(|i| i.modifiers.ctrl) {
-                    self[i].file().selected = !self[i].file().selected;
+                    item!(i; file).selected = !item!(i; file).selected;
                 } else {
                     self.clear_selected();
-                    self[i].file().selected = true;
+                    item!(i; file).selected = true;
                 }
-                if self[i].file().selected {
-                    self[start].as_folder_mut().unwrap().last_selected = Some(i.0);
+                if item!(i; file).selected && !ui.input(|i| i.modifiers.shift) {
+                    self.last_selected = Some(i);
                 }
             }
-
-            i += self[i].item_count() + 1;
+            i += item!(i).item_count() + 1;
         }
     }
     pub fn clear_selected(&mut self) {
@@ -269,14 +284,12 @@ fn list_item<'a, T>(ui: &mut Ui, file: &'a File<T>) -> Response {
 struct Folder<T> {
     path: PathBuf,
     children: Vec<Item<T>>,
-    last_selected: Option<usize>,
 }
 impl<T> Folder<T> {
     fn new(path: PathBuf, children: Vec<Item<T>>) -> Self {
         Self {
             path,
             children,
-            last_selected: None,
         }
     }
     fn item_count(&self) -> usize {
@@ -376,18 +389,6 @@ enum Item<T> {
     File { file: File<T> },
 }
 impl<T> Item<T> {
-    fn file(&mut self) -> &mut File<T> {
-        self.as_file_mut().unwrap()
-    }
-    fn fldr(&mut self) -> &mut Folder<T> {
-        self.as_folder_mut().unwrap()
-    }
-    fn into_folder(self) -> Option<Folder<T>> {
-        match self {
-            Item::Folder { folder } => Some(folder),
-            Item::File { .. } => None,
-        }
-    }
     #[inline]
     fn as_folder(&self) -> Option<&Folder<T>> {
         match self {
@@ -468,35 +469,5 @@ impl<T> Item<T> {
             }));
         }
         return Err(std::io::Error::other("not a file or directory"));
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
-struct ItemIndex(usize);
-impl Add<usize> for ItemIndex {
-    type Output = Self;
-    #[inline]
-    fn add(self, rhs: usize) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-impl AddAssign<usize> for ItemIndex {
-    #[inline]
-    fn add_assign(&mut self, rhs: usize) {
-        self.0 += rhs
-    }
-}
-impl<T> Index<ItemIndex> for FileTree<T> {
-    type Output = Item<T>;
-    #[inline]
-    fn index(&self, index: ItemIndex) -> &Self::Output {
-        self.tree.get_item(index.0).unwrap()
-    }
-}
-impl<T> IndexMut<ItemIndex> for FileTree<T> {
-    #[inline]
-    fn index_mut(&mut self, index: ItemIndex) -> &mut Self::Output {
-        self.tree.get_item_mut(index.0).unwrap()
     }
 }
