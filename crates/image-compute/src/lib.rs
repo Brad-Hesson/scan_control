@@ -7,8 +7,10 @@ mod shaders;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, OnceLock};
+
     use eyre::{Context, Result};
-    use itertools::{Itertools, izip};
+    use itertools::izip;
     use tracing::info;
     use tracing_subscriber::EnvFilter;
     use wgpu::{
@@ -17,7 +19,7 @@ mod tests {
         RequestAdapterOptions,
     };
 
-    use crate::image_compute::{ImageComputeBuffers, ImageComputePipeline};
+    use crate::image_compute::{FitType, ImageComputeBuffers, ImageComputePipeline};
 
     #[test]
     fn output() -> Result<()> {
@@ -26,12 +28,7 @@ mod tests {
         const HEIGHT: usize = 5;
         const SIZE: [u32; 2] = [WIDTH as _, HEIGHT as _];
         let mut plane_fitter = ImageComputePipeline::new(&device);
-        let x_slope = 1.0;
-        let y_slope = 10.0;
-        let offset = 0.0;
-        let mut mean = 0.;
         let init_data = |data: &mut [f32]| {
-            // data.fill(1.);
             for y in 0..HEIGHT {
                 for x in 0..WIDTH {
                     let dat = &mut data[y * WIDTH + x];
@@ -39,7 +36,7 @@ mod tests {
                 }
             }
         };
-        let original = ImageComputeBuffers::new(
+        let buffers = ImageComputeBuffers::new(
             &device,
             &queue,
             Some("original_image"),
@@ -47,7 +44,6 @@ mod tests {
             HEIGHT as u32,
             init_data,
         );
-        mean /= (WIDTH * HEIGHT) as f64;
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         unsafe { device.start_graphics_debugger_capture() };
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -59,25 +55,29 @@ mod tests {
                 label: Some("Test Compute Pass"),
                 timestamp_writes: None,
             });
-            n_times = plane_fitter.dispatch_line_fit_subtract(&device, &mut pass, &original);
+            n_times = plane_fitter.dispatch_line_fit_subtract(&device, &mut pass, &buffers);
         }
         plane_fitter.resolve_timings(&mut encoder, n_times);
         device.poll(PollType::WaitForSubmissionIndex(
             queue.submit([encoder.finish()]),
         ))?;
         unsafe { device.stop_graphics_debugger_capture() };
-        let planarize_download = original.download_planarize_data(&device, &queue, HEIGHT * 2);
-        let normalize_download = original.download_normalize_data(&device, &queue);
-        device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
-        let planarize = planarize_download.get().unwrap();
-        let means: [f64; HEIGHT] = planarize[..HEIGHT]
-            .iter()
-            .map(|v| v / WIDTH as f64)
-            .collect_array()
+        let planarize_data = Arc::new(OnceLock::new());
+        let pd = planarize_data.clone();
+        buffers
+            .download_fit_data(&device, &queue, FitType::LineFitSubtract, move |data| {
+                pd.set(data).unwrap()
+            })
             .unwrap();
-        let normalize = normalize_download.get().unwrap();
-        println!("{:.4?}", means);
-        println!("{:.4?}", &planarize[HEIGHT..]);
+        let normalize_data = Arc::new(OnceLock::new());
+        let nd = normalize_data.clone();
+        buffers
+            .download_normalize_data(&device, &queue, move |data| nd.set(data).unwrap())
+            .unwrap();
+        device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
+        let planarize = planarize_data.get().unwrap();
+        let normalize = normalize_data.get().unwrap();
+        println!("{:.4?}", planarize);
         println!("{normalize:?}");
         Ok(())
     }
@@ -141,7 +141,9 @@ mod tests {
             device.poll(PollType::WaitForSubmissionIndex(
                 queue.submit([encoder.finish()]),
             ))?;
-            let times_download = plane_fitter.queue_timings_download(&device, &queue, n_times);
+            let times_download = plane_fitter
+                .queue_timings_download(&device, &queue, n_times)
+                .unwrap();
             device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
             let new_times = times_download
                 .get()

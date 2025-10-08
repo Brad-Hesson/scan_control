@@ -2,10 +2,10 @@
 
 use eframe::wgpu::{DeviceDescriptor, PresentMode};
 use eyre::Context as _;
-use tracing::info;
+use tracing::{info, trace};
 use tracing_subscriber::EnvFilter;
 use wgpu::{
-    Adapter, Device, FeaturesWGPU, FeaturesWebGPU, Instance, PowerPreference, Queue,
+    Adapter, Backends, Device, FeaturesWGPU, FeaturesWebGPU, Instance, PowerPreference, Queue,
     RequestAdapterOptions,
 };
 
@@ -62,18 +62,16 @@ fn main() -> eframe::Result {
 
 fn init_wgpu() -> eyre::Result<(Instance, Adapter, Device, Queue)> {
     let instance = wgpu::Instance::default();
+    let adapters = instance.enumerate_adapters(Backends::all());
+    for adapter in adapters {
+        trace!("Adapter: {}", adapter_to_str(&adapter));
+    }
     let adapter = smol::block_on(instance.request_adapter(&RequestAdapterOptions {
         power_preference: PowerPreference::HighPerformance,
         ..Default::default()
     }))
     .context("Adapter request failed")?;
-    info!("Backend: {}", adapter.get_info().backend.to_str());
-    info!("Adapter: {}", adapter.get_info().name);
-    info!(
-        "Driver: {} {}",
-        adapter.get_info().driver,
-        adapter.get_info().driver_info
-    );
+    info!("Selected: {}", adapter_to_str(&adapter));
     let (dev, queue) = smol::block_on(adapter.request_device(&DeviceDescriptor {
         required_features: wgpu::Features {
             features_wgpu: FeaturesWGPU::TIMESTAMP_QUERY_INSIDE_PASSES
@@ -85,4 +83,15 @@ fn init_wgpu() -> eyre::Result<(Instance, Adapter, Device, Queue)> {
     }))
     .context("Device request failed")?;
     Ok((instance, adapter, dev, queue))
+}
+
+fn adapter_to_str(adapter: &Adapter) -> String {
+    let info = adapter.get_info();
+    format!(
+        "{} : {} : {} : {}",
+        info.name,
+        info.backend.to_str(),
+        info.driver,
+        info.driver_info
+    )
 }

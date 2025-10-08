@@ -13,7 +13,7 @@ use wgpu::{
 };
 
 use crate::{
-    buffers::{QueueDownloadError, StorageBuffer, TransformBuffer},
+    buffers::{BufferOpError, StorageBuffer, TransformBuffer},
     shaders::{self, scan_image::NormalizeControl},
 };
 
@@ -37,13 +37,10 @@ impl From<NormalizationType> for NormalizeControl {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WriteLinesError {
-    #[error("line of length `{line_length}` is supposed to be `{correct_length}` to match image")]
-    LineWrongLength {
-        line_length: usize,
-        correct_length: usize,
-    },
-    #[error("the image is already full")]
-    ImageFull,
+    #[error("requested to write `{requested}` lines, but there is only room for `{remaining}`")]
+    TooManyLines { requested: usize, remaining: usize },
+    #[error("{0}")]
+    BufferOpError(#[from] BufferOpError),
 }
 
 pub struct ImageComputeBuffers {
@@ -169,33 +166,39 @@ impl ImageComputeBuffers {
     pub fn write_world_transform(&self, queue: &Queue, transform: Affine2) {
         self.world_transform_buffer.write(queue, transform);
     }
-    pub fn write_normalization_type(&self, queue: &Queue, normalization_type: NormalizationType) {
+    pub fn write_normalization_type(
+        &self,
+        queue: &Queue,
+        normalization_type: NormalizationType,
+    ) -> Result<(), BufferOpError> {
         self.normalize_control_buffer
-            .queue_write(queue, 0, &[normalization_type.into()]);
+            .queue_write(queue, 0, 1, |buf| buf[0] = normalization_type.into())
     }
-    pub fn write_line(&mut self, queue: &Queue, line: &[f32]) -> Result<(), WriteLinesError> {
-        if self.lines == self.size[1] {
-            return Err(WriteLinesError::ImageFull);
-        }
-        let correct_length = self.size[0] as usize;
-        if line.len() != correct_length {
-            return Err(WriteLinesError::LineWrongLength {
-                line_length: line.len(),
-                correct_length,
+    pub fn write_lines(
+        &mut self,
+        queue: &Queue,
+        num_lines: usize,
+        callback: impl Fn(&mut [f32]),
+    ) -> Result<(), WriteLinesError> {
+        if self.lines + num_lines as u32 > self.size[1] {
+            return Err(WriteLinesError::TooManyLines {
+                requested: num_lines,
+                remaining: (self.size[1] - self.lines) as usize,
             });
         }
         self.image_data_buffer.queue_write(
             queue,
             self.lines as usize * self.size[0] as usize,
-            line,
-        );
-        self.lines += 1;
-        self.image_size_buffer.queue_write(queue, 1, &[self.lines]);
+            num_lines * self.size[0] as usize,
+            callback,
+        )?;
+        self.lines += num_lines as u32;
+        self.image_size_buffer
+            .queue_write(queue, 1, 1, |buf| buf[0] = self.lines)
+            .expect("params should be correct");
         Ok(())
     }
-    pub fn clear_lines(&mut self, queue: &Queue) {
-        let data = vec![f32::NAN; (self.size[0] * self.size[1]) as usize];
-        self.image_data_buffer.queue_write(queue, 0, &data);
+    pub fn clear_lines(&mut self) {
         self.lines = 0;
     }
     pub fn current_size(&self) -> [u32; 2] {
@@ -209,10 +212,9 @@ impl ImageComputeBuffers {
         device: &Device,
         queue: &Queue,
         callback: impl FnOnce(NormalizeData) + Send + 'static,
-    ) -> Result<(), QueueDownloadError> {
+    ) -> Result<(), BufferOpError> {
         self.normalize_buffer
-            .queue_download_with(device, queue, ..1, |data| callback(data[0]))
-            .map(|_| {})
+            .queue_download(device, queue, ..1, |data| callback(data[0]))
     }
     pub fn download_fit_data(
         &self,
@@ -220,13 +222,14 @@ impl ImageComputeBuffers {
         queue: &Queue,
         fit_type: FitType,
         callback: impl FnOnce(FitData) + Send + 'static,
-    ) -> Result<(), QueueDownloadError> {
+    ) -> Result<(), BufferOpError> {
         let size = self.current_size();
-        self.planarize_buffer
-            .queue_download_with(device, queue, ..fit_type.download_size(size), move |data| {
-                callback(FitData::from_raw(data, size, fit_type))
-            })
-            .map(|_| {})
+        self.planarize_buffer.queue_download(
+            device,
+            queue,
+            ..fit_type.download_size(size),
+            move |data| callback(FitData::from_raw(data, size, fit_type)),
+        )
     }
 }
 
@@ -238,7 +241,7 @@ pub enum FitType {
     LineFitSubtract,
 }
 impl FitType {
-    const fn download_size(&self, size: [u32; 2]) -> usize {
+    fn download_size(&self, size: [u32; 2]) -> usize {
         match self {
             FitType::MeanSubtract => 1,
             FitType::PlaneFitSubtract => 3,
@@ -247,6 +250,8 @@ impl FitType {
         }
     }
 }
+
+#[derive(Debug, Clone)]
 pub enum FitData {
     MeanSubtract {
         mean: f64,
@@ -265,6 +270,16 @@ pub enum FitData {
     },
 }
 impl FitData {
+    pub fn mean(&self) -> f64 {
+        match self {
+            FitData::MeanSubtract { mean } => *mean,
+            FitData::PlaneFitSubtract { mean, .. } => *mean,
+            FitData::LineMeanSubtract { means } => means.iter().sum::<f64>() / means.len() as f64,
+            FitData::LineFitSubtract { means, .. } => {
+                means.iter().sum::<f64>() / means.len() as f64
+            }
+        }
+    }
     fn from_raw(data: &[f64], size: [u32; 2], fit_type: FitType) -> Self {
         assert_eq!(data.len(), fit_type.download_size(size));
         let [width, height] = [size[0] as f64, size[1] as f64];
@@ -678,17 +693,23 @@ impl ImageComputePipeline {
         device: &Device,
         queue: &Queue,
         num: usize,
-    ) -> Result<Arc<OnceLock<Box<[u64]>>>, QueueDownloadError> {
+    ) -> Result<Arc<OnceLock<Box<[u64]>>>, BufferOpError> {
+        let buf = Arc::new(OnceLock::new());
+        let buf_clone = buf.clone();
         self.qs_buf
-            .queue_download_with(device, queue, ..num * 2, |r| {
-                r.iter()
-                    .chunks(2)
-                    .into_iter()
-                    .map(|c| c.collect_tuple().unwrap())
-                    .map(|(a, b)| b.saturating_sub(*a))
-                    .collect_vec()
-                    .into_boxed_slice()
-            })
+            .queue_download(device, queue, ..num * 2, move |data| {
+                buf.set(
+                    data.iter()
+                        .chunks(2)
+                        .into_iter()
+                        .map(|c| c.collect_tuple().unwrap())
+                        .map(|(a, b)| b.saturating_sub(*a))
+                        .collect_vec()
+                        .into_boxed_slice(),
+                )
+                .unwrap();
+            })?;
+        Ok(buf_clone)
     }
     pub fn resolve_timings(&self, encoder: &mut CommandEncoder, num: usize) {
         encoder.resolve_query_set(&self.qs, 0..num as u32 * 2, self.qs_buf.buffer_ref(), 0);
@@ -696,18 +717,13 @@ impl ImageComputePipeline {
 }
 
 fn dispatch_linear(pass: &mut ComputePass, size: [u32; 2]) {
-    pass.dispatch_workgroups(
-        align_to(size[0] * size[1], shaders::plane_fit::WGS) / shaders::plane_fit::WGS,
-        1,
-        1,
-    );
+    pass.dispatch_workgroups(num_wgs(size[0] * size[1], shaders::plane_fit::WGS), 1, 1);
 }
 
 fn dispatch_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0] * size[1];
     while remaining_data > 1 {
-        let num_workgroups =
-            align_to(remaining_data, shaders::plane_fit::WGS) / shaders::plane_fit::WGS;
+        let num_workgroups = num_wgs(remaining_data, shaders::plane_fit::WGS);
         pass.dispatch_workgroups(num_workgroups, 1, 1);
         remaining_data = num_workgroups;
     }
@@ -716,13 +732,17 @@ fn dispatch_reduction(pass: &mut ComputePass, size: [u32; 2]) {
 fn dispatch_y_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0];
     while remaining_data > 1 {
-        let num_workgroups = align_to(remaining_data, shaders::plane_fit::WGS_SQUARE)
-            / shaders::plane_fit::WGS_SQUARE;
+        let num_workgroups = num_wgs(remaining_data, shaders::plane_fit::WGS_SQUARE);
         pass.dispatch_workgroups(
-            align_to(size[1], shaders::plane_fit::WGS_SQUARE) / shaders::plane_fit::WGS_SQUARE,
+            num_wgs(size[1], shaders::plane_fit::WGS_SQUARE),
             num_workgroups,
             1,
         );
         remaining_data = num_workgroups;
     }
+}
+
+#[inline]
+fn num_wgs(num: u32, wg_size: u32) -> u32 {
+    num.saturating_sub(1) / wg_size + 1
 }

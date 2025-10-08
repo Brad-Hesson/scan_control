@@ -1,9 +1,4 @@
-use std::{
-    fmt::Debug,
-    marker::PhantomData,
-    ops::RangeBounds,
-    sync::{Arc, OnceLock},
-};
+use std::{fmt::Debug, marker::PhantomData, num::NonZero, ops::RangeBounds};
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use glam::{Affine2, Mat3, Mat4};
@@ -42,49 +37,42 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
             pd: PhantomData,
         }
     }
-    pub fn queue_write(&self, queue: &Queue, offset: usize, data: &[T]) {
-        queue.write_buffer(
-            &self.inner,
-            offset as u64 * size_of::<T>() as u64,
-            bytemuck::cast_slice(data),
-        );
-    }
-    pub fn queue_download_with<W>(
+    pub fn queue_write(
         &self,
-        device: &Device,
         queue: &Queue,
-        range: impl RangeBounds<usize>,
-        f: impl FnOnce(&[T]) -> W + Send + 'static,
-    ) -> Result<Arc<OnceLock<W>>, QueueDownloadError>
-    where
-        W: Sync + Send + Debug + 'static,
-    {
-        let buf = Arc::new(std::sync::OnceLock::new());
-        let buf_clone = buf.clone();
-        let range = rangebounds_map(range, |v| (*v * size_of::<T>()) as BufferAddress);
-        if range_is_empty(&range) {
-            return Err(QueueDownloadError::BufferSizeZero);
-        }
-        wgpu::util::DownloadBuffer::read_buffer(
-            device,
-            queue,
-            &self.inner.slice(range),
-            move |db| {
-                buf.set(f(bytemuck::cast_slice(&db.unwrap()))).unwrap();
-            },
-        );
-        Ok(buf_clone)
+        offset: usize,
+        size: usize,
+        callback: impl Fn(&mut [T]),
+    ) -> Result<(), BufferOpError> {
+        let mut view = queue
+            .write_buffer_with(
+                &self.inner,
+                offset as u64 * size_of::<T>() as u64,
+                NonZero::try_from(size as u64 * size_of::<T>() as u64)
+                    .map_err(|_| BufferOpError::BufferSizeZero)?,
+            )
+            .expect("`Queue::write_buffer_with` failed");
+        callback(bytemuck::cast_slice_mut(&mut *view));
+        Ok(())
     }
     pub fn queue_download(
         &self,
         device: &Device,
         queue: &Queue,
         range: impl RangeBounds<usize>,
-    ) -> Result<Arc<OnceLock<Box<[T]>>>, QueueDownloadError>
-    where
-        T: Sync + Send + Debug,
-    {
-        self.queue_download_with(device, queue, range, |r| r.to_vec().into_boxed_slice())
+        callback: impl FnOnce(&[T]) + Send + 'static,
+    ) -> Result<(), BufferOpError> {
+        let range = rangebounds_map(range, |v| (*v * size_of::<T>()) as BufferAddress);
+        if range_is_empty(&range) {
+            return Err(BufferOpError::BufferSizeZero);
+        }
+        wgpu::util::DownloadBuffer::read_buffer(
+            device,
+            queue,
+            &self.inner.slice(range),
+            move |db| callback(bytemuck::cast_slice(&db.unwrap())),
+        );
+        Ok(())
     }
     pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.inner.as_entire_buffer_binding()
@@ -95,8 +83,8 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum QueueDownloadError {
-    #[error("the requested size of the download was zero")]
+pub enum BufferOpError {
+    #[error("the requested size of the buffer was zero")]
     BufferSizeZero,
 }
 

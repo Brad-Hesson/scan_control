@@ -261,9 +261,7 @@ impl ScanImage {
         }
     }
     pub fn clear(&self, image_encoder: &mut ImageEncoder) {
-        self.image_data
-            .write()
-            .clear_lines(&image_encoder.wgpu_state.queue);
+        self.image_data.write().clear_lines();
         let mut encoder = image_encoder
             .wgpu_state
             .device
@@ -283,14 +281,15 @@ impl ScanImage {
         *self.norm_data.write() = None;
         *self.fit_data.write() = None;
     }
-    pub fn write_line(
+    pub fn write_lines(
         &mut self,
         image_encoder: &ImageEncoder,
-        line: &[f32],
+        num_lines: usize,
+        callback: impl Fn(&mut [f32]),
     ) -> Result<(), WriteLinesError> {
         self.image_data
             .write()
-            .write_line(&image_encoder.wgpu_state.queue, line)
+            .write_lines(&image_encoder.wgpu_state.queue, num_lines, callback)
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()

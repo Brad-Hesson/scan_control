@@ -161,11 +161,16 @@ impl eframe::App for MyApp {
         {
             let current_scan = &mut self.app_state.current_scan;
             let [x, y] = current_scan.image_data.current_size();
-            let line = &current_scan.image_src.data[0][0][x as usize * y as usize..][..x as usize];
+            let n = 1;
             current_scan
                 .image_data
-                .write_line(&self.image_encoder, line)
-                .unwrap();
+                .write_lines(&self.image_encoder, n, |buf| {
+                    buf.copy_from_slice(
+                        &current_scan.image_src.data[0][0][x as usize * y as usize..]
+                            [..x as usize * n],
+                    )
+                })
+                .ok_trace();
             current_scan.update_texture(&mut self.image_encoder);
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::C)) {
@@ -382,33 +387,33 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     if matches!(sub_type_selector.inner, Some(true)) {
         image.update_texture(image_encoder);
     }
-    if let Some(data) = image.image_data.norm_data.read().as_ref() {
-        ui.label(format!("Min: {:.2}", MetersFmt(data.min)));
-        ui.label(format!("Max: {:.2}", MetersFmt(data.max)));
-        ui.label(format!("Std Dev: {:.2}", MetersFmt(data.stddev)));
-    }
-    if let Some(data) = image.image_data.fit_data.read().as_ref() {
-        match data {
+    let norm = image.image_data.norm_data.read();
+    let fit = image.image_data.fit_data.read();
+    if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
+        ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + fit.mean())));
+        ui.label(format!("Mean:    {:.2}", MetersFmt(fit.mean())));
+        ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + fit.mean())));
+        ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
+        match fit {
             FitData::PlaneFitSubtract {
-                mean,
-                x_slope,
-                y_slope,
+                x_slope, y_slope, ..
             } => {
-                ui.label(format!("Mean: {:.2}", MetersFmt(*mean)));
                 ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
                 ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
             }
-            FitData::MeanSubtract { mean } => {
-                ui.label(format!("Mean: {:.2}", MetersFmt(*mean)));
-            }
+            FitData::MeanSubtract { .. } => {}
             FitData::LineMeanSubtract { means } => {
                 for m in means {
-                    ui.label(format!("{:.2}", MetersFmt(*m)));
+                    ui.label(format!("{:.2}", MetersFmt(*m - fit.mean())));
                 }
             }
             FitData::LineFitSubtract { means, slopes } => {
                 for (m, s) in izip!(means, slopes) {
-                    ui.label(format!("{:.2}  {:.2}", MetersFmt(*m), MetersFmt(*s)));
+                    ui.label(format!(
+                        "{:.2}  {:.2}",
+                        MetersFmt(*m - fit.mean()),
+                        MetersFmt(*s)
+                    ));
                 }
             }
         }
