@@ -159,15 +159,13 @@ impl<T> FileTree<T> {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &File<T>> {
         (0..self.len()).map(|i| &self[i])
     }
-    pub fn iter_selected(&self) -> impl DoubleEndedIterator<Item = &File<T>> {
-        self.iter().filter(|file| file.selected)
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut File<T>> {
+        let ptr = self as *mut Self;
+        (0..self.len()).map(move |i| &mut unsafe { &mut *ptr }[i])
     }
     pub fn get_hovered(&self, ctx: &Context) -> Option<&File<T>> {
         self.iter()
             .find_map(|file| file.resp_group.response(ctx)?.hovered().then_some(file))
-    }
-    pub fn iter_selected_indexes<'a>(&'a self) -> impl DoubleEndedIterator<Item = usize> + 'a {
-        (0..self.len()).filter_map(|i| self[i].selected.then_some(i))
     }
 }
 impl<T> Index<usize> for FileTree<T> {
@@ -181,6 +179,24 @@ impl<T> IndexMut<usize> for FileTree<T> {
     #[inline]
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         self.get_mut(index).unwrap()
+    }
+}
+impl<'a, T> IntoIterator for &'a FileTree<T> {
+    type Item = &'a File<T>;
+
+    type IntoIter = Box<dyn DoubleEndedIterator<Item = &'a File<T>> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+impl<'a, T> IntoIterator for &'a mut FileTree<T> {
+    type Item = &'a mut File<T>;
+
+    type IntoIter = Box<dyn DoubleEndedIterator<Item = &'a mut File<T>> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter_mut())
     }
 }
 
@@ -287,10 +303,7 @@ struct Folder<T> {
 }
 impl<T> Folder<T> {
     fn new(path: PathBuf, children: Vec<Item<T>>) -> Self {
-        Self {
-            path,
-            children,
-        }
+        Self { path, children }
     }
     fn item_count(&self) -> usize {
         self.children
