@@ -370,23 +370,20 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
         (FitType::PlaneFitSubtract, "Plane Fit"),
         (FitType::MeanSubtract, "Mean Subtract"),
     ];
-    let sub_type_selector = ComboBox::new((image.image_data.uuid(), "fit type"), "")
+    ComboBox::new((image.image_data.uuid(), "fit type"), "")
         .selected_text(types.iter().find(|(t, _)| *t == image.fit_type).unwrap().1)
         .show_ui(ui, |ui| {
             ui.set_min_height(82.);
             let changed = types
                 .iter()
                 .copied()
-                .map(|(typ, name)| {
-                    ui.selectable_value(&mut image.fit_type, typ, name)
-                        .clicked()
-                })
-                .any(|b| b);
-            changed
+                .map(|(typ, name)| ui.selectable_value(&mut image.fit_type, typ, name))
+                .any(|resp| resp.clicked());
+            if changed {
+                println!("changed");
+                image.update_texture(image_encoder);
+            }
         });
-    if matches!(sub_type_selector.inner, Some(true)) {
-        image.update_texture(image_encoder);
-    }
     let norm = image.image_data.norm_data.read();
     let fit = image.image_data.fit_data.read();
     if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
