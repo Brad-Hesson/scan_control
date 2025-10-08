@@ -14,6 +14,7 @@ use egui::{
 use eyre::{Context as _, ContextCompat, Result};
 use itertools::Itertools;
 use notify_typed::{Event, EventWatcher, RecursiveMode};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
@@ -22,8 +23,8 @@ use crate::{
 };
 
 pub struct FileTree<T> {
-    tree: Folder<T>,
-    rx: mpsc::Receiver<Event>,
+    tree: Option<Folder<T>>,
+    file_event_rx: mpsc::Receiver<Event>,
     watcher: EventWatcher,
     load_callback: Box<dyn Fn(&Path) -> Option<T>>,
     last_selected: Option<usize>,
@@ -40,20 +41,23 @@ impl<T> FileTree<T> {
             ctx.request_repaint();
         })?;
         Ok(Self {
-            tree: Folder::new("".into(), vec![]),
+            tree: None,
             watcher,
-            rx,
+            file_event_rx: rx,
             load_callback: Box::new(load_callback),
             last_selected: None,
         })
     }
     pub fn load_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let new_tree = Item::load_path(&path, &self.load_callback)
+        let Item::Folder { folder } = Item::load_path(&path, &self.load_callback)
             .with_context(|| format!("failed to load path `{}`", path.display()))?
-            .unwrap();
-        if let Some(item) = self.tree.children.get(0) {
-            let prev_path = item.path().to_path_buf();
+            .unwrap()
+        else {
+            panic!()
+        };
+        if let Some(folder) = self.tree.as_ref() {
+            let prev_path = &folder.path;
             self.watcher
                 .unwatch(&prev_path)
                 .with_context(|| format!("failed to unwatch the path `{}`", prev_path.display()))?;
@@ -61,43 +65,50 @@ impl<T> FileTree<T> {
         self.watcher
             .watch(&path, RecursiveMode::Recursive)
             .with_context(|| format!("failed to start watching the path `{}`", path.display()))?;
-        self.tree.children.clear();
-        self.tree.children.push(new_tree);
+        self.tree = Some(folder);
         Ok(())
     }
     #[inline]
     pub fn len(&self) -> usize {
-        self.tree.file_count()
+        self.tree
+            .as_ref()
+            .map(|folder| folder.file_count())
+            .unwrap_or_default()
     }
     #[inline]
     pub fn get(&self, i: usize) -> Option<&File<T>> {
-        self.tree.get_file(i)
+        self.tree.as_ref().and_then(|folder| folder.get_file(i))
     }
     #[inline]
     pub fn get_mut(&mut self, i: usize) -> Option<&mut File<T>> {
-        self.tree.get_file_mut(i)
+        self.tree.as_mut().and_then(|folder| folder.get_file_mut(i))
     }
     #[inline]
     pub fn show(&mut self, ui: &mut Ui) {
+        self.update();
         self.show_list(
             ui,
             0,
             self.tree
-                .get_item(0)
-                .and_then(|item| item.as_folder())
-                .and_then(|folder| Some(folder.children.len()))
+                .as_ref()
+                .map(|folder| folder.children.len())
                 .unwrap_or_default(),
         );
     }
     fn show_item(&mut self, ui: &mut Ui, i: usize) -> SyncResponse {
-        match self.tree.get_item_mut(i).unwrap() {
+        match self
+            .tree
+            .as_mut()
+            .and_then(|folder| folder.get_item_mut(i))
+            .unwrap()
+        {
             Item::Folder { folder } => {
                 let name = folder.path.file_stem().unwrap().to_string_lossy();
                 let len = folder.children.len();
                 let resp = CollapsingHeader::new(name)
                     .default_open(true)
                     .show(ui, |ui| {
-                        self.show_list(ui, i, len);
+                        self.show_list(ui, i + 1, len);
                     })
                     .header_response;
                 SyncResponse {
@@ -111,7 +122,7 @@ impl<T> FileTree<T> {
     fn show_list(&mut self, ui: &mut Ui, start: usize, len: usize) {
         macro_rules! item {
             ($i:expr) => {
-                self.tree.get_item_mut($i).unwrap()
+                self.tree.as_mut().unwrap().get_item_mut($i).unwrap()
             };
             ($i:expr; file) => {
                 item!($i).as_file_mut().unwrap()
@@ -120,7 +131,7 @@ impl<T> FileTree<T> {
                 item!($i).as_folder_mut().unwrap()
             };
         }
-        let mut i = start + 1;
+        let mut i = start;
         for _ in 0..len {
             let mut resp = self.show_item(ui, i);
             if resp.sync.hovered() {
@@ -149,6 +160,90 @@ impl<T> FileTree<T> {
                 }
             }
             i += item!(i).item_count() + 1;
+        }
+    }
+    fn update(&mut self) {
+        let Some(tree) = self.tree.as_mut() else {
+            return;
+        };
+        for event in self.file_event_rx.try_iter() {
+            info!("{event:?}");
+            match event {
+                Event::Create { path } => {
+                    let Some(item) = Item::load_path(path, &self.load_callback)
+                        .ok_trace()
+                        .flatten()
+                    else {
+                        continue;
+                    };
+                    for i in 0..tree.item_count() {
+                        if tree.get_item(i).unwrap().path() == item.path().parent().unwrap() {
+                            tree.get_item_mut(i)
+                                .unwrap()
+                                .as_folder_mut()
+                                .unwrap()
+                                .children
+                                .push(item);
+                            break;
+                        }
+                    }
+                }
+                Event::Rename { from, to } => {
+                    for i in 0..tree.file_count() {
+                        if tree.get_item(i).unwrap().path() == from {
+                            tree.get_item_mut(i).unwrap().rename(to);
+                            break;
+                        }
+                    }
+                }
+                Event::Move { from, to } => {
+                    let mut item = None;
+                    for i in 0..tree.item_count() {
+                        if tree.get_item(i).unwrap().path() == from.parent().unwrap() {
+                            item = tree
+                                .get_item_mut(i)
+                                .unwrap()
+                                .as_folder_mut()
+                                .unwrap()
+                                .children
+                                .extract_if(.., |it| it.path() == from)
+                                .exactly_one()
+                                .ok_trace();
+                            break;
+                        }
+                    }
+                    let Some(mut item) = item else {
+                        todo!("parent folder is not iterated so is never found as the parent");
+                        error!("Never found parent during move event");
+                        continue;
+                    };
+                    item.rename(&to);
+                    for i in 0..tree.item_count() {
+                        if tree.get_item(i).unwrap().path() == item.path().parent().unwrap() {
+                            tree.get_item_mut(i)
+                                .unwrap()
+                                .as_folder_mut()
+                                .unwrap()
+                                .children
+                                .push(item);
+                            break;
+                        }
+                    }
+                }
+                Event::Delete { path } => {
+                    for i in 0..tree.item_count() {
+                        if tree.get_item(i).unwrap().path() == path.parent().unwrap() {
+                            tree.get_item_mut(i)
+                                .unwrap()
+                                .as_folder_mut()
+                                .unwrap()
+                                .children
+                                .retain(|it| it.path() != path);
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
     pub fn clear_selected(&mut self) {
@@ -449,14 +544,13 @@ impl<T> Item<T> {
             Item::File { file } => &mut file.path,
         }
     }
-    fn rename(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+    fn rename(&mut self, path: impl AsRef<Path>) {
         *self.path_mut() = path.as_ref().to_path_buf();
         if let Some(folder) = self.as_folder_mut() {
             for child in &mut folder.children {
-                child.rename(folder.path.join(child.path().file_name().unwrap()))?;
+                child.rename(folder.path.join(child.path().file_name().unwrap()));
             }
         }
-        Ok(())
     }
     fn load_path(
         path: impl AsRef<Path>,
