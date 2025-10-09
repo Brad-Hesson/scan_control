@@ -28,6 +28,9 @@ tracing.workspace = true
 smol.workspace = true
 egui-file-dialog = "0.11.0"
 egui_extras = { version = "0.32", features = ["image"] }
+id_tree = "1.8.0"
+thiserror = "2.0.17"
+borrow = "2.0.0"
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
