@@ -402,7 +402,7 @@ fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEnc
     }
 }
 
-struct StaticImage {
+pub struct StaticImage {
     image_data: ScanImage,
     image_src: SXM,
     fit_type: FitType,

@@ -1252,6 +1252,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetree"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3089,6 +3096,7 @@ dependencies = [
  "egui_extras",
  "env_logger",
  "eyre",
+ "filetree",
  "glam",
  "id_tree",
  "image-compute",

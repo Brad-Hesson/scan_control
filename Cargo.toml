@@ -21,6 +21,7 @@ uuid = { version = "1.18", features = ["v4"] }
 image-compute = { path = "crates/image-compute" }
 sxmfile = { path = "crates/sxmfile" }
 notify-typed = { path = "crates/notify-typed" }
+filetree = { path = "crates/filetree" }
 wgpu = { workspace = true, default-features = false, features = ["wgsl"] }
 bytemuck.workspace = true
 eyre.workspace = true
@@ -39,7 +40,12 @@ wgsl_to_wgpu.workspace = true
 pollster = "0.4.0"
 
 [workspace]
-members = ["crates/sxmfile", "crates/image-compute", "crates/notify-typed"]
+members = [
+    "crates/sxmfile",
+    "crates/image-compute",
+    "crates/notify-typed",
+    "crates/filetree",
+]
 
 [workspace.dependencies]
 bytemuck = "1.20"
