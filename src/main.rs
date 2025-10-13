@@ -1,5 +1,7 @@
 // #![windows_subsystem = "windows"]
 
+use std::error::Error;
+
 use eframe::wgpu::{DeviceDescriptor, PresentMode};
 use eyre::Context as _;
 use tracing::{info, trace};
@@ -15,7 +17,7 @@ mod scan_view;
 mod undo_queue;
 mod utils;
 
-fn main() -> eframe::Result {
+fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
@@ -48,16 +50,22 @@ fn main() -> eframe::Result {
         multisampling: 4,
         ..Default::default()
     };
-    eframe::run_native(
-        "Scan Control",
-        native_options,
-        Box::new(|cc| {
-            egui_extras::install_image_loaders(&cc.egui_ctx);
-            cc.egui_ctx
-                .tessellation_options_mut(|opt| opt.feathering = false);
-            Ok(Box::new(app::MyApp::new(cc)))
-        }),
-    )
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        tokio::task::block_in_place(|| {
+            eframe::run_native(
+                "Scan Control",
+                native_options,
+                Box::new(|cc| {
+                    egui_extras::install_image_loaders(&cc.egui_ctx);
+                    cc.egui_ctx
+                        .tessellation_options_mut(|opt| opt.feathering = false);
+                    Ok(Box::new(app::MyApp::new(cc)))
+                }),
+            )
+        })
+    })?;
+    Ok(())
 }
 
 fn init_wgpu() -> eyre::Result<(Instance, Adapter, Device, Queue)> {

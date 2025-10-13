@@ -32,6 +32,7 @@ egui_extras = { version = "0.32", features = ["image"] }
 id_tree = "1.8.0"
 thiserror = "2.0.17"
 borrow = "2.0.0"
+tokio.workspace = true
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
@@ -59,3 +60,10 @@ tracing-subscriber = "0.3"
 glam = "0.30"
 eframe = "0.32"
 egui = "0.32"
+tokio = { version = "1.47.1", default-features = false, features = [
+    "full",
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "time",
+] }
