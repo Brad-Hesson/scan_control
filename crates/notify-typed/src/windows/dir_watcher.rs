@@ -61,6 +61,7 @@ impl Stream for DirWatcher {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        self.waker.register(cx.waker());
         if let Ok(read) = self.cons.read() {
             let mut reader = Cursor::new(read.buf());
             if let Ok(action) = ActionPacket::read_ne(&mut reader) {
@@ -73,7 +74,6 @@ impl Stream for DirWatcher {
             }
             read.release(0);
         }
-        self.waker.register(cx.waker());
         Poll::Pending
     }
 }
