@@ -13,7 +13,7 @@ use std::{
 
 use bbqueue::{BBBuffer, Consumer, GrantW, Producer};
 use binrw::BinRead;
-use futures::Stream;
+use futures::{Stream, task::AtomicWaker};
 use windows::core::Error;
 
 use crate::windows::{
@@ -28,7 +28,7 @@ pub struct DirWatcher {
     buffer: Box<BBBuffer<BUFFER_SIZE>>,
     cons: Consumer<'static, BUFFER_SIZE>,
     thread_pool: ThreadPoolIO<Callback>,
-    waker: Arc<AtomicPtr<Waker>>,
+    waker: Arc<AtomicWaker>,
     base_path: PathBuf,
 }
 impl DirWatcher {
@@ -38,7 +38,7 @@ impl DirWatcher {
             .try_split()
             .expect("buffer should not already be split");
         let handle = DirHandle::new(&path)?;
-        let waker = Arc::new(AtomicPtr::new(ptr::null_mut()));
+        let waker = Arc::new(AtomicWaker::new());
         let callback = Callback::new(
             handle,
             prod,
@@ -76,8 +76,7 @@ impl Stream for DirWatcher {
             }
             read.release(0);
         }
-        self.waker
-            .store(ptr::from_ref(cx.waker()).cast_mut(), Ordering::Release);
+        self.waker.register(cx.waker());
         Poll::Pending
     }
 }
@@ -86,14 +85,14 @@ struct Callback {
     handle: DirHandle,
     prod: Producer<'static, BUFFER_SIZE>,
     grant: Option<GrantW<'static, BUFFER_SIZE>>,
-    waker: Arc<AtomicPtr<Waker>>,
+    waker: Arc<AtomicWaker>,
     filter: Filter,
 }
 impl Callback {
     fn new(
         handle: DirHandle,
         prod: Producer<'static, BUFFER_SIZE>,
-        waker: Arc<AtomicPtr<Waker>>,
+        waker: Arc<AtomicWaker>,
         filter: Filter,
     ) -> Self {
         Self {
@@ -127,9 +126,7 @@ impl ThreadPoolCallback for Callback {
         let grant = self.grant.take().unwrap();
         grant.commit(dword_align(num_bytes));
         self.start_read();
-        if let Some(waker) = unsafe { self.waker.load(Ordering::Acquire).as_ref() } {
-            waker.wake_by_ref();
-        }
+        self.waker.wake();
     }
 }
 
@@ -167,17 +164,30 @@ pub enum ActionType {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use futures::StreamExt;
     use tokio::pin;
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_name() {
+    #[test]
+    fn test_name() {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(test_name_async())
+    }
+    async fn test_name_async() {
         let watcher = DirWatcher::new("./data").unwrap();
-        pin!(watcher);
-        while let Some(action) = watcher.next().await {
-            println!("{action:?}");
+        tokio::spawn(async {
+            pin!(watcher);
+            while let Some(action) = watcher.next().await {
+                eprintln!("{action:?}");
+            }
+        });
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            eprint!("|");
         }
     }
 }

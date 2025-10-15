@@ -60,6 +60,7 @@ impl DirHandle {
         }
     }
 }
+unsafe impl Send for DirHandle{}
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
