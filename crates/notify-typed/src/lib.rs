@@ -11,6 +11,9 @@ use notify::{
 };
 use tracing::{error, trace};
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 pub struct EventWatcher {
     watcher: RecommendedWatcher,
 }
