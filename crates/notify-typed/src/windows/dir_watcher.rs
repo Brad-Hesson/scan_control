@@ -3,12 +3,9 @@ use std::{
     io::Cursor,
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-    ptr::{self, NonNull},
-    sync::{
-        Arc,
-        atomic::{AtomicPtr, Ordering},
-    },
-    task::{Poll, Waker},
+    ptr::NonNull,
+    sync::Arc,
+    task::Poll,
 };
 
 use bbqueue::{BBBuffer, Consumer, GrantW, Producer};
