@@ -9,12 +9,14 @@ tracing = { workspace = true }
 eyre = { workspace = true }
 tokio = { workspace = true }
 notify = "8.2.0"
-bbqueue = "0.5.1"
 bitflags = "2.9.4"
 futures = "0.3.31"
 binrw = "0.15.0"
 num_enum = "0.7.4"
-bbq2 = { version = "0.4.2", features = ["std"] }
+bbq2 = { version = "0.4.2", default-features = false, features = [
+    "std",
+    "maitake-sync-0_2",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = ">=0.59, <=0.62", features = [

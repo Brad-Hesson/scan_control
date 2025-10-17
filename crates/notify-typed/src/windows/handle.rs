@@ -1,4 +1,4 @@
-use std::{os::windows::ffi::OsStrExt, path::Path};
+use std::{mem::MaybeUninit, os::windows::ffi::OsStrExt, path::Path};
 
 use windows::{
     self,
@@ -42,6 +42,7 @@ impl DirHandle {
         buffer: &mut [u8],
         recursive: bool,
         filter: Filter,
+        overlapped: &mut Overlapped,
     ) -> windows::core::Result<()> {
         unsafe {
             ReadDirectoryChangesW(
@@ -54,13 +55,13 @@ impl DirHandle {
                 recursive,
                 FILE_NOTIFY_CHANGE(filter.bits()),
                 None,
-                Some(&mut OVERLAPPED::default()),
+                Some(&mut overlapped.0),
                 None,
             )
         }
     }
 }
-unsafe impl Send for DirHandle{}
+unsafe impl Send for DirHandle {}
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
@@ -75,3 +76,11 @@ bitflags::bitflags! {
         const Security = 0x100;
     }
 }
+
+pub struct Overlapped(OVERLAPPED);
+impl Overlapped {
+    pub fn new() -> Self {
+        Self(OVERLAPPED::default())
+    }
+}
+unsafe impl Send for Overlapped {}
