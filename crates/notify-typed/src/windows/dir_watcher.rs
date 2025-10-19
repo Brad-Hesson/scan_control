@@ -3,102 +3,153 @@ use std::{
     io::Cursor,
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-    sync::Arc,
+    pin::Pin,
     task::Poll,
+    time::Duration,
 };
 
-use bbq2::{
-    prod_cons::stream::{StreamConsumer, StreamGrantW, StreamProducer},
-    queue::{ArcBBQueue, BBQueue},
-    traits::{notifier::maitake::MaiNotSpsc, storage::BoxedSlice},
-};
+use async_stream::stream;
 use binrw::BinRead;
-use futures::{Stream, task::AtomicWaker};
+use futures::{Stream, StreamExt};
+use futures::{
+    channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    stream::Peekable,
+};
+use tokio::{pin, time::timeout};
+use tracing::error;
 use windows::core::Error;
 
-use crate::windows::{
-    atomic_coord_min::AtomicCoordMin,
-    handle::{DirHandle, Filter, Overlapped},
-    threadpool_io::{ThreadPoolCallback, ThreadPoolIO},
+use crate::{
+    Event,
+    windows::{
+        handle::{DirHandle, Filter, Overlapped},
+        threadpool_io::{ThreadPoolCallback, ThreadPoolIO},
+    },
 };
 
-const BUFFER_SIZE: usize = 64 * 1024;
-const GRANT_SIZE: usize = 1024;
-type Buffer = ArcBBQueue<BoxedSlice, AtomicCoordMin, MaiNotSpsc>;
-type BufferHandle = Arc<BBQueue<BoxedSlice, AtomicCoordMin, MaiNotSpsc>>;
+const READ_BUFFER_SIZE: usize = 16 * 1024;
+const DELETE_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct DirWatcher {
-    buffer: Buffer,
-    cons: StreamConsumer<BufferHandle>,
+    event_parser: Pin<Box<dyn Stream<Item = Event>>>,
     thread_pool: ThreadPoolIO<Callback>,
-    waker: Arc<AtomicWaker>,
     base_path: PathBuf,
 }
 impl DirWatcher {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
         let handle = DirHandle::new(&path)?;
-        let buffer = Buffer::new_with_storage(BoxedSlice::new(BUFFER_SIZE));
-        let waker = Arc::new(AtomicWaker::new());
-        let callback = Callback::new(handle, buffer.stream_producer(), waker.clone());
+        let (sender, recv) = mpsc::unbounded();
+        let callback = Callback::new(handle, sender);
         let mut thread_pool = ThreadPoolIO::new(handle, callback)?;
         thread_pool.start();
         thread_pool.callback.start_read();
-        let cons = buffer.stream_consumer();
+        let event_parser = Box::pin(event_parser(recv, path.as_ref().to_path_buf()));
         Ok(Self {
-            buffer,
-            cons,
+            event_parser,
             thread_pool,
-            waker,
             base_path: path.as_ref().to_path_buf(),
         })
     }
 }
 impl Stream for DirWatcher {
-    type Item = ActionPacket;
+    type Item = Event;
 
     fn poll_next(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        self.waker.register(cx.waker());
-        if let Ok(read) = self.cons.read() {
-            let mut reader = Cursor::new(&*read);
-            if let Ok(action) = ActionPacket::read_ne(&mut reader) {
-                read.release(dword_align(action.byte_len()));
-                // let action = Action {
-                //     action_type: ActionType::try_from(action.action).unwrap(),
-                //     path: self.base_path.join(action.name),
-                // };
-                return Poll::Ready(Some(action));
-            }
-            read.release(0);
-        }
-        Poll::Pending
+        self.event_parser.poll_next_unpin(cx)
     }
+}
+
+fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stream<Item = Event> {
+    stream! {
+        let rx = rx.peekable();
+        pin!(rx);
+        while let Some(packet) = rx.next().await {
+            match packet.action_type() {
+                ActionType::Added => {
+                    yield Event::Create {
+                        path: base.join(packet.path()),
+                    }
+                }
+                ActionType::RenamedOld => {
+                    let from = base.join(packet.path());
+                    match expect_action(rx.as_mut(), ActionType::RenamedNew).await {
+                        None => return,
+                        Some(Ok(packet)) => {
+                            yield Event::Rename {
+                                from,
+                                to: base.join(packet.path()),
+                            }
+                        }
+                        Some(Err(())) => {
+                            error!("got rename event without new path");
+                            continue;
+                        }
+                    };
+                }
+                ActionType::Removed => {
+                    let from = base.join(packet.path());
+                    match timeout(
+                        DELETE_TIMEOUT,
+                        expect_action(rx.as_mut(), ActionType::Added),
+                    )
+                    .await
+                    {
+                        Ok(None) => return,
+                        Ok(Some(Ok(packet))) => {
+                            yield Event::Move {
+                                from,
+                                to: base.join(packet.path()),
+                            }
+                        }
+                        _ => yield Event::Delete { path: from },
+                    }
+                }
+                other_action => {
+                    error!("got unexpected event: {other_action:?}");
+                }
+            }
+        }
+    }
+}
+
+async fn expect_action(
+    mut rx: Pin<&mut Peekable<UnboundedReceiver<ActionPacket>>>,
+    action_type: ActionType,
+) -> Option<Result<ActionPacket, ()>> {
+    let packet = rx.as_mut().peek().await?;
+    if packet.action_type() == action_type {
+        return Some(Ok(rx.next().await.unwrap()));
+    }
+    return Some(Err(()));
+}
+
+#[repr(C, align(4))]
+struct ReadBuffer {
+    buf: [u8; READ_BUFFER_SIZE],
 }
 
 struct Callback {
     handle: DirHandle,
-    prod: StreamProducer<BufferHandle>,
-    grant: Option<StreamGrantW<BufferHandle>>,
-    waker: Arc<AtomicWaker>,
+    sender: UnboundedSender<ActionPacket>,
     overlapped: Overlapped,
+    read_buffer: ReadBuffer,
 }
 impl Callback {
-    fn new(handle: DirHandle, prod: StreamProducer<BufferHandle>, waker: Arc<AtomicWaker>) -> Self {
+    fn new(handle: DirHandle, sender: UnboundedSender<ActionPacket>) -> Self {
         Self {
             handle,
-            prod,
-            grant: None,
-            waker,
+            sender,
             overlapped: Overlapped::new(),
+            read_buffer: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
         }
     }
     fn start_read(&mut self) {
-        self.grant = Some(self.prod.grant_max_remaining(GRANT_SIZE).unwrap());
         self.handle
             .read_dir_changes_overlapped(
-                self.grant.as_mut().expect("just loaded the grant"),
+                &mut self.read_buffer.buf,
                 true,
                 Filter::DirCRD | Filter::FileCRD,
                 &mut self.overlapped,
@@ -109,26 +160,35 @@ impl Callback {
 impl ThreadPoolCallback for Callback {
     fn call(&mut self, bytes_written: Result<usize, u32>) {
         let num_bytes = bytes_written.unwrap();
-        let grant = self.grant.take().unwrap();
-        grant.commit(dword_align(num_bytes));
-        self.waker.wake();
+        let mut buf = Cursor::new(&self.read_buffer.buf[..num_bytes]);
+        while let Ok(packet) = ActionPacket::read_ne(&mut buf) {
+            let send_resp = self.sender.unbounded_send(packet);
+            if send_resp.is_err() {
+                return;
+            }
+        }
         self.start_read();
     }
 }
 
 #[derive(Debug, binrw::BinRead)]
 pub struct ActionPacket {
+    #[br(align_before(4))]
     next_offset: u32,
-    #[br(map = |v: u32| ActionType::try_from(v).expect("undefined action type"))]
-    action: ActionType,
+    action: u32,
     name_len: u32,
-    #[br(map = |v: Vec<u16>| OsString::from_wide(&v))]
     #[br(count = name_len / 2)]
-    name: OsString,
+    name: Vec<u16>,
 }
 impl ActionPacket {
     fn byte_len(&self) -> usize {
         12 + self.name_len as usize
+    }
+    fn action_type(&self) -> ActionType {
+        ActionType::try_from(self.action).expect("invalid action type")
+    }
+    fn path(&self) -> OsString {
+        OsString::from_wide(&self.name)
     }
 }
 
@@ -172,8 +232,4 @@ mod tests {
             out.flush().await.unwrap();
         }
     }
-}
-
-fn dword_align(n: usize) -> usize {
-    n.div_ceil(4) * 4
 }
