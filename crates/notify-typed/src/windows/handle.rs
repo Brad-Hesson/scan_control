@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, os::windows::ffi::OsStrExt, path::Path};
+use std::{os::windows::ffi::OsStrExt, path::Path};
 
 use windows::{
     self,
@@ -11,10 +11,9 @@ use windows::{
         },
         System::IO::OVERLAPPED,
     },
-    core::{Error, PCWSTR},
+    core::{Error, Free as _, PCWSTR},
 };
 
-#[derive(Clone, Copy)]
 pub struct DirHandle(pub(super) HANDLE);
 impl DirHandle {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
@@ -61,7 +60,13 @@ impl DirHandle {
         }
     }
 }
+impl Drop for DirHandle {
+    fn drop(&mut self) {
+        unsafe { self.0.free() }
+    }
+}
 unsafe impl Send for DirHandle {}
+unsafe impl Sync for DirHandle {}
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]

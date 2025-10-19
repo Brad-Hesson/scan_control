@@ -2,15 +2,17 @@ use std::ptr;
 
 use windows::{
     Win32::System::Threading::{
-        CancelThreadpoolIo, CloseThreadpoolIo, CreateThreadpoolIo, PTP_CALLBACK_INSTANCE, PTP_IO,
-        StartThreadpoolIo,
+        CancelThreadpoolIo, CreateThreadpoolIo, PTP_CALLBACK_INSTANCE, PTP_IO, StartThreadpoolIo,
     },
-    core::Error,
+    core::{Error, Free as _},
 };
 
 use crate::windows::handle::DirHandle;
 
-pub struct ThreadPoolIO<C> {
+pub struct ThreadPoolIO<C>
+where
+    C: ThreadPoolCallback,
+{
     pub(super) callback: Box<C>,
     ptp_io: PTP_IO,
 }
@@ -18,7 +20,7 @@ impl<C> ThreadPoolIO<C>
 where
     C: ThreadPoolCallback,
 {
-    pub fn new(handle: DirHandle, callback: C) -> Result<Self, Error> {
+    pub fn new(handle: &DirHandle, callback: C) -> Result<Self, Error> {
         let mut callback = Box::new(callback);
         let callback_ptr = ptr::from_mut(callback.as_mut()).cast();
         let ptp_io = unsafe {
@@ -35,11 +37,14 @@ where
         };
     }
 }
-impl<C> Drop for ThreadPoolIO<C> {
+impl<C> Drop for ThreadPoolIO<C>
+where
+    C: ThreadPoolCallback,
+{
     fn drop(&mut self) {
+        self.cancel();
         unsafe {
-            CancelThreadpoolIo(self.ptp_io);
-            CloseThreadpoolIo(self.ptp_io);
+            self.ptp_io.free();
         };
     }
 }

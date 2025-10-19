@@ -4,19 +4,20 @@ use std::{
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
     task::Poll,
     time::Duration,
 };
 
 use async_stream::stream;
 use binrw::BinRead;
-use futures::{Stream, StreamExt};
 use futures::{
+    Stream, StreamExt,
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    pin_mut,
     stream::Peekable,
 };
-use tokio::{pin, time::timeout};
-use tracing::error;
+use tracing::{error, trace};
 use windows::core::Error;
 
 use crate::{
@@ -30,28 +31,28 @@ use crate::{
 const READ_BUFFER_SIZE: usize = 16 * 1024;
 const DELETE_TIMEOUT: Duration = Duration::from_millis(100);
 
-pub struct DirWatcher {
+pub struct DirEventStream {
     event_parser: Pin<Box<dyn Stream<Item = Event>>>,
-    thread_pool: ThreadPoolIO<Callback>,
-    base_path: PathBuf,
+    _thread_pool: ThreadPoolIO<Callback>,
 }
-impl DirWatcher {
+impl DirEventStream {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let handle = DirHandle::new(&path)?;
+        let handle = Arc::new(DirHandle::new(&path)?);
         let (sender, recv) = mpsc::unbounded();
-        let callback = Callback::new(handle, sender);
-        let mut thread_pool = ThreadPoolIO::new(handle, callback)?;
-        thread_pool.start();
-        thread_pool.callback.start_read();
-        let event_parser = Box::pin(event_parser(recv, path.as_ref().to_path_buf()));
+        let mut _thread_pool = ThreadPoolIO::new(&handle.clone(), Callback::new(handle, sender))?;
+        _thread_pool.start();
+        _thread_pool.callback.start_read();
+        let event_parser = Box::pin(
+            event_parser(recv, path.as_ref().to_path_buf())
+                .inspect(|event| trace!("parsed dir event: {event:?}")),
+        );
         Ok(Self {
             event_parser,
-            thread_pool,
-            base_path: path.as_ref().to_path_buf(),
+            _thread_pool,
         })
     }
 }
-impl Stream for DirWatcher {
+impl Stream for DirEventStream {
     type Item = Event;
 
     fn poll_next(
@@ -64,8 +65,10 @@ impl Stream for DirWatcher {
 
 fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stream<Item = Event> {
     stream! {
-        let rx = rx.peekable();
-        pin!(rx);
+        let rx = rx.inspect(|packet| {
+            trace!("system dir event: {:?} : {}", packet.action_type(), packet.path().display());
+        }).peekable();
+        pin_mut!(rx);
         while let Some(packet) = rx.next().await {
             match packet.action_type() {
                 ActionType::Added => {
@@ -85,9 +88,8 @@ fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stre
                         }
                         Some(Err(())) => {
                             error!("got rename event without new path");
-                            continue;
                         }
-                    };
+                    }
                 }
                 ActionType::Removed => {
                     let from = base.join(packet.path());
@@ -108,22 +110,32 @@ fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stre
                     }
                 }
                 other_action => {
-                    error!("got unexpected event: {other_action:?}");
+                    error!("got unexpected event: {other_action:?} : {}", packet.path().display());
                 }
             }
         }
     }
 }
 
-async fn expect_action(
-    mut rx: Pin<&mut Peekable<UnboundedReceiver<ActionPacket>>>,
+async fn expect_action<S: Stream<Item = ActionPacket>>(
+    mut rx: Pin<&mut Peekable<S>>,
     action_type: ActionType,
 ) -> Option<Result<ActionPacket, ()>> {
     let packet = rx.as_mut().peek().await?;
     if packet.action_type() == action_type {
-        return Some(Ok(rx.next().await.unwrap()));
+        return Some(Ok(rx.next().await.expect("just peeked the packet")));
     }
-    return Some(Err(()));
+    Some(Err(()))
+}
+
+async fn timeout<I>(dur: Duration, fut: impl IntoFuture<Output = I>) -> Result<I, ()> {
+    let del = futures_timer::Delay::new(dur);
+    let fut = fut.into_future();
+    pin_mut!(fut);
+    match futures::future::select(fut, del).await {
+        futures::future::Either::Left((out, _)) => Ok(out),
+        futures::future::Either::Right(_) => Err(()),
+    }
 }
 
 #[repr(C, align(4))]
@@ -132,18 +144,18 @@ struct ReadBuffer {
 }
 
 struct Callback {
-    handle: DirHandle,
+    handle: Arc<DirHandle>,
     sender: UnboundedSender<ActionPacket>,
     overlapped: Overlapped,
     read_buffer: ReadBuffer,
 }
 impl Callback {
-    fn new(handle: DirHandle, sender: UnboundedSender<ActionPacket>) -> Self {
+    fn new(handle: Arc<DirHandle>, sender: UnboundedSender<ActionPacket>) -> Self {
         Self {
             handle,
             sender,
             overlapped: Overlapped::new(),
-            read_buffer: unsafe { std::mem::MaybeUninit::uninit().assume_init() },
+            read_buffer: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
         }
     }
     fn start_read(&mut self) {
@@ -174,28 +186,19 @@ impl ThreadPoolCallback for Callback {
 #[derive(Debug, binrw::BinRead)]
 pub struct ActionPacket {
     #[br(align_before(4))]
-    next_offset: u32,
+    _next_offset: u32,
     action: u32,
-    name_len: u32,
-    #[br(count = name_len / 2)]
+    _name_len: u32,
+    #[br(count = _name_len / 2)]
     name: Vec<u16>,
 }
 impl ActionPacket {
-    fn byte_len(&self) -> usize {
-        12 + self.name_len as usize
-    }
     fn action_type(&self) -> ActionType {
         ActionType::try_from(self.action).expect("invalid action type")
     }
     fn path(&self) -> OsString {
         OsString::from_wide(&self.name)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct Action {
-    action_type: ActionType,
-    path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, num_enum::TryFromPrimitive)]
@@ -210,19 +213,36 @@ pub enum ActionType {
 
 #[cfg(test)]
 mod tests {
+    use std::task::{Context, Waker};
+
     use futures::StreamExt;
     use tokio::{io::AsyncWriteExt, pin};
+    use tracing_subscriber::EnvFilter;
 
     use super::*;
 
     #[test]
+    fn blocking() {
+        let mut watcher = DirEventStream::new("./data").unwrap();
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            while let Poll::Ready(Some(event)) = watcher.poll_next_unpin(&mut cx) {
+                println!("{event:?}");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    #[test]
     fn test_name() {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(test_name_async())
     }
     async fn test_name_async() {
-        let watcher = DirWatcher::new("./data").unwrap();
+        let watcher = DirEventStream::new("./data").unwrap();
         let out = tokio::io::BufWriter::new(tokio::io::stdout());
         pin!(out);
         pin!(watcher);

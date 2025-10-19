@@ -1,10 +1,12 @@
 use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, RecvError, RecvTimeoutError},
+    task::{Context, Waker},
     time::Duration,
 };
 
 use eyre::Result;
+use futures::StreamExt;
 use notify::{
     Event as RawEvent, EventKind, RecommendedWatcher, Watcher as _,
     event::{ModifyKind, RenameMode},
@@ -13,6 +15,25 @@ use tracing::{error, trace};
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::stream::DirEventStream;
+
+impl DirEventStream {
+    pub fn try_recv(&mut self) -> Option<Event> {
+        let mut cx = Context::from_waker(Waker::noop());
+        match self.poll_next_unpin(&mut cx) {
+            std::task::Poll::Ready(Some(event)) => Some(event),
+            _ => None,
+        }
+    }
+    pub fn try_recv_iter(&mut self) -> impl Iterator<Item = Event> {
+        let mut cx = Context::from_waker(Waker::noop());
+        std::iter::from_fn(move || match self.poll_next_unpin(&mut cx) {
+            std::task::Poll::Ready(Some(event)) => Some(event),
+            _ => None,
+        })
+    }
+}
 
 pub struct EventWatcher {
     watcher: RecommendedWatcher,
