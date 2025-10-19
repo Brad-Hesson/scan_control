@@ -26,7 +26,7 @@ impl DirEventStream {
             _ => None,
         }
     }
-    pub fn try_recv_iter(&mut self) -> impl Iterator<Item = Event> {
+    pub fn try_recv_many(&mut self) -> impl Iterator<Item = Event> {
         let mut cx = Context::from_waker(Waker::noop());
         std::iter::from_fn(move || match self.poll_next_unpin(&mut cx) {
             std::task::Poll::Ready(Some(event)) => Some(event),

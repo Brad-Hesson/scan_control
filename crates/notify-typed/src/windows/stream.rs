@@ -12,9 +12,9 @@ use std::{
 use async_stream::stream;
 use binrw::BinRead;
 use futures::{
-    Stream, StreamExt,
+    FutureExt, Stream, StreamExt,
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    pin_mut,
+    pin_mut, select_biased,
     stream::Peekable,
 };
 use tracing::{error, trace};
@@ -63,7 +63,10 @@ impl Stream for DirEventStream {
     }
 }
 
-fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stream<Item = Event> {
+fn event_parser(
+    rx: UnboundedReceiver<ActionPacketExt>,
+    base: PathBuf,
+) -> impl Stream<Item = Event> {
     stream! {
         let rx = rx.inspect(|packet| {
             trace!("system dir event: {:?} : {}", packet.action_type(), packet.path().display());
@@ -78,7 +81,7 @@ fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stre
                 }
                 ActionType::RenamedOld => {
                     let from = base.join(packet.path());
-                    match expect_action(rx.as_mut(), ActionType::RenamedNew).await {
+                    match next_if(rx.as_mut(), |p| p.action_type() == ActionType::RenamedNew).await {
                         None => return,
                         Some(Ok(packet)) => {
                             yield Event::Rename {
@@ -93,9 +96,10 @@ fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stre
                 }
                 ActionType::Removed => {
                     let from = base.join(packet.path());
+                    let id = packet.file_id;
                     match timeout(
                         DELETE_TIMEOUT,
-                        expect_action(rx.as_mut(), ActionType::Added),
+                        next_if(rx.as_mut(), |p| p.action_type() == ActionType::Added && p.file_id == id),
                     )
                     .await
                     {
@@ -117,24 +121,24 @@ fn event_parser(rx: UnboundedReceiver<ActionPacket>, base: PathBuf) -> impl Stre
     }
 }
 
-async fn expect_action<S: Stream<Item = ActionPacket>>(
+async fn next_if<S: Stream<Item = ActionPacketExt>>(
     mut rx: Pin<&mut Peekable<S>>,
-    action_type: ActionType,
-) -> Option<Result<ActionPacket, ()>> {
+    f: impl FnOnce(&ActionPacketExt) -> bool,
+) -> Option<Result<ActionPacketExt, ()>> {
     let packet = rx.as_mut().peek().await?;
-    if packet.action_type() == action_type {
+    if f(packet) {
         return Some(Ok(rx.next().await.expect("just peeked the packet")));
     }
     Some(Err(()))
 }
 
 async fn timeout<I>(dur: Duration, fut: impl IntoFuture<Output = I>) -> Result<I, ()> {
-    let del = futures_timer::Delay::new(dur);
-    let fut = fut.into_future();
+    let mut del = futures_timer::Delay::new(dur).fuse();
+    let fut = fut.into_future().fuse();
     pin_mut!(fut);
-    match futures::future::select(fut, del).await {
-        futures::future::Either::Left((out, _)) => Ok(out),
-        futures::future::Either::Right(_) => Err(()),
+    select_biased! {
+        _ = del => Err(()),
+        out = fut => Ok(out)
     }
 }
 
@@ -145,12 +149,12 @@ struct ReadBuffer {
 
 struct Callback {
     handle: Arc<DirHandle>,
-    sender: UnboundedSender<ActionPacket>,
+    sender: UnboundedSender<ActionPacketExt>,
     overlapped: Overlapped,
     read_buffer: ReadBuffer,
 }
 impl Callback {
-    fn new(handle: Arc<DirHandle>, sender: UnboundedSender<ActionPacket>) -> Self {
+    fn new(handle: Arc<DirHandle>, sender: UnboundedSender<ActionPacketExt>) -> Self {
         Self {
             handle,
             sender,
@@ -160,7 +164,7 @@ impl Callback {
     }
     fn start_read(&mut self) {
         self.handle
-            .read_dir_changes_overlapped(
+            .read_dir_changes_ex_overlapped(
                 &mut self.read_buffer.buf,
                 true,
                 Filter::DirCRD | Filter::FileCRD,
@@ -173,7 +177,7 @@ impl ThreadPoolCallback for Callback {
     fn call(&mut self, bytes_written: Result<usize, u32>) {
         let num_bytes = bytes_written.unwrap();
         let mut buf = Cursor::new(&self.read_buffer.buf[..num_bytes]);
-        while let Ok(packet) = ActionPacket::read_ne(&mut buf) {
+        while let Ok(packet) = ActionPacketExt::read_ne(&mut buf) {
             let send_resp = self.sender.unbounded_send(packet);
             if send_resp.is_err() {
                 return;
@@ -184,15 +188,25 @@ impl ThreadPoolCallback for Callback {
 }
 
 #[derive(Debug, binrw::BinRead)]
-pub struct ActionPacket {
+pub struct ActionPacketExt {
     #[br(align_before(4))]
     _next_offset: u32,
     action: u32,
+    _creation_time: i64,
+    _last_mod_time: i64,
+    _last_change_time: i64,
+    _last_access_time: i64,
+    _allocated_length: i64,
+    _file_size: i64,
+    _file_attrs: u32,
+    _dummy_union: u32,
+    file_id: i64,
+    _parent_file_id: i64,
     _name_len: u32,
     #[br(count = _name_len / 2)]
     name: Vec<u16>,
 }
-impl ActionPacket {
+impl ActionPacketExt {
     fn action_type(&self) -> ActionType {
         ActionType::try_from(self.action).expect("invalid action type")
     }
@@ -213,7 +227,7 @@ pub enum ActionType {
 
 #[cfg(test)]
 mod tests {
-    use std::task::{Context, Waker};
+    use std::io::Write;
 
     use futures::StreamExt;
     use tokio::{io::AsyncWriteExt, pin};
@@ -223,17 +237,25 @@ mod tests {
 
     #[test]
     fn blocking() {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
         let mut watcher = DirEventStream::new("./data").unwrap();
-        let mut cx = Context::from_waker(Waker::noop());
         loop {
-            while let Poll::Ready(Some(event)) = watcher.poll_next_unpin(&mut cx) {
+            if let Some(event) = watcher.try_recv() {
                 println!("{event:?}");
+            } else {
+                print!(".");
+                std::io::stdout().flush().ok();
             }
-            std::thread::sleep(Duration::from_millis(100));
+            // for event in watcher.try_recv_iter() {
+            //     println!("{event:?}");
+            // }
+            std::thread::sleep(Duration::from_secs(5));
         }
     }
     #[test]
-    fn test_name() {
+    fn asink() {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .init();

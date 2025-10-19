@@ -7,7 +7,7 @@ use windows::{
         Storage::FileSystem::{
             CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
             FILE_NOTIFY_CHANGE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-            OPEN_EXISTING, ReadDirectoryChangesW,
+            OPEN_EXISTING, ReadDirectoryChangesExW, ReadDirectoryNotifyExtendedInformation,
         },
         System::IO::OVERLAPPED,
     },
@@ -36,7 +36,7 @@ impl DirHandle {
         }?;
         Ok(Self(handle))
     }
-    pub fn read_dir_changes_overlapped(
+    pub fn read_dir_changes_ex_overlapped(
         &self,
         buffer: &mut [u8],
         recursive: bool,
@@ -44,7 +44,7 @@ impl DirHandle {
         overlapped: &mut Overlapped,
     ) -> windows::core::Result<()> {
         unsafe {
-            ReadDirectoryChangesW(
+            ReadDirectoryChangesExW(
                 self.0,
                 buffer.as_mut_ptr().cast(),
                 buffer
@@ -56,6 +56,7 @@ impl DirHandle {
                 None,
                 Some(&mut overlapped.0),
                 None,
+                ReadDirectoryNotifyExtendedInformation,
             )
         }
     }
@@ -89,3 +90,4 @@ impl Overlapped {
     }
 }
 unsafe impl Send for Overlapped {}
+unsafe impl Sync for Overlapped {}
