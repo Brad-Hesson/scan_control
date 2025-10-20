@@ -40,6 +40,57 @@ impl DirEventStream {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use futures::StreamExt;
+    use tokio::{io::AsyncWriteExt, pin};
+    use tracing_subscriber::EnvFilter;
+
+    use super::*;
+
+    #[test]
+    fn blocking() {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+        let mut watcher = DirEventStream::new("./data").unwrap();
+        loop {
+            if let Some(event) = watcher.try_recv() {
+                println!("{event:?}");
+            } else {
+                print!(".");
+                std::io::stdout().flush().ok();
+            }
+            // for event in watcher.try_recv_iter() {
+            //     println!("{event:?}");
+            // }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    }
+    #[test]
+    fn asink() {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(test_name_async())
+    }
+    async fn test_name_async() {
+        let watcher = DirEventStream::new("./data").unwrap();
+        let out = tokio::io::BufWriter::new(tokio::io::stdout());
+        pin!(out);
+        pin!(watcher);
+        while let Some(action) = watcher.next().await {
+            let s = format!("{action:?}\n");
+            out.write_all_buf(&mut s.as_bytes()).await.unwrap();
+            out.flush().await.unwrap();
+        }
+    }
+}
+
 pub struct EventWatcher {
     watcher: RecommendedWatcher,
 }
