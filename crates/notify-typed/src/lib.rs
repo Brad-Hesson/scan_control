@@ -18,6 +18,11 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::stream::DirEventStream;
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::stream::DirEventStream;
+
 impl DirEventStream {
     pub fn try_recv(&mut self) -> Option<Event> {
         let mut cx = Context::from_waker(Waker::noop());
