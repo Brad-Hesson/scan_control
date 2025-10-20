@@ -1,4 +1,4 @@
-use std::{os::windows::ffi::OsStrExt, path::Path};
+use std::{marker::PhantomPinned, os::windows::ffi::OsStrExt, path::Path, pin::Pin};
 
 use windows::{
     self,
@@ -13,6 +13,8 @@ use windows::{
     },
     core::{Error, Free as _, PCWSTR},
 };
+
+use crate::windows::bindings::threadpool_io::BytesWritten;
 
 pub struct DirHandle(pub(super) HANDLE);
 impl DirHandle {
@@ -36,25 +38,27 @@ impl DirHandle {
         }?;
         Ok(Self(handle))
     }
-    pub fn read_dir_changes_ex_overlapped(
+    pub fn read_dir_changes_ex_overlapped<const N: usize>(
         &self,
-        buffer: &mut [u8],
+        buffer: Pin<&mut DirChangesBuffer<N>>,
         recursive: bool,
         filter: Filter,
-        overlapped: &mut Overlapped,
+        overlapped: Pin<&mut Overlapped>,
     ) -> windows::core::Result<()> {
+        let buffer_len = buffer
+            .buf
+            .len()
+            .try_into()
+            .expect("buffer len should always fit in u32");
         unsafe {
             ReadDirectoryChangesExW(
                 self.0,
-                buffer.as_mut_ptr().cast(),
-                buffer
-                    .len()
-                    .try_into()
-                    .expect("buffer len should always fit in u32"),
+                buffer.get_unchecked_mut().buf.as_mut_ptr().cast(),
+                buffer_len,
                 recursive,
                 FILE_NOTIFY_CHANGE(filter.bits()),
                 None,
-                Some(&mut overlapped.0),
+                Some(&raw mut overlapped.get_unchecked_mut().0),
                 None,
                 ReadDirectoryNotifyExtendedInformation,
             )
@@ -83,11 +87,22 @@ bitflags::bitflags! {
     }
 }
 
-pub struct Overlapped(OVERLAPPED);
+pub struct Overlapped(OVERLAPPED, PhantomPinned);
 impl Overlapped {
     pub fn new() -> Self {
-        Self(OVERLAPPED::default())
+        Self(OVERLAPPED::default(), PhantomPinned)
     }
 }
 unsafe impl Send for Overlapped {}
 unsafe impl Sync for Overlapped {}
+
+#[repr(C, align(4))]
+pub struct DirChangesBuffer<const N: usize> {
+    buf: [u8; N],
+    _p: PhantomPinned,
+}
+impl<const N: usize> DirChangesBuffer<N> {
+    pub fn read(&self, len: &BytesWritten) -> &[u8] {
+        &self.buf[..len.0]
+    }
+}

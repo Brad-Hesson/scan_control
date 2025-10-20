@@ -2409,6 +2409,7 @@ dependencies = [
  "itertools",
  "notify",
  "num_enum",
+ "pin-project",
  "tokio",
  "tracing",
  "tracing-subscriber",

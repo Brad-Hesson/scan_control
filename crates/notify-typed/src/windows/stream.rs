@@ -4,6 +4,7 @@ use std::{
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
     pin::Pin,
+    ptr::addr_of_mut,
     sync::Arc,
     task::Poll,
     time::Duration,
@@ -17,14 +18,15 @@ use futures::{
     pin_mut, select_biased,
     stream::Peekable,
 };
+use pin_project::pin_project;
 use tracing::{error, trace};
 use windows::core::Error;
 
 use crate::{
     Event,
-    windows::{
-        handle::{DirHandle, Filter, Overlapped},
-        threadpool_io::{ThreadPoolCallback, ThreadPoolIO},
+    windows::bindings::{
+        handle::{DirChangesBuffer, DirHandle, Filter, Overlapped},
+        threadpool_io::{BytesWritten, ThreadPoolCallback, ThreadPoolIO},
     },
 };
 
@@ -38,17 +40,15 @@ pub struct DirEventStream {
 impl DirEventStream {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
         let handle = Arc::new(DirHandle::new(&path)?);
-        let (sender, recv) = mpsc::unbounded();
-        let mut _thread_pool = ThreadPoolIO::new(&handle.clone(), Callback::new(handle, sender))?;
-        _thread_pool.start();
-        _thread_pool.callback.start_read();
-        let event_parser = Box::pin(
-            event_parser(recv, path.as_ref().to_path_buf())
-                .inspect(|event| trace!("parsed dir event: {event:?}")),
-        );
+        let (tx, rx) = mpsc::unbounded();
+        let callback = Pin::from(Callback::new_boxed(handle.clone(), tx));
+        let mut thread_pool = ThreadPoolIO::new(&handle, callback)?;
+        thread_pool.start();
+        thread_pool.callback.as_mut().start_read();
+        let event_parser = Box::pin(event_parser(rx, path.as_ref().to_path_buf()));
         Ok(Self {
             event_parser,
-            _thread_pool,
+            _thread_pool: thread_pool,
         })
     }
 }
@@ -118,7 +118,7 @@ fn event_parser(
                 }
             }
         }
-    }
+    }.inspect(|event| trace!("parsed dir event: {event:?}"))
 }
 
 async fn next_if<S: Stream<Item = ActionPacketExt>>(
@@ -137,46 +137,48 @@ async fn timeout<I>(dur: Duration, fut: impl IntoFuture<Output = I>) -> Result<I
     let fut = fut.into_future().fuse();
     pin_mut!(fut);
     select_biased! {
+        out = fut => Ok(out),
         _ = del => Err(()),
-        out = fut => Ok(out)
     }
 }
 
-#[repr(C, align(4))]
-struct ReadBuffer {
-    buf: [u8; READ_BUFFER_SIZE],
-}
-
+#[pin_project]
 struct Callback {
     handle: Arc<DirHandle>,
     sender: UnboundedSender<ActionPacketExt>,
+    #[pin]
     overlapped: Overlapped,
-    read_buffer: ReadBuffer,
+    #[pin]
+    read_buffer: DirChangesBuffer<READ_BUFFER_SIZE>,
 }
 impl Callback {
-    fn new(handle: Arc<DirHandle>, sender: UnboundedSender<ActionPacketExt>) -> Self {
-        Self {
-            handle,
-            sender,
-            overlapped: Overlapped::new(),
-            read_buffer: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
+    fn new_boxed(handle: Arc<DirHandle>, sender: UnboundedSender<ActionPacketExt>) -> Box<Self> {
+        let mut uninit = Box::<Self>::new_uninit();
+        let p = uninit.as_mut_ptr();
+        unsafe {
+            addr_of_mut!((*p).handle).write(handle);
+            addr_of_mut!((*p).sender).write(sender);
+            addr_of_mut!((*p).overlapped).write(Overlapped::new());
+            // read_buffer can be uninitialized
+            uninit.assume_init()
         }
     }
-    fn start_read(&mut self) {
-        self.handle
+    fn start_read(self: Pin<&mut Self>) {
+        let this = self.project();
+        this.handle
             .read_dir_changes_ex_overlapped(
-                &mut self.read_buffer.buf,
+                this.read_buffer,
                 true,
                 Filter::DirCRD | Filter::FileCRD,
-                &mut self.overlapped,
+                this.overlapped,
             )
             .unwrap();
     }
 }
 impl ThreadPoolCallback for Callback {
-    fn call(&mut self, bytes_written: Result<usize, u32>) {
+    fn call(self: Pin<&mut Self>, bytes_written: Result<&BytesWritten, u32>) {
         let num_bytes = bytes_written.unwrap();
-        let mut buf = Cursor::new(&self.read_buffer.buf[..num_bytes]);
+        let mut buf = Cursor::new(self.read_buffer.read(num_bytes));
         while let Ok(packet) = ActionPacketExt::read_ne(&mut buf) {
             let send_resp = self.sender.unbounded_send(packet);
             if send_resp.is_err() {
