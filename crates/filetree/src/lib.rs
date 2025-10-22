@@ -8,6 +8,7 @@ use std::{
 use crate::dir_walk::{DirEntry, visit_dir};
 
 mod dir_walk;
+mod file_uid;
 
 pub struct FileTree<F, D> {
     entries: Vec<Entry<F, D>>,
