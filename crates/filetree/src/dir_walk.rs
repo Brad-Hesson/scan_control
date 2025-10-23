@@ -3,6 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub fn read_dir(
+    path: impl AsRef<Path>,
+) -> std::io::Result<impl Iterator<Item = std::io::Result<DirEntry>>> {
+    Ok(std::fs::read_dir(path)?.map(|entry| entry.and_then(DirEntry::try_from)))
+}
+
 pub fn visit_dir(
     path: impl AsRef<Path>,
     mut visit_fn: impl FnMut(io::Result<DirEntry>) -> bool,
@@ -55,6 +61,22 @@ impl TryFrom<fs::DirEntry> for DirEntry {
     fn try_from(dir_entry: fs::DirEntry) -> Result<Self, Self::Error> {
         let file_type = dir_entry.file_type()?;
         let path = dir_entry.path();
+        if file_type.is_file() {
+            return Ok(DirEntry::File { path });
+        }
+        if file_type.is_dir() {
+            return Ok(DirEntry::Dir { path });
+        }
+        Err(io::Error::other(format!(
+            "path `{}` was not a file or directory",
+            path.display()
+        )))
+    }
+}
+impl TryFrom<PathBuf> for DirEntry {
+    type Error = io::Error;
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let file_type = std::fs::metadata(&path)?.file_type();
         if file_type.is_file() {
             return Ok(DirEntry::File { path });
         }

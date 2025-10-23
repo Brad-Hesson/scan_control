@@ -5,6 +5,9 @@ edition = "2024"
 
 [dependencies]
 tracing.workspace = true
+eyre.workspace = true
+notify-typed = { path = "../notify-typed" }
 twox-hash = { version = "2.1", default-features = false, features = [
     "xxhash3_64",
 ] }
+itertools.workspace = true
