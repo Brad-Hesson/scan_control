@@ -60,7 +60,7 @@ impl TryFrom<fs::DirEntry> for DirEntry {
     type Error = io::Error;
     fn try_from(dir_entry: fs::DirEntry) -> Result<Self, Self::Error> {
         let file_type = dir_entry.file_type()?;
-        let path = dir_entry.path();
+        let path = dir_entry.path().canonicalize()?;
         if file_type.is_file() {
             return Ok(DirEntry::File { path });
         }

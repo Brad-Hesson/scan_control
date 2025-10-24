@@ -4,7 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::dir_walk::{self, DirEntry};
+use eyre::Context;
+
+use crate::{
+    dir_walk::{self, DirEntry},
+    handlers::{LoadHandler, UpdateHandler},
+};
 
 #[derive(Debug)]
 pub struct File<T> {
@@ -51,10 +56,27 @@ impl<T, U> Child<T, U> {
             Child::Folder { folder } => Some(folder),
         }
     }
-    pub(crate) fn rename_recursive(&mut self, path: PathBuf) {
+    pub(crate) fn rename_recursive(
+        &mut self,
+        path: PathBuf,
+        handler: &mut impl UpdateHandler<FileData = T, FolderData = U>,
+    ) -> eyre::Result<()> {
         match self {
-            Child::File { file } => file.path = path,
-            Child::Folder { folder } => folder.rename_recursive(path),
+            Child::File { file } => {
+                handler.rename_file(&file.path, &path, &mut file.data);
+                file.path = path;
+            }
+            Child::Folder { folder } => folder.rename_recursive(path, handler)?,
+        }
+        Ok(())
+    }
+    pub(crate) fn delete_recursive(
+        self,
+        handler: &mut impl UpdateHandler<FileData = T, FolderData = U>,
+    ) {
+        match self {
+            Child::File { file } => handler.delete_file(&file.path, file.data),
+            Child::Folder { folder } => folder.delete_recursive(handler),
         }
     }
 }
@@ -88,24 +110,27 @@ impl<T, U> Folder<T, U> {
     }
     pub fn load_path(
         path: impl AsRef<Path>,
-        load_file_fn: &mut impl FnMut(&Path) -> Option<T>,
-        load_folder_fn: &mut impl FnMut(&Path) -> Option<U>,
-    ) -> std::io::Result<Option<Self>> {
-        let Some(data) = load_folder_fn(path.as_ref()) else {
+        load_handler: &mut impl LoadHandler<FileData = T, FolderData = U>,
+    ) -> eyre::Result<Option<Self>> {
+        let path = path
+            .as_ref()
+            .canonicalize()
+            .context("failed to canonicalize the path")?;
+        let Some(data) = load_handler.load_folder(path.as_ref()) else {
             return Ok(None);
         };
         let mut children = vec![];
         for entry in dir_walk::read_dir(&path)? {
             match entry? {
                 DirEntry::Dir { path: folder_path } => {
-                    if let Some(folder) =
-                        Folder::load_path(folder_path, load_file_fn, load_folder_fn)?
+                    if let Some(folder) = Folder::load_path(&folder_path, load_handler)
+                        .with_context(|| format!("failed to load {}", folder_path.display()))?
                     {
                         children.push(Child::Folder { folder });
                     }
                 }
                 DirEntry::File { path: file_path } => {
-                    if let Some(data) = load_file_fn(&file_path) {
+                    if let Some(data) = load_handler.load_file(&file_path) {
                         children.push(Child::File {
                             file: File {
                                 path: file_path,
@@ -118,47 +143,59 @@ impl<T, U> Folder<T, U> {
         }
         Ok(Some(Self {
             data,
-            path: path.as_ref().to_path_buf(),
+            path,
             children,
         }))
     }
-    pub fn get_parent_of(&self, path: impl AsRef<Path>) -> Option<&Folder<T, U>> {
-        let path = path.as_ref().parent().expect("path should have a parent");
-        if self.path == path {
-            Some(self)
-        } else {
-            self.children
-                .iter()
-                .filter_map(Child::as_folder)
-                .find(|f| path.starts_with(&f.path))
-                .and_then(|f| f.get_parent_of(path))
-        }
-    }
-    pub fn get_parent_of_mut(&mut self, path: impl AsRef<Path>) -> Option<&mut Folder<T, U>> {
-        let path = path.as_ref().parent().expect("path should have a parent");
-        if self.path == path {
-            Some(self)
-        } else {
-            self.children
-                .iter_mut()
-                .filter_map(Child::as_folder_mut)
-                .find(|f| path.starts_with(&f.path))
-                .and_then(|f| f.get_parent_of_mut(path))
-        }
-    }
     pub fn get_descendant_mut(&mut self, path: impl AsRef<Path>) -> Option<&mut Child<T, U>> {
-        let path = path.as_ref();
-        self.get_parent_of_mut(path)?
-            .children
+        let target_path = path.as_ref();
+        self.children
             .iter_mut()
-            .find(|child| child.path() == path)
+            .find(|child| target_path.starts_with(child.path()))
+            .and_then(|child| match child {
+                Child::File { file } if file.path == target_path => Some(child),
+                Child::Folder { folder } if folder.path == target_path => Some(child),
+                Child::Folder { folder } => folder.get_descendant_mut(target_path),
+                _ => None,
+            })
     }
-    pub(crate) fn rename_recursive(&mut self, path: PathBuf) {
+    pub fn get_folder_mut(&mut self, path: impl AsRef<Path>) -> Option<&mut Folder<T, U>> {
+        let target_path = path.as_ref();
+        if self.path == target_path {
+            return Some(self);
+        }
+        self.children
+            .iter_mut()
+            .filter_map(Child::as_folder_mut)
+            .find(|folder| target_path.starts_with(&folder.path))
+            .and_then(|folder| folder.get_folder_mut(target_path))
+    }
+    pub(crate) fn rename_recursive(
+        &mut self,
+        path: PathBuf,
+        handler: &mut impl UpdateHandler<FileData = T, FolderData = U>,
+    ) -> eyre::Result<()> {
+        handler.rename_folder(&self.path, &path, &mut self.data);
         let old_base = std::mem::replace(&mut self.path, path.clone());
         let new_base = path;
         for child in &mut self.children {
-            let new_path = new_base.join(child.path().strip_prefix(&old_base).unwrap());
-            child.rename_recursive(new_path);
+            let new_path = new_base.join(
+                child
+                    .path()
+                    .strip_prefix(&old_base)
+                    .context("child path was not a child of the parent path")?,
+            );
+            child.rename_recursive(new_path, handler)?;
         }
+        Ok(())
+    }
+    pub(crate) fn delete_recursive(
+        self,
+        handler: &mut impl UpdateHandler<FileData = T, FolderData = U>,
+    ) {
+        for child in self.children {
+            child.delete_recursive(handler);
+        }
+        handler.delete_folder(&self.path, self.data);
     }
 }
