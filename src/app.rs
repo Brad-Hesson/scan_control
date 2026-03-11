@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::components::file_dialog::ViewportFileDialog;
 // TODO: rename to ImageTree
@@ -60,10 +60,8 @@ impl MyApp {
         //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
         // );
 
-        let src_sxm = SXM::parse_file("data/20240229_075.sxm").unwrap();
-        let mut image_encoder = ImageEncoder::new(wgpu);
+        let image_encoder = ImageEncoder::new(wgpu);
         let current_scan = NanonisImage::new(cc.egui_ctx.clone(), image_encoder.clone());
-        let enc = image_encoder.clone();
         let file_tree = FileTree::new(image_encoder.clone());
         Self {
             app_state: AppState {
