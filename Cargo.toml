@@ -33,6 +33,7 @@ id_tree = "1.8.0"
 thiserror = "2.0.17"
 borrow = "2.0.0"
 tokio.workspace = true
+nanonis-tcp = { path = "../nanonis-tcp", features = ["tokio"]}
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
@@ -52,7 +53,7 @@ members = [
 bytemuck = "1.20"
 itertools = "0.14"
 wgpu = { version = "25.0", default-features = false } # need to use 25.0 because of egui
-wgsl_to_wgpu = "0.15.0"                               # latest version that uses wgpu 25.0
+wgsl_to_wgpu = "0.15.0" # latest version that uses wgpu 25.0
 eyre = "0.6"
 tracing = "0.1"
 smol = "2.0.2"

@@ -5,6 +5,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 // TODO: rename to ImageTree
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
+use crate::nanonis_image::NanonisImage;
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
@@ -35,7 +36,7 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
-    current_scan: StaticImage,
+    current_scan: NanonisImage,
     file_tree: FileTree,
 }
 
@@ -61,8 +62,7 @@ impl MyApp {
 
         let src_sxm = SXM::parse_file("data/20240229_075.sxm").unwrap();
         let mut image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = StaticImage::load_sxm(src_sxm, &image_encoder).unwrap();
-        current_scan.image_data.clear(&mut image_encoder);
+        let current_scan = NanonisImage::new(cc.egui_ctx.clone(), image_encoder.clone());
         let enc = image_encoder.clone();
         let file_tree = FileTree::new(image_encoder.clone());
         Self {
@@ -112,6 +112,7 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.app_state.current_scan.update(&mut self.image_encoder);
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
             self.load_files(paths)
                 .context("file load failed")
@@ -146,23 +147,23 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
             self.undo_queue.redo(&mut self.app_state);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
-            && !self.app_state.current_scan.image_data.is_full()
-        {
-            let current_scan = &mut self.app_state.current_scan;
-            let [x, y] = current_scan.image_data.current_size();
-            let n = 1;
-            current_scan
-                .image_data
-                .write_lines(&self.image_encoder, n, |buf| {
-                    buf.copy_from_slice(
-                        &current_scan.image_src.data[0][0][x as usize * y as usize..]
-                            [..x as usize * n],
-                    )
-                })
-                .ok_trace();
-            current_scan.update_texture(&mut self.image_encoder);
-        }
+        // if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+        //     && !self.app_state.current_scan.image_data.is_full()
+        // {
+        //     let current_scan = &mut self.app_state.current_scan;
+        //     let [x, y] = current_scan.image_data.current_size();
+        //     let n = 1;
+        //     current_scan
+        //         .image_data
+        //         .write_lines(&self.image_encoder, n, |buf| {
+        //             buf.copy_from_slice(
+        //                 &current_scan.image_src.data[0][0][x as usize * y as usize..]
+        //                     [..x as usize * n],
+        //             )
+        //         })
+        //         .ok_trace();
+        //     current_scan.update_texture(&mut self.image_encoder);
+        // }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::C)) {
             self.app_state
                 .current_scan
@@ -291,11 +292,9 @@ impl eframe::App for MyApp {
                     .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                     .resizable(false)
                     .show(ctx, |ui| {
-                        image_menu(
-                            ui,
-                            &mut self.app_state.current_scan,
-                            &mut self.image_encoder,
-                        )
+                        self.app_state
+                            .current_scan
+                            .show_image_menu(ui, &mut self.image_encoder);
                     })
                     .unwrap()
                     .response
@@ -316,7 +315,7 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            image_menu(ui, &mut image.image, &mut self.image_encoder)
+                            image.image.show_image_menu(ui, &mut self.image_encoder);
                         })
                         .unwrap()
                         .response
@@ -339,56 +338,81 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     app.file_dialog.update(ctx);
     app.folder_dialog.update(ctx);
 }
-fn image_menu(ui: &mut Ui, image: &mut StaticImage, image_encoder: &mut ImageEncoder) {
-    let vis = &mut ui.style_mut().visuals.widgets.inactive;
-    vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-    let types = [
-        (FitType::LineFitSubtract, "Line Fit"),
-        (FitType::LineMeanSubtract, "Line Mean Subtract"),
-        (FitType::PlaneFitSubtract, "Plane Fit"),
-        (FitType::MeanSubtract, "Mean Subtract"),
-    ];
-    ComboBox::new((image.image_data.uuid(), "fit type"), "")
-        .selected_text(types.iter().find(|(t, _)| *t == image.fit_type).unwrap().1)
-        .show_ui(ui, |ui| {
-            ui.set_min_height(82.);
-            let changed = types
-                .iter()
-                .copied()
-                .map(|(typ, name)| ui.selectable_value(&mut image.fit_type, typ, name))
-                .any(|resp| resp.clicked());
-            if changed {
-                println!("changed");
-                image.update_texture(image_encoder);
-            }
-        });
-    let norm = image.image_data.norm_data.read();
-    let fit = image.image_data.fit_data.read();
-    if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
-        ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + fit.mean())));
-        ui.label(format!("Mean:    {:.2}", MetersFmt(fit.mean())));
-        ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + fit.mean())));
-        ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
-        match fit {
-            FitData::PlaneFitSubtract {
-                x_slope, y_slope, ..
-            } => {
-                ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
-                ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
-            }
-            FitData::MeanSubtract { .. } => {}
-            FitData::LineMeanSubtract { means } => {
-                for m in means {
-                    ui.label(format!("{:.2}", MetersFmt(*m - fit.mean())));
+
+impl ImageMenu for StaticImage {
+    fn fit_type_mut(&mut self) -> &mut FitType {
+        &mut self.fit_type
+    }
+
+    fn image_data_mut(&mut self) -> &mut ScanImage {
+        &mut self.image_data
+    }
+}
+
+pub trait ImageMenu {
+    fn fit_type_mut(&mut self) -> &mut FitType;
+
+    fn image_data_mut(&mut self) -> &mut ScanImage;
+
+    fn show_image_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
+        let vis = &mut ui.style_mut().visuals.widgets.inactive;
+        vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
+        let types = [
+            (FitType::LineFitSubtract, "Line Fit"),
+            (FitType::LineMeanSubtract, "Line Mean Subtract"),
+            (FitType::PlaneFitSubtract, "Plane Fit"),
+            (FitType::MeanSubtract, "Mean Subtract"),
+        ];
+        ComboBox::new((self.image_data_mut().uuid(), "fit type"), "")
+            .selected_text(
+                types
+                    .iter()
+                    .find(|(t, _)| *t == *self.fit_type_mut())
+                    .unwrap()
+                    .1,
+            )
+            .show_ui(ui, |ui| {
+                ui.set_min_height(82.);
+                let changed = types
+                    .iter()
+                    .copied()
+                    .map(|(typ, name)| ui.selectable_value(self.fit_type_mut(), typ, name))
+                    .any(|resp| resp.clicked());
+                if changed {
+                    println!("changed");
+                    let fit_type = *self.fit_type_mut();
+                    self.image_data_mut().write_texture(image_encoder, fit_type);
                 }
-            }
-            FitData::LineFitSubtract { means, slopes } => {
-                for (m, s) in izip!(means, slopes) {
-                    ui.label(format!(
-                        "{:.2}  {:.2}",
-                        MetersFmt(*m - fit.mean()),
-                        MetersFmt(*s)
-                    ));
+            });
+        let image_data = self.image_data_mut();
+        let norm = image_data.norm_data.read();
+        let fit = image_data.fit_data.read();
+        if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
+            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + fit.mean())));
+            ui.label(format!("Mean:    {:.2}", MetersFmt(fit.mean())));
+            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + fit.mean())));
+            ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
+            match fit {
+                FitData::PlaneFitSubtract {
+                    x_slope, y_slope, ..
+                } => {
+                    ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
+                    ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
+                }
+                FitData::MeanSubtract { .. } => {}
+                FitData::LineMeanSubtract { means } => {
+                    for m in means {
+                        ui.label(format!("{:.2}", MetersFmt(*m - fit.mean())));
+                    }
+                }
+                FitData::LineFitSubtract { means, slopes } => {
+                    for (m, s) in izip!(means, slopes) {
+                        ui.label(format!(
+                            "{:.2}  {:.2}",
+                            MetersFmt(*m - fit.mean()),
+                            MetersFmt(*s)
+                        ));
+                    }
                 }
             }
         }

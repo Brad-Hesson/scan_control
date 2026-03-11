@@ -105,9 +105,11 @@ impl ScanView {
                 color_map.assume_init_mut()[i] = Color32::from_gray((color * 255.) as u8);
             }
         }
+        let mut world_transform = Affine2::IDENTITY;
+        world_transform.matrix2.y_axis[1] = -1.0;
         Self {
             new_color_map: Some(unsafe { color_map.assume_init() }),
-            world_transform: Affine2::IDENTITY,
+            world_transform,
             target_format: image_encoder.wgpu_state.target_format,
         }
     }
@@ -293,6 +295,9 @@ impl ScanImage {
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()
+    }
+    pub fn capacity(&self) -> [u32; 2] {
+        self.image_data.read().capacity()
     }
     pub fn is_full(&self) -> bool {
         self.current_size() == self.image_data.read().capacity()
