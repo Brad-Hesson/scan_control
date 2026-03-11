@@ -34,7 +34,7 @@ impl NanonisImage {
         let lines = nanonis.scan_wait_end_of_line(None).unwrap();
         let base_transform = Affine2::from_scale_angle_translation(
             [frame.width * 1e9, frame.height * -1e9].into(),
-            frame.angle,
+            frame.angle / 180. * -3.14,
             [frame.center_x * 1e9, frame.center_y * 1e9].into(),
         );
         let (event_tx, event_rx) = std::sync::mpsc::channel();
@@ -75,7 +75,7 @@ impl NanonisImage {
         let frame_meta = self.nanonis.scan_frame_get().unwrap();
         self.base_transform = Affine2::from_scale_angle_translation(
             [frame_meta.width * 1e9, frame_meta.height * -1e9].into(),
-            frame_meta.angle,
+            frame_meta.angle / 180. * -3.14,
             [frame_meta.center_x * 1e9, frame_meta.center_y * 1e9].into(),
         );
         while let Ok(ev) = self.event_rx.try_recv() {
