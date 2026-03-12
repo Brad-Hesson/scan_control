@@ -1,5 +1,5 @@
 use core::f32;
-use std::{cell::RefCell, mem::MaybeUninit, rc::Rc, sync::Arc};
+use std::{cell::RefCell, mem::MaybeUninit, ops::RangeBounds, rc::Rc, sync::Arc};
 
 use eframe::{
     egui_wgpu::{self, Callback, RenderState},
@@ -13,8 +13,11 @@ use egui::{
 use glam::{Affine2, Vec2};
 use global::GlobalCallback;
 use image::ImageCallback;
-use image_compute::image_compute::{
-    FitData, FitType, ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
+use image_compute::{
+    buffers::BufferOpError,
+    image_compute::{
+        FitData, FitType, ImageComputeBuffers, ImageComputePipeline, NormalizeData, WriteLinesError,
+    },
 };
 use tracing::info;
 use uuid::Uuid;
@@ -289,6 +292,16 @@ impl ScanImage {
         self.image_data
             .write()
             .write_lines(&image_encoder.wgpu_state.queue, num_lines, callback)
+    }
+    pub fn write_lines_range(
+        &mut self,
+        image_encoder: &ImageEncoder,
+        lines: impl RangeBounds<u32>,
+        callback: impl Fn(&mut [f32]),
+    ) -> Result<(), BufferOpError> {
+        self.image_data
+            .write()
+            .write_lines_range(&image_encoder.wgpu_state.queue, lines, callback)
     }
     pub fn current_size(&self) -> [u32; 2] {
         self.image_data.read().current_size()

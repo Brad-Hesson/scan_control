@@ -27,7 +27,6 @@ impl NanonisImage {
         if frame_data.scan_dir == ScanDir::Up {
             flip_buf(&mut frame_data.scan_data.data, frame_data.scan_data.size[1]);
         }
-        let lines = nanonis.scan_wait_end_of_line(None).unwrap();
         let base_transform = Affine2::from_scale_angle_translation(
             [frame.width * 1e9, frame.height * -1e9].into(),
             frame.angle / 180. * -3.14,
@@ -47,16 +46,10 @@ impl NanonisImage {
             ScanDir::Down => flip_transform(base_transform),
             ScanDir::Up => base_transform,
         };
-        let image = ScanImage::new(
-            &image_encoder,
-            size,
-            lines.line_number as u32,
-            transform,
-            |buf| {
-                buf.copy_from_slice(&frame_data.scan_data.data);
-            },
-        );
-        let fit_type = FitType::PlaneFitSubtract;
+        let image = ScanImage::new(&image_encoder, size, size[1], transform, |buf| {
+            buf.copy_from_slice(&frame_data.scan_data.data);
+        });
+        let fit_type = FitType::MeanSubtract;
         image.write_texture(&image_encoder, fit_type);
         Self {
             image_data: image,
@@ -76,38 +69,43 @@ impl NanonisImage {
         );
         while let Ok(ev) = self.event_rx.try_recv() {
             match ev {
-                Event::Frame {
-                    num_lines,
-                    mut frame,
-                } => {
+                Event::Frame { num_lines, frame } => {
                     let new_size = [
                         frame.scan_data.size[1] as u32,
                         frame.scan_data.size[0] as u32,
                     ];
-                    let transform = match frame.scan_dir {
-                        ScanDir::Down => flip_transform(self.base_transform),
-                        ScanDir::Up => self.base_transform,
-                    };
                     if self.image_data.capacity() != new_size {
-                        self.image_data = ScanImage::new(encoder, new_size, 0, transform, |_| {})
+                        self.image_data = ScanImage::new(
+                            encoder,
+                            new_size,
+                            new_size[1],
+                            self.base_transform,
+                            |_| {},
+                        )
                     } else {
-                        self.image_data.transform = transform;
-                        if frame.scan_dir == ScanDir::Up {
-                            flip_buf(&mut frame.scan_data.data, frame.scan_data.size[1]);
-                        }
-                        let [width, current_lines] = self.image_data.current_size();
-                        let new_lines = num_lines - current_lines as usize;
-                        if new_lines == 0 {
-                            continue;
-                        }
-                        let src = &frame.scan_data.data[(current_lines * width) as usize..]
-                            [..new_lines * width as usize];
+                        // if frame.scan_dir == ScanDir::Up {
+                        //     flip_buf(&mut frame.scan_data.data, frame.scan_data.size[1]);
+                        // }
+                        // let [width, current_lines] = self.image_data.current_size();
+                        // let new_lines = num_lines - current_lines as usize;
+                        // if new_lines == 0 {
+                        //     continue;
+                        // }
+                        // let src = &frame.scan_data.data[(current_lines * width) as usize..]
+                        //     [..new_lines * width as usize];
                         self.image_data
-                            .write_lines(encoder, new_lines, |buf| buf.copy_from_slice(src))
-                            .unwrap()
+                            .write_lines_range(encoder, .., |buf| {
+                                buf.copy_from_slice(&frame.scan_data.data)
+                            })
+                            .unwrap();
+                        // self.image_data
+                        //     .write_lines(encoder, new_lines, |buf| buf.copy_from_slice(src))
+                        //     .unwrap()
                     }
                 }
-                Event::Clear => self.image_data.clear(encoder),
+                Event::Clear => {
+                    // self.image_data.clear(encoder)
+                }
             }
         }
         self.image_data.write_texture(encoder, self.fit_type);

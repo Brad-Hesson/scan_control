@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    ops::RangeBounds,
+    sync::{Arc, OnceLock},
+};
 
 use glam::Affine2;
 use itertools::{Itertools, izip};
@@ -198,6 +201,29 @@ impl ImageComputeBuffers {
             .expect("params should be correct");
         Ok(())
     }
+    pub fn write_lines_range(
+        &mut self,
+        queue: &Queue,
+        lines: impl RangeBounds<u32>,
+        callback: impl Fn(&mut [f32]),
+    ) -> Result<(), BufferOpError> {
+        let offset = match lines.start_bound() {
+            std::ops::Bound::Included(v) => *v,
+            std::ops::Bound::Unbounded => 0,
+            std::ops::Bound::Excluded(_) => panic!("don't use excluded start bound for lines"),
+        };
+        let size = match lines.end_bound() {
+            std::ops::Bound::Included(v) => v - offset,
+            std::ops::Bound::Excluded(v) => v + 1 - offset,
+            std::ops::Bound::Unbounded => self.size[1] - offset,
+        };
+        self.image_data_buffer.queue_write(
+            queue,
+            (offset * self.size[0]) as usize,
+            (size * self.size[0]) as usize,
+            callback,
+        )
+    }
     pub fn clear_lines(&mut self) {
         self.lines = 0;
     }
@@ -243,10 +269,10 @@ pub enum FitType {
 impl FitType {
     fn download_size(&self, size: [u32; 2]) -> usize {
         match self {
-            FitType::MeanSubtract => 1,
-            FitType::PlaneFitSubtract => 3,
+            FitType::MeanSubtract => 2,
+            FitType::PlaneFitSubtract => 4,
             FitType::LineMeanSubtract => size[1] as usize,
-            FitType::LineFitSubtract => size[1] as usize * 2,
+            FitType::LineFitSubtract => size[1] as usize * 3,
         }
     }
 }
@@ -274,23 +300,34 @@ impl FitData {
         match self {
             FitData::MeanSubtract { mean } => *mean,
             FitData::PlaneFitSubtract { mean, .. } => *mean,
-            FitData::LineMeanSubtract { means } => means.iter().sum::<f64>() / means.len() as f64,
+            FitData::LineMeanSubtract { means } => {
+                let (sum, count) = means
+                    .iter()
+                    .filter(|m| !m.is_nan())
+                    .fold((0., 0.), |(sum, count), v| (sum + v, count + 1.));
+                sum / count
+            }
             FitData::LineFitSubtract { means, .. } => {
-                means.iter().sum::<f64>() / means.len() as f64
+                let (sum, count) = means
+                    .iter()
+                    .filter(|m| !m.is_nan())
+                    .fold((0., 0.), |(sum, count), v| (sum + v, count + 1.));
+                sum / count
             }
         }
     }
     fn from_raw(data: &[f64], size: [u32; 2], fit_type: FitType) -> Self {
         assert_eq!(data.len(), fit_type.download_size(size));
         let [width, height] = [size[0] as f64, size[1] as f64];
+        let h = size[1] as usize;
         match fit_type {
             FitType::MeanSubtract => Self::MeanSubtract {
-                mean: data[0] / (width * height),
+                mean: data[0] / data[1],
             },
             FitType::PlaneFitSubtract => Self::PlaneFitSubtract {
-                mean: data[0] / (width * height),
-                x_slope: data[1] * width,
-                y_slope: data[2] * height,
+                mean: data[0] / data[1],
+                x_slope: data[2] * width,
+                y_slope: data[3] * height,
             },
             FitType::LineMeanSubtract => Self::LineMeanSubtract {
                 means: data
@@ -300,14 +337,16 @@ impl FitData {
                     .into_boxed_slice(),
             },
             FitType::LineFitSubtract => Self::LineFitSubtract {
-                means: data[..height as usize]
+                means: data[..h]
                     .iter()
-                    .map(|v| v / width)
+                    .zip(data[h * 1..][..h].iter())
+                    .map(|(sum, count)| sum / count)
                     .collect_vec()
                     .into_boxed_slice(),
-                slopes: data[height as usize..]
+                slopes: data[h * 2..][..h]
                     .iter()
-                    .map(|v| v * width)
+                    .zip(data[h * 1..][..h].iter())
+                    .map(|(slope, count)| slope / count)
                     .collect_vec()
                     .into_boxed_slice(),
             },
@@ -316,14 +355,26 @@ impl FitData {
 }
 
 struct ScratchBuffers {
-    xz: StorageBuffer<f64>,
-    yz: StorageBuffer<f64>,
-    std_dev: StorageBuffer<f64>,
+    count_buf: StorageBuffer<u32>,
+    scratch_a: StorageBuffer<f64>,
+    scratch_b: StorageBuffer<f64>,
+    scratch_c: StorageBuffer<f64>,
+    scratch_d: StorageBuffer<f64>,
+    mins: StorageBuffer<f64>,
+    maxs: StorageBuffer<f64>,
+    std_devs: StorageBuffer<f64>,
     bg: shaders::plane_fit::bind_groups::BindGroup2,
     size: [u32; 2],
 }
 impl ScratchBuffers {
     fn new(device: &Device, size: [u32; 2]) -> Self {
+        let count_buf = StorageBuffer::new(
+            device,
+            Some("count_buf"),
+            BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            size[0] as usize * size[1] as usize,
+            |_| {},
+        );
         let mk_buffer = |s: &'static str| {
             StorageBuffer::new(
                 device,
@@ -333,22 +384,36 @@ impl ScratchBuffers {
                 |_| {},
             )
         };
-        let xz = mk_buffer("xz");
-        let yz = mk_buffer("yz");
-        let std_dev = mk_buffer("std_dev");
+        let scratch_a = mk_buffer("scratch_a");
+        let scratch_b = mk_buffer("scratch_b");
+        let scratch_c = mk_buffer("scratch_c");
+        let scratch_d = mk_buffer("scratch_d");
+        let mins = mk_buffer("mins");
+        let maxs = mk_buffer("maxs");
+        let std_devs = mk_buffer("std_devs");
         Self {
             size,
             bg: shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
                 device,
                 shaders::plane_fit::bind_groups::BindGroupLayout2 {
-                    xz: xz.as_entire_buffer_binding(),
-                    yz: yz.as_entire_buffer_binding(),
-                    std_dev: std_dev.as_entire_buffer_binding(),
+                    a: scratch_a.as_entire_buffer_binding(),
+                    b: scratch_b.as_entire_buffer_binding(),
+                    c: scratch_c.as_entire_buffer_binding(),
+                    d: scratch_d.as_entire_buffer_binding(),
+                    count: count_buf.as_entire_buffer_binding(),
+                    mins: mins.as_entire_buffer_binding(),
+                    maxs: mins.as_entire_buffer_binding(),
+                    std_devs: mins.as_entire_buffer_binding(),
                 },
             ),
-            xz,
-            yz,
-            std_dev,
+            scratch_a,
+            scratch_b,
+            scratch_c,
+            scratch_d,
+            count_buf,
+            mins,
+            maxs,
+            std_devs,
         }
     }
 }
@@ -368,11 +433,6 @@ pub struct ImageComputePipeline {
     generate_normalization__plane_fit: ComputePipeline,
     generate_normalization__line_fit: ComputePipeline,
     generate_normalization__line_mean: ComputePipeline,
-    copy_line_slopes: ComputePipeline,
-    write__mean_subtract: ComputePipeline,
-    write__plane_fit: ComputePipeline,
-    write__line_fit: ComputePipeline,
-    write__line_mean: ComputePipeline,
     clear_texture: ComputePipeline,
     qs: QuerySet,
     qs_buf: StorageBuffer<u64>,
@@ -420,13 +480,6 @@ impl ImageComputePipeline {
                 shaders::plane_fit::compute::create_generate_normalization__line_mean_pipeline(
                     device,
                 ),
-            copy_line_slopes: shaders::plane_fit::compute::create_copy_line_slopes_pipeline(device),
-            write__mean_subtract: shaders::plane_fit::compute::create_write__mean_subtract_pipeline(
-                device,
-            ),
-            write__plane_fit: shaders::plane_fit::compute::create_write__plane_fit_pipeline(device),
-            write__line_fit: shaders::plane_fit::compute::create_write__line_fit_pipeline(device),
-            write__line_mean: shaders::plane_fit::compute::create_write__line_mean_pipeline(device),
             clear_texture: shaders::plane_fit::compute::create_clear_texture_pipeline(device),
             qs: device.create_query_set(&QuerySetDescriptor {
                 label: Some("plane_fitter_qs"),
@@ -484,11 +537,6 @@ impl ImageComputePipeline {
         dispatch_reduction(pass, size);
         wts(pass);
 
-        pass.set_pipeline(&self.write__mean_subtract);
-        wts(pass);
-        dispatch_linear(pass, size);
-        wts(pass);
-
         qs_n / 2
     }
     pub fn dispatch_plane_fit_subtract(
@@ -542,11 +590,6 @@ impl ImageComputePipeline {
         dispatch_reduction(pass, size);
         wts(pass);
 
-        pass.set_pipeline(&self.write__plane_fit);
-        wts(pass);
-        dispatch_linear(pass, size);
-        wts(pass);
-
         qs_n / 2
     }
     pub fn dispatch_line_fit_subtract(
@@ -590,11 +633,6 @@ impl ImageComputePipeline {
         dispatch_y_reduction(pass, size);
         wts(pass);
 
-        pass.set_pipeline(&self.copy_line_slopes);
-        wts(pass);
-        dispatch_linear(pass, [size[1], 1]);
-        wts(pass);
-
         pass.set_pipeline(&self.generate_normalization__line_fit);
         wts(pass);
         dispatch_linear(pass, size);
@@ -603,11 +641,6 @@ impl ImageComputePipeline {
         pass.set_pipeline(&self.reduce_normalizations);
         wts(pass);
         dispatch_reduction(pass, size);
-        wts(pass);
-
-        pass.set_pipeline(&self.write__line_fit);
-        wts(pass);
-        dispatch_linear(pass, size);
         wts(pass);
 
         qs_n / 2
@@ -651,11 +684,6 @@ impl ImageComputePipeline {
         pass.set_pipeline(&self.reduce_normalizations);
         wts(pass);
         dispatch_reduction(pass, size);
-        wts(pass);
-
-        pass.set_pipeline(&self.write__line_mean);
-        wts(pass);
-        dispatch_linear(pass, size);
         wts(pass);
 
         qs_n / 2
@@ -745,4 +773,8 @@ fn dispatch_y_reduction(pass: &mut ComputePass, size: [u32; 2]) {
 #[inline]
 fn num_wgs(num: u32, wg_size: u32) -> u32 {
     num.saturating_sub(1) / wg_size + 1
+}
+
+fn map_range<T, O>(range: impl RangeBounds<T>, f: impl Fn(&T) -> O) -> impl RangeBounds<O> {
+    (range.start_bound().map(&f), range.end_bound().map(&f))
 }

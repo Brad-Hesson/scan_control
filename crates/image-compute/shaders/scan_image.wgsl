@@ -54,7 +54,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     if normalize_control.max_min != 0u {
         height = (raw - f32(normalize_data.min)) / f32(normalize_data.max - normalize_data.min);
     } else {
-        let factor = f32(normalize_control.std_dev_mul * normalize_data.stddev * 2.0);
+        let factor = f32(normalize_control.std_dev_mul * normalize_data.stddev * 3.0);
         height = (raw / factor) + 0.5;
     }
 

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod buffers;
+pub mod buffers;
 pub mod image_compute;
 pub mod scan_image;
 mod shaders;
