@@ -7,13 +7,7 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    brad-utils = {
-      url = "github:Brad-Hesson/brad-utils";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-      inputs.crane.follows = "crane";
-      inputs.fenix.follows = "fenix";
-    };
+    brad-utils.url = "github:Brad-Hesson/brad-utils";
     wgsl-analyzer = {
       url = "github:wgsl-analyzer/wgsl-analyzer/nightly";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -27,7 +21,7 @@
         inherit system;
         config.allowUnfree = true;
       };
-      brad-utils = flakes.brad-utils.lib.${system};
+      brad-utils = flakes.brad-utils.mkLib pkgs;
       fenix = flakes.fenix.packages.${system};
       crane = (flakes.crane.mkLib pkgs).overrideToolchain (fenix.combine [
         fenix.stable.defaultToolchain
@@ -39,10 +33,10 @@
         vulkan-loader
         libxkbcommon
         wayland
-        xorg.libX11
-        xorg.libXcursor
-        xorg.libXrandr
-        xorg.libXi
+        libX11
+        libXcursor
+        libXrandr
+        libXi
         libGL
         libGLU
       ];
@@ -72,9 +66,9 @@
         packages = [ pkgs.renderdoc ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
         shellHook = ''
-          ${brad-utils.vscodeDefaultHook}
+          ${brad-utils.vscodeSettingsHook {}}
         '';
-          # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
+        # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
       };
     }
   );
