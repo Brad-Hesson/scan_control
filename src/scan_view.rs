@@ -127,7 +127,6 @@ pub struct ScanViewCtx<'a> {
 pub struct ScanImage {
     uuid: Uuid,
     pub transform: Affine2,
-    changes: Vec<(usize, Box<[f32]>)>,
     image_data: Arc<RwLock<ImageComputeBuffers>>,
     pub fit_data: Arc<RwLock<Option<FitData>>>,
     pub norm_data: Arc<RwLock<Option<NormalizeData>>>,
@@ -152,7 +151,6 @@ impl ScanImage {
             uuid: Uuid::new_v4(),
             transform,
             image_data,
-            changes: vec![],
             fit_data: Arc::new(RwLock::new(None)),
             norm_data: Arc::new(RwLock::new(None)),
         }
@@ -186,7 +184,6 @@ impl ScanImage {
             ctx.rect,
             ImageCallback {
                 transform: self.transform,
-                changes: std::mem::take(&mut self.changes),
                 image_buffers: self.image_data.clone(),
             },
         );

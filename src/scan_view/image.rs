@@ -10,7 +10,6 @@ use crate::scan_view::global::GlobalResources;
 
 pub(super) struct ImageCallback {
     pub transform: Affine2,
-    pub changes: Vec<(usize, Box<[f32]>)>,
     pub image_buffers: Arc<RwLock<ImageComputeBuffers>>,
 }
 impl CallbackTrait for ImageCallback {

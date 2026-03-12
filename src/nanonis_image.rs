@@ -1,10 +1,6 @@
 use glam::Affine2;
 use image_compute::image_compute::FitType;
-use nanonis_tcp::{
-    commands::scan::FrameDataGrabResponse,
-    scan_watcher::{self, ScanWatcher},
-    ScanDir,
-};
+use nanonis_tcp::{commands::scan::FrameDataGrabResponse, scan_watcher::ScanWatcher, ScanDir};
 
 use crate::{
     app::ImageMenu,
