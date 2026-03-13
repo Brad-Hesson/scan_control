@@ -13,7 +13,7 @@ pub struct NanonisImage {
     nanonis: nanonis_tcp::blocking::NanonisTcp,
     fit_type: FitType,
     event_rx: std::sync::mpsc::Receiver<Event>,
-    base_transform: Affine2,
+    transform: Affine2,
 }
 impl NanonisImage {
     pub fn new(ctx: egui::Context, image_encoder: ImageEncoder) -> Self {
@@ -27,7 +27,7 @@ impl NanonisImage {
         if frame_data.scan_dir == ScanDir::Up {
             flip_buf(&mut frame_data.scan_data.data, frame_data.scan_data.size[1]);
         }
-        let base_transform = Affine2::from_scale_angle_translation(
+        let transform = Affine2::from_scale_angle_translation(
             [frame.width * 1e9, frame.height * -1e9].into(),
             frame.angle / 180. * -3.14,
             [frame.center_x * 1e9, frame.center_y * 1e9].into(),
@@ -42,10 +42,6 @@ impl NanonisImage {
             ))
             .unwrap();
         scan_watcher.set_channel(30);
-        let transform = match frame_data.scan_dir {
-            ScanDir::Down => flip_transform(base_transform),
-            ScanDir::Up => base_transform,
-        };
         let image = ScanImage::new(&image_encoder, size, size[1], transform, |buf| {
             buf.copy_from_slice(&frame_data.scan_data.data);
         });
@@ -57,50 +53,35 @@ impl NanonisImage {
             nanonis,
             fit_type,
             event_rx,
-            base_transform,
+            transform,
         }
     }
     pub fn update(&mut self, encoder: &mut ImageEncoder) {
         let frame_meta = self.nanonis.scan_frame_get().unwrap();
-        self.base_transform = Affine2::from_scale_angle_translation(
+        self.transform = Affine2::from_scale_angle_translation(
             [frame_meta.width * 1e9, frame_meta.height * -1e9].into(),
             frame_meta.angle / 180. * -3.14,
             [frame_meta.center_x * 1e9, frame_meta.center_y * 1e9].into(),
         );
         while let Ok(ev) = self.event_rx.try_recv() {
             match ev {
-                Event::Frame { num_lines, frame } => {
+                Event::Frame { frame, .. } => {
                     let new_size = [
                         frame.scan_data.size[1] as u32,
                         frame.scan_data.size[0] as u32,
                     ];
                     if self.image_data.capacity() != new_size {
-                        self.image_data = ScanImage::new(
-                            encoder,
-                            new_size,
-                            new_size[1],
-                            self.base_transform,
-                            |_| {},
-                        )
+                        self.image_data =
+                            ScanImage::new(encoder, new_size, new_size[1], self.transform, |buf| {
+                                buf.copy_from_slice(&frame.scan_data.data)
+                            })
                     } else {
-                        // if frame.scan_dir == ScanDir::Up {
-                        //     flip_buf(&mut frame.scan_data.data, frame.scan_data.size[1]);
-                        // }
-                        // let [width, current_lines] = self.image_data.current_size();
-                        // let new_lines = num_lines - current_lines as usize;
-                        // if new_lines == 0 {
-                        //     continue;
-                        // }
-                        // let src = &frame.scan_data.data[(current_lines * width) as usize..]
-                        //     [..new_lines * width as usize];
                         self.image_data
                             .write_lines_range(encoder, .., |buf| {
                                 buf.copy_from_slice(&frame.scan_data.data)
                             })
                             .unwrap();
-                        // self.image_data
-                        //     .write_lines(encoder, new_lines, |buf| buf.copy_from_slice(src))
-                        //     .unwrap()
+                        self.image_data.transform = self.transform;
                     }
                 }
                 Event::Clear => {
