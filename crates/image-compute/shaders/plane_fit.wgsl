@@ -95,7 +95,6 @@ fn reduce_image(
         planarize_out[read_idx] = z_sum_wg[0];
         count[read_idx] = z_count_wg[0];
     } else {
-        planarize_out[read_idx] = 0.;
         count[read_idx] = 0u;
     }
 }
@@ -108,9 +107,12 @@ fn reduce_image_lines(
     @builtin(num_workgroups) num_workgroups: vec3<u32>
 ) {
     let sz = image_size.yx;
+    if global_id.x >= sz.x { return; }
+
     let local_id = vec2(local_index % WGS_SQUARE, local_index / WGS_SQUARE);
     let col_read_idx = num_workgroups.y * local_id.y + workgroup_id.y;
-    if col_read_idx < sz.y && global_id.x < sz.x {
+
+    if col_read_idx < sz.y {
         z_sum_wg[local_index] = planarize_out[idx(sz, global_id.x, col_read_idx)];
         z_count_wg[local_index] = count[idx(sz, global_id.x, col_read_idx)];
     } else {
@@ -130,7 +132,6 @@ fn reduce_image_lines(
         planarize_out[idx(sz, global_id.x, col_read_idx)] = z_sum_wg[local_id.x];
         count[idx(sz, global_id.x, col_read_idx)] = z_count_wg[local_id.x];
     } else {
-        planarize_out[idx(sz, global_id.x, col_read_idx)] = 0.;
         count[idx(sz, global_id.x, col_read_idx)] = 0u;
     }
 }
@@ -208,11 +209,6 @@ fn reduce_sums_plane(
         yz[read_idx] = yz_sum_wg[0];
         xx[read_idx] = xx_sum_wg[0];
         yy[read_idx] = yy_sum_wg[0];
-    } else {
-        xz[read_idx] = 0.;
-        yz[read_idx] = 0.;
-        xx[read_idx] = 0.;
-        yy[read_idx] = 0.;
     }
 }
 
@@ -225,9 +221,11 @@ fn reduce_sums_lines(
 ) {
     let sz = image_size.yx;
     if global_id.x >= sz.x { return; }
+
     let local_id = vec2(local_index % WGS_SQUARE, local_index / WGS_SQUARE);
     let col_read_idx = num_workgroups.y * local_id.y + workgroup_id.y;
-    if col_read_idx < sz.y && global_id.x < sz.x {
+
+    if col_read_idx < sz.y {
         xz_sum_wg[local_index] = xz[idx(sz, global_id.x, col_read_idx)];
         xx_sum_wg[local_index] = xx[idx(sz, global_id.x, col_read_idx)];
     } else {
@@ -246,9 +244,6 @@ fn reduce_sums_lines(
     if local_id.y == 0u {
         xz[idx(sz, global_id.x, col_read_idx)] = xz_sum_wg[local_id.x];
         xx[idx(sz, global_id.x, col_read_idx)] = xx_sum_wg[local_id.x];
-    } else {
-        xz[idx(sz, global_id.x, col_read_idx)] = 0.;
-        xx[idx(sz, global_id.x, col_read_idx)] = 0.;
     }
 }
 
@@ -361,11 +356,6 @@ fn reduce_normalizations(
         maxs[read_idx] = max_wg[0];
         std_devs[read_idx] = std_dev_sum_wg[0];
         count[read_idx] = z_count_wg[0];
-    } else {
-        mins[read_idx] = f64_pos_infinity();
-        maxs[read_idx] = f64_neg_infinity();
-        std_devs[read_idx] = 0.;
-        count[read_idx] = 0u;
     }
     if global_id.x == 0u {
         normalize_out.min = mins[0];
