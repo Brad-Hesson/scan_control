@@ -386,14 +386,9 @@ pub trait ImageMenu {
         let norm = image_data.norm_data.read();
         let fit = image_data.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
-            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min)));
+            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + fit.mean())));
             ui.label(format!("Mean:    {:.2}", MetersFmt(fit.mean())));
-            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));
-            println!("{:0X?}", norm.min.to_bits());
-            println!("{:0X?}", norm.max.to_bits());
-            // ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + fit.mean())));
-            // ui.label(format!("Mean:    {:.2}", MetersFmt(fit.mean())));
-            // ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + fit.mean())));
+            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + fit.mean())));
             ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
             match fit {
                 FitData::PlaneFitSubtract {

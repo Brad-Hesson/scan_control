@@ -356,10 +356,10 @@ impl FitData {
 
 struct ScratchBuffers {
     count_buf: StorageBuffer<u32>,
-    scratch_a: StorageBuffer<f64>,
-    scratch_b: StorageBuffer<f64>,
-    scratch_c: StorageBuffer<f64>,
-    scratch_d: StorageBuffer<f64>,
+    xz: StorageBuffer<f64>,
+    yz: StorageBuffer<f64>,
+    xx: StorageBuffer<f64>,
+    yy: StorageBuffer<f64>,
     mins: StorageBuffer<f64>,
     maxs: StorageBuffer<f64>,
     std_devs: StorageBuffer<f64>,
@@ -384,10 +384,10 @@ impl ScratchBuffers {
                 |_| {},
             )
         };
-        let scratch_a = mk_buffer("scratch_a");
-        let scratch_b = mk_buffer("scratch_b");
-        let scratch_c = mk_buffer("scratch_c");
-        let scratch_d = mk_buffer("scratch_d");
+        let xz = mk_buffer("xz");
+        let yz = mk_buffer("yz");
+        let xx = mk_buffer("xx");
+        let yy = mk_buffer("yy");
         let mins = mk_buffer("mins");
         let maxs = mk_buffer("maxs");
         let std_devs = mk_buffer("std_devs");
@@ -396,20 +396,20 @@ impl ScratchBuffers {
             bg: shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
                 device,
                 shaders::plane_fit::bind_groups::BindGroupLayout2 {
-                    a: scratch_a.as_entire_buffer_binding(),
-                    b: scratch_b.as_entire_buffer_binding(),
-                    c: scratch_c.as_entire_buffer_binding(),
-                    d: scratch_d.as_entire_buffer_binding(),
+                    xz: xz.as_entire_buffer_binding(),
+                    yz: yz.as_entire_buffer_binding(),
+                    xx: xx.as_entire_buffer_binding(),
+                    yy: yy.as_entire_buffer_binding(),
                     count: count_buf.as_entire_buffer_binding(),
                     mins: mins.as_entire_buffer_binding(),
                     maxs: maxs.as_entire_buffer_binding(),
                     std_devs: std_devs.as_entire_buffer_binding(),
                 },
             ),
-            scratch_a,
-            scratch_b,
-            scratch_c,
-            scratch_d,
+            xz,
+            yz,
+            xx,
+            yy,
             count_buf,
             mins,
             maxs,
