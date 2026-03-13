@@ -402,8 +402,8 @@ impl ScratchBuffers {
                     d: scratch_d.as_entire_buffer_binding(),
                     count: count_buf.as_entire_buffer_binding(),
                     mins: mins.as_entire_buffer_binding(),
-                    maxs: mins.as_entire_buffer_binding(),
-                    std_devs: mins.as_entire_buffer_binding(),
+                    maxs: maxs.as_entire_buffer_binding(),
+                    std_devs: std_devs.as_entire_buffer_binding(),
                 },
             ),
             scratch_a,
@@ -511,7 +511,7 @@ impl ImageComputePipeline {
             info!("Reallocating scratch buffers to {:?}", image.size);
             self.scratch_buffers = ScratchBuffers::new(device, image.size);
         }
-
+        pass.push_debug_group("mean subtract");
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
@@ -537,6 +537,7 @@ impl ImageComputePipeline {
         dispatch_reduction(pass, size);
         wts(pass);
 
+        pass.pop_debug_group();
         qs_n / 2
     }
     pub fn dispatch_plane_fit_subtract(
@@ -554,7 +555,7 @@ impl ImageComputePipeline {
             info!("Reallocating scratch buffers to {:?}", image.size);
             self.scratch_buffers = ScratchBuffers::new(device, image.size);
         }
-
+        pass.push_debug_group("plane fit");
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
@@ -590,6 +591,7 @@ impl ImageComputePipeline {
         dispatch_reduction(pass, size);
         wts(pass);
 
+        pass.pop_debug_group();
         qs_n / 2
     }
     pub fn dispatch_line_fit_subtract(
@@ -607,7 +609,7 @@ impl ImageComputePipeline {
             info!("Reallocating scratch buffers to {:?}", image.size);
             self.scratch_buffers = ScratchBuffers::new(device, image.size);
         }
-
+        pass.push_debug_group("line fit subtract");
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
@@ -643,6 +645,7 @@ impl ImageComputePipeline {
         dispatch_reduction(pass, size);
         wts(pass);
 
+        pass.pop_debug_group();
         qs_n / 2
     }
     pub fn dispatch_line_mean_subtract(
@@ -665,7 +668,7 @@ impl ImageComputePipeline {
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
         let size = image.current_size();
-
+        pass.push_debug_group("line mean subtract");
         pass.set_pipeline(&self.copy_image_transpose);
         wts(pass);
         dispatch_linear(pass, size);
@@ -685,6 +688,7 @@ impl ImageComputePipeline {
         wts(pass);
         dispatch_reduction(pass, size);
         wts(pass);
+        pass.pop_debug_group();
 
         qs_n / 2
     }
