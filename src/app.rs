@@ -398,20 +398,8 @@ pub trait ImageMenu {
                     ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
                 }
                 FitData::MeanSubtract { .. } => {}
-                FitData::LineMeanSubtract { means } => {
-                    for m in means {
-                        ui.label(format!("{:.2}", MetersFmt(*m - fit.mean())));
-                    }
-                }
-                FitData::LineFitSubtract { means, slopes } => {
-                    for (m, s) in izip!(means, slopes) {
-                        ui.label(format!(
-                            "{:.2}  {:.2}",
-                            MetersFmt(*m - fit.mean()),
-                            MetersFmt(*s)
-                        ));
-                    }
-                }
+                FitData::LineMeanSubtract { .. } => {}
+                FitData::LineFitSubtract { .. } => {}
             }
         }
     }
