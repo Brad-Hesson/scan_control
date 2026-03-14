@@ -63,9 +63,11 @@ impl NanonisImage {
             frame_meta.angle / 180. * -3.14,
             [frame_meta.center_x * 1e9, frame_meta.center_y * 1e9].into(),
         );
+        let mut updated = false;
         while let Ok(ev) = self.event_rx.try_recv() {
             match ev {
                 Event::Frame { frame, .. } => {
+                    updated = true;
                     let new_size = [
                         frame.scan_data.size[1] as u32,
                         frame.scan_data.size[0] as u32,
@@ -89,7 +91,9 @@ impl NanonisImage {
                 }
             }
         }
-        self.image_data.write_texture(encoder, self.fit_type);
+        if updated{
+            self.image_data.write_texture(encoder, self.fit_type);
+        }
     }
 }
 
