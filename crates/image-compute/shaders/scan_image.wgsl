@@ -97,10 +97,10 @@ var<private> verts: array<vec2<f32>, 4> = array(
 );
 
 var<private> uvs: array<vec2<f32>, 4> = array(
-    vec2(0.0, 1.0), // TL
-    vec2(1.0, 1.0), // TR
-    vec2(0.0, 0.0), // BL
-    vec2(1.0, 0.0), // BR
+    vec2(0.0, 0.0), // TL
+    vec2(1.0, 0.0), // TR
+    vec2(0.0, 1.0), // BL
+    vec2(1.0, 1.0), // BR
 );
 
 fn isNan(value: f32) -> bool {

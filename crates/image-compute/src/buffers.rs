@@ -8,7 +8,7 @@ use wgpu::{
     TextureViewDescriptor,
 };
 
-#[derive(Debug)]
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct StorageBuffer<T: Clone + NoUninit + AnyBitPattern> {
     inner: Buffer,
@@ -112,6 +112,7 @@ fn range_is_empty(range: &impl RangeBounds<u64>) -> bool {
     end <= first
 }
 
+#[derive(Clone)]
 pub struct TransformBuffer(Buffer);
 impl TransformBuffer {
     pub fn new(device: &Device) -> Self {
@@ -134,6 +135,7 @@ impl TransformBuffer {
     }
 }
 
+#[derive(Clone)]
 pub struct ColorMapTexture<const SIZE: usize>(Texture);
 impl<const SIZE: usize> ColorMapTexture<SIZE> {
     pub fn new(device: &Device) -> Self {

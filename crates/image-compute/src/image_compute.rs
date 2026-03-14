@@ -11,7 +11,7 @@ use wgpu::{
     BufferUsages, CommandEncoder, ComputePass, ComputePipeline, Device, Extent3d, QuerySet,
     QueryType, Queue, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     TextureViewDescriptor,
-    util::{DeviceExt, align_to},
+    util::DeviceExt,
     wgt::{QuerySetDescriptor, TextureDataOrder},
 };
 
@@ -46,6 +46,7 @@ pub enum WriteLinesError {
     BufferOpError(#[from] BufferOpError),
 }
 
+#[derive(Clone)]
 pub struct ImageComputeBuffers {
     size: [u32; 2],
     world_transform_buffer: TransformBuffer,
@@ -54,9 +55,9 @@ pub struct ImageComputeBuffers {
     planarize_buffer: StorageBuffer<f32>,
     normalize_buffer: StorageBuffer<shaders::plane_fit::NormalizeData>,
     normalize_control_buffer: StorageBuffer<shaders::scan_image::NormalizeControl>,
-    image_src_bg: shaders::plane_fit::bind_groups::BindGroup0,
-    normalize_bg: shaders::plane_fit::bind_groups::BindGroup1,
-    pub(crate) scan_image_bg: shaders::scan_image::bind_groups::BindGroup1,
+    image_src_bg: Arc<shaders::plane_fit::bind_groups::BindGroup0>,
+    normalize_bg: Arc<shaders::plane_fit::bind_groups::BindGroup1>,
+    pub(crate) scan_image_bg: Arc<shaders::scan_image::bind_groups::BindGroup1>,
 }
 impl ImageComputeBuffers {
     pub fn new(
@@ -107,7 +108,7 @@ impl ImageComputeBuffers {
         let normalize_control_buffer = StorageBuffer::new(
             device,
             None,
-            BufferUsages::UNIFORM | BufferUsages::COPY_SRC,
+            BufferUsages::UNIFORM | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
             1,
             |data| data[0] = NormalizationType::StdDev(3.).into(),
         );
@@ -125,14 +126,14 @@ impl ImageComputeBuffers {
             size[0] as usize * size[1] as usize,
             |_| {},
         );
-        let image_src_bg = shaders::plane_fit::bind_groups::BindGroup0::from_bindings(
+        let image_src_bg = Arc::new(shaders::plane_fit::bind_groups::BindGroup0::from_bindings(
             device,
             shaders::plane_fit::bind_groups::BindGroupLayout0 {
                 image_size: image_size_buffer.as_entire_buffer_binding(),
                 image_in: image_data_buffer.as_entire_buffer_binding(),
             },
-        );
-        let scan_image_bg = shaders::scan_image::bind_groups::BindGroup1::from_bindings(
+        ));
+        let scan_image_bg = Arc::new(shaders::scan_image::bind_groups::BindGroup1::from_bindings(
             device,
             shaders::scan_image::bind_groups::BindGroupLayout1 {
                 quad2world: world_transform_buffer.as_entire_buffer_binding(),
@@ -140,15 +141,15 @@ impl ImageComputeBuffers {
                 normalize_data: normalize_buffer.as_entire_buffer_binding(),
                 normalize_control: normalize_control_buffer.as_entire_buffer_binding(),
             },
-        );
-        let normalize_bg = shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
+        ));
+        let normalize_bg = Arc::new(shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
             device,
             shaders::plane_fit::bind_groups::BindGroupLayout1 {
                 texture_out: &image_texture.create_view(&TextureViewDescriptor::default()),
                 planarize_out: planarize_buffer.as_entire_buffer_binding(),
                 normalize_out: normalize_buffer.as_entire_buffer_binding(),
             },
-        );
+        ));
         Self {
             size,
             image_size_buffer,
@@ -320,6 +321,7 @@ impl FitData {
     }
 }
 
+#[derive(Clone)]
 struct ScratchBuffers {
     size: [u32; 2],
     count_buf: StorageBuffer<u32>,
@@ -330,7 +332,7 @@ struct ScratchBuffers {
     mins: StorageBuffer<f64>,
     maxs: StorageBuffer<f64>,
     std_devs: StorageBuffer<f64>,
-    bg: shaders::plane_fit::bind_groups::BindGroup2,
+    bg: Arc<shaders::plane_fit::bind_groups::BindGroup2>,
 }
 impl ScratchBuffers {
     fn new(device: &Device, size: [u32; 2]) -> Self {
@@ -359,7 +361,7 @@ impl ScratchBuffers {
         let std_devs = mk_buffer("std_devs");
         Self {
             size,
-            bg: shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
+            bg: Arc::new(shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
                 device,
                 shaders::plane_fit::bind_groups::BindGroupLayout2 {
                     xz: xz.as_entire_buffer_binding(),
@@ -371,7 +373,7 @@ impl ScratchBuffers {
                     maxs: maxs.as_entire_buffer_binding(),
                     std_devs: std_devs.as_entire_buffer_binding(),
                 },
-            ),
+            )),
             xz,
             yz,
             xx,
@@ -384,6 +386,7 @@ impl ScratchBuffers {
     }
 }
 
+#[derive(Clone)]
 #[allow(non_snake_case)]
 pub struct ImageComputePipeline {
     copy_image: ComputePipeline,
@@ -402,7 +405,7 @@ pub struct ImageComputePipeline {
     clear_texture: ComputePipeline,
     qs: QuerySet,
     qs_buf: StorageBuffer<u64>,
-    scratch_buffers: ScratchBuffers,
+    scratch_buffers: Arc<parking_lot::Mutex<ScratchBuffers>>,
 }
 impl ImageComputePipeline {
     pub fn new(device: &Device) -> Self {
@@ -459,29 +462,51 @@ impl ImageComputePipeline {
                 n_timings as usize * 2,
                 |_| {},
             ),
-            scratch_buffers: ScratchBuffers::new(device, [1024, 1024]),
+            scratch_buffers: Arc::new(parking_lot::Mutex::new(ScratchBuffers::new(
+                device,
+                [1024, 1024],
+            ))),
         }
     }
-    pub fn dispatch_mean_subtract(
-        &mut self,
+    pub fn dispatch(
+        &self,
         device: &Device,
         pass: &mut ComputePass,
-        image: &ImageComputeBuffers,
+        image_buffers: &ImageComputeBuffers,
+        fit_type: FitType,
+    ) {
+        let dispatch_fn = match fit_type {
+            FitType::MeanSubtract => Self::dispatch_mean_subtract,
+            FitType::PlaneFitSubtract => Self::dispatch_plane_fit_subtract,
+            FitType::LineMeanSubtract => Self::dispatch_line_mean_subtract,
+            FitType::LineFitSubtract => Self::dispatch_line_fit_subtract,
+        };
+        dispatch_fn(self, device, pass, image_buffers);
+    }
+    pub fn dispatch_mean_subtract(
+        &self,
+        device: &Device,
+        pass: &mut ComputePass,
+        image_buffers: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
-            info!("Reallocating scratch buffers to {:?}", image.size);
-            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        {
+            let mut scratch = self.scratch_buffers.lock();
+            if izip!(scratch.size, image_buffers.size).any(|(a, b)| a < b) {
+                info!("Reallocating scratch buffers to {:?}", image_buffers.size);
+                *scratch = ScratchBuffers::new(device, image_buffers.size);
+            }
+            scratch.bg.set(pass);
         }
+        image_buffers.image_src_bg.set(pass);
+        image_buffers.normalize_bg.set(pass);
+
+        let size = image_buffers.size();
         pass.push_debug_group("mean subtract");
-        self.scratch_buffers.bg.set(pass);
-        image.image_src_bg.set(pass);
-        image.normalize_bg.set(pass);
-        let size = image.size();
 
         pass.set_pipeline(&self.copy_image);
         wts(pass);
@@ -507,25 +532,29 @@ impl ImageComputePipeline {
         qs_n / 2
     }
     pub fn dispatch_plane_fit_subtract(
-        &mut self,
+        &self,
         device: &Device,
         pass: &mut ComputePass,
-        image: &ImageComputeBuffers,
+        image_buffers: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
-            info!("Reallocating scratch buffers to {:?}", image.size);
-            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        {
+            let mut scratch = self.scratch_buffers.lock();
+            if izip!(scratch.size, image_buffers.size).any(|(a, b)| a < b) {
+                info!("Reallocating scratch buffers to {:?}", image_buffers.size);
+                *scratch = ScratchBuffers::new(device, image_buffers.size);
+            }
+            scratch.bg.set(pass);
         }
+        image_buffers.image_src_bg.set(pass);
+        image_buffers.normalize_bg.set(pass);
+
         pass.push_debug_group("plane fit");
-        self.scratch_buffers.bg.set(pass);
-        image.image_src_bg.set(pass);
-        image.normalize_bg.set(pass);
-        let size = image.size();
+        let size = image_buffers.size();
 
         pass.set_pipeline(&self.copy_image);
         wts(pass);
@@ -561,25 +590,29 @@ impl ImageComputePipeline {
         qs_n / 2
     }
     pub fn dispatch_line_fit_subtract(
-        &mut self,
+        &self,
         device: &Device,
         pass: &mut ComputePass,
-        image: &ImageComputeBuffers,
+        image_buffers: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
-            info!("Reallocating scratch buffers to {:?}", image.size);
-            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        {
+            let mut scratch = self.scratch_buffers.lock();
+            if izip!(scratch.size, image_buffers.size).any(|(a, b)| a < b) {
+                info!("Reallocating scratch buffers to {:?}", image_buffers.size);
+                *scratch = ScratchBuffers::new(device, image_buffers.size);
+            }
+            scratch.bg.set(pass);
         }
+        image_buffers.image_src_bg.set(pass);
+        image_buffers.normalize_bg.set(pass);
+
         pass.push_debug_group("line fit subtract");
-        self.scratch_buffers.bg.set(pass);
-        image.image_src_bg.set(pass);
-        image.normalize_bg.set(pass);
-        let size = image.size();
+        let size = image_buffers.size();
 
         pass.set_pipeline(&self.copy_image_transpose);
         wts(pass);
@@ -615,26 +648,30 @@ impl ImageComputePipeline {
         qs_n / 2
     }
     pub fn dispatch_line_mean_subtract(
-        &mut self,
+        &self,
         device: &Device,
         pass: &mut ComputePass,
-        image: &ImageComputeBuffers,
+        image_buffers: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
-            info!("Reallocating scratch buffers to {:?}", image.size);
-            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        {
+            let mut scratch = self.scratch_buffers.lock();
+            if izip!(scratch.size, image_buffers.size).any(|(a, b)| a < b) {
+                info!("Reallocating scratch buffers to {:?}", image_buffers.size);
+                *scratch = ScratchBuffers::new(device, image_buffers.size);
+            }
+            scratch.bg.set(pass);
         }
+        image_buffers.image_src_bg.set(pass);
+        image_buffers.normalize_bg.set(pass);
 
-        self.scratch_buffers.bg.set(pass);
-        image.image_src_bg.set(pass);
-        image.normalize_bg.set(pass);
-        let size = image.size();
+        let size = image_buffers.size();
         pass.push_debug_group("line mean subtract");
+
         pass.set_pipeline(&self.copy_image_transpose);
         wts(pass);
         dispatch_linear(pass, size);
@@ -659,25 +696,27 @@ impl ImageComputePipeline {
         qs_n / 2
     }
     pub fn dispatch_clear_texture(
-        &mut self,
+        &self,
         device: &Device,
         pass: &mut ComputePass,
-        image: &ImageComputeBuffers,
+        image_buffers: &ImageComputeBuffers,
     ) -> usize {
         let mut qs_n = 0;
         let mut wts = |pass: &mut ComputePass| {
             pass.write_timestamp(&self.qs, qs_n as u32);
             qs_n += 1;
         };
-        if izip!(self.scratch_buffers.size, image.size).any(|(a, b)| a < b) {
-            info!("Reallocating scratch buffers to {:?}", image.size);
-            self.scratch_buffers = ScratchBuffers::new(device, image.size);
+        {
+            let mut scratch = self.scratch_buffers.lock();
+            if izip!(scratch.size, image_buffers.size).any(|(a, b)| a < b) {
+                info!("Reallocating scratch buffers to {:?}", image_buffers.size);
+                *scratch = ScratchBuffers::new(device, image_buffers.size);
+            }
+            scratch.bg.set(pass);
         }
-
-        self.scratch_buffers.bg.set(pass);
-        image.image_src_bg.set(pass);
-        image.normalize_bg.set(pass);
-        let size = image.size;
+        image_buffers.image_src_bg.set(pass);
+        image_buffers.normalize_bg.set(pass);
+        let size = image_buffers.size;
 
         pass.set_pipeline(&self.clear_texture);
         wts(pass);
@@ -715,33 +754,34 @@ impl ImageComputePipeline {
 }
 
 fn dispatch_linear(pass: &mut ComputePass, size: [u32; 2]) {
-    pass.dispatch_workgroups(num_wgs(size[0] * size[1], shaders::plane_fit::WGS), 1, 1);
+    pass.dispatch_workgroups(
+        num_workgroups(size[0] * size[1], shaders::plane_fit::WGS),
+        1,
+        1,
+    );
 }
 
 fn dispatch_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0] * size[1];
     while remaining_data > 1 {
-        let num_workgroups = num_wgs(remaining_data, shaders::plane_fit::WGS);
-        pass.dispatch_workgroups(num_workgroups, 1, 1);
-        remaining_data = num_workgroups;
+        let num_wgs = num_workgroups(remaining_data, shaders::plane_fit::WGS);
+        pass.dispatch_workgroups(num_wgs, 1, 1);
+        remaining_data = num_wgs;
     }
 }
 
 fn dispatch_y_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0];
+    let num_wgs_cols = num_workgroups(size[1], shaders::plane_fit::WGS_SQUARE);
     while remaining_data > 1 {
-        let num_workgroups = num_wgs(remaining_data, shaders::plane_fit::WGS_SQUARE);
-        pass.dispatch_workgroups(
-            num_wgs(size[1], shaders::plane_fit::WGS_SQUARE),
-            num_workgroups,
-            1,
-        );
-        remaining_data = num_workgroups;
+        let num_wgs_rows = num_workgroups(remaining_data, shaders::plane_fit::WGS_SQUARE);
+        pass.dispatch_workgroups(num_wgs_cols, num_wgs_rows, 1);
+        remaining_data = num_wgs_rows;
     }
 }
 
 #[inline]
-fn num_wgs(num: u32, wg_size: u32) -> u32 {
+fn num_workgroups(num: u32, wg_size: u32) -> u32 {
     num.saturating_sub(1) / wg_size + 1
 }
 

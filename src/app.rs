@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::components::file_dialog::ViewportFileDialog;
 // TODO: rename to ImageTree
 use crate::components::file_tree_extern::ImageTree as FileTree;
+use crate::components::image_menu::ImageMenu;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::nanonis_image::NanonisImage;
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
@@ -17,7 +18,7 @@ use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
-use image_compute::image_compute::{FitData, FitType};
+use image_compute::image_compute::{FitData, FitType, NormalizationType};
 use itertools::{izip, Itertools};
 use sxmfile::SXM;
 use tracing::{error, info, warn};
@@ -345,74 +346,15 @@ impl ImageMenu for StaticImage {
     fn image_data_mut(&mut self) -> &mut ScanImage {
         &mut self.image_data
     }
-}
-
-pub trait ImageMenu {
-    fn fit_type_mut(&mut self) -> &mut FitType;
-
-    fn image_data_mut(&mut self) -> &mut ScanImage;
-
-    fn show_image_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
-        let vis = &mut ui.style_mut().visuals.widgets.inactive;
-        vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-        let types = [
-            (FitType::LineFitSubtract, "Line Fit"),
-            (FitType::LineMeanSubtract, "Line Mean Subtract"),
-            (FitType::PlaneFitSubtract, "Plane Fit"),
-            (FitType::MeanSubtract, "Mean Subtract"),
-        ];
-        ComboBox::new((self.image_data_mut().uuid(), "fit type"), "")
-            .selected_text(
-                types
-                    .iter()
-                    .find(|(t, _)| *t == *self.fit_type_mut())
-                    .unwrap()
-                    .1,
-            )
-            .show_ui(ui, |ui| {
-                ui.set_min_height(82.);
-                let changed = types
-                    .iter()
-                    .copied()
-                    .map(|(typ, name)| ui.selectable_value(self.fit_type_mut(), typ, name))
-                    .any(|resp| resp.clicked());
-                if changed {
-                    println!("changed");
-                    let fit_type = *self.fit_type_mut();
-                    self.image_data_mut().write_texture(image_encoder, fit_type);
-                }
-            });
-        let image_data = self.image_data_mut();
-        let norm = image_data.norm_data.read();
-        let fit = image_data.fit_data.read();
-        if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
-            let mean = fit.mean();
-            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + mean)));
-            ui.label(format!("Gap:    {:.2}", MetersFmt(norm.max - norm.min)));
-            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + mean)));
-            ui.label(format!("Mean:    {:.2}", MetersFmt(mean)));
-            ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
-            match fit {
-                FitData::PlaneFitSubtract {
-                    x_slope, y_slope, ..
-                } => {
-                    ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
-                    ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
-                }
-                FitData::MeanSubtract { .. } => {}
-                FitData::LineMeanSubtract { means } => {
-                    for m in means {
-                        ui.label(format!("{:.2}", MetersFmt(*m)));
-                    }
-                }
-                FitData::LineFitSubtract { means, slopes } => {
-                    for (m, s) in izip!(means, slopes) {
-                        ui.label(format!("{:.2}  {:.2}", MetersFmt(*m), MetersFmt(*s)));
-                    }
-                }
-            }
-        }
+    
+    fn norm_type_mut(&mut self) -> &mut crate::components::image_menu::NormType {
+        todo!()
     }
+    
+    fn std_dev_mut(&mut self) -> &mut f32 {
+        todo!()
+    }
+    
 }
 
 pub struct StaticImage {
@@ -430,9 +372,15 @@ impl StaticImage {
             0.,
             Vec2::from(translation) * 1e9,
         );
-        let scan_image = ScanImage::new(image_encoder, size, size[1], transform, |data_mut| {
-            data_mut.copy_from_slice(&sxm_file.data[0][0]);
-        });
+        let scan_image = ScanImage::new(
+            image_encoder,
+            size,
+            transform,
+            NormalizationType::MinMax,
+            |data_mut| {
+                data_mut.copy_from_slice(&sxm_file.data[0][0]);
+            },
+        );
         Ok(Self {
             image_data: scan_image,
             image_src: sxm_file,
@@ -525,40 +473,6 @@ impl StateModify<AppState> for MoveBackwardModifier {
 
     fn undo(&mut self, state: &mut AppState) {
         self.0 = state.image_list.move_indexes_down(&self.0)
-    }
-}
-
-#[repr(transparent)]
-struct MetersFmt(f32);
-impl Display for MetersFmt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mag = (self.0.abs().log10() / 3.).floor();
-        let scaled = self.0 / (10f32).powf(mag * 3.);
-        let suf = match mag as i32 {
-            4 => Some("Tm"),
-            3 => Some("Gm"),
-            2 => Some("Mm"),
-            1 => Some("km"),
-            0 => Some("m"),
-            -1 => Some("mm"),
-            -2 => Some("μm"),
-            -3 => Some("nm"),
-            -4 => Some("pm"),
-            -5 => Some("fm"),
-            _ => None,
-        };
-        if let Some(suf) = suf {
-            f32::fmt(&scaled, f)?;
-            write!(f, " {}", suf)?;
-        } else if self.0 == 0. {
-            f32::fmt(&self.0, f)?;
-            write!(f, " m")?;
-        } else {
-            warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
-            f32::fmt(&self.0, f)?;
-            write!(f, " m")?;
-        }
-        Ok(())
     }
 }
 
