@@ -35,7 +35,7 @@ pub trait ImageMenu {
             if *self.norm_type_mut() == NormType::StdDev {
                 ui.add(
                     DragValue::new(self.std_dev_mut())
-                        .range((0.)..=(5.))
+                        .range((0.)..=(9.))
                         .speed(0.01),
                 );
             }
@@ -45,9 +45,9 @@ pub trait ImageMenu {
         let fit = image_data.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
             let mean = fit.mean();
-            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max + mean)));
+            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));
             ui.label(format!("Gap:    {:.2}", MetersFmt(norm.max - norm.min)));
-            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min + mean)));
+            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min)));
             ui.label(format!("Mean:    {:.2}", MetersFmt(mean)));
             ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
             match fit {
@@ -74,10 +74,10 @@ pub trait ImageMenu {
 }
 
 const FIT_TYPES: &[(FitType, &'static str)] = &[
-    (FitType::LineFitSubtract, "Line Fit"),
-    (FitType::LineMeanSubtract, "Line Mean Subtract"),
-    (FitType::PlaneFitSubtract, "Plane Fit"),
-    (FitType::MeanSubtract, "Mean Subtract"),
+    (FitType::MeanSubtract, "Raw"),
+    (FitType::LineMeanSubtract, "Subtract Average"),
+    (FitType::LineFitSubtract, "Subtract Linear Fit"),
+    (FitType::PlaneFitSubtract, "Subtract Plane"),
 ];
 const NORM_TYPES: &[(NormType, &'static str)] = &[
     (NormType::FullScale, "Full Scale"),
