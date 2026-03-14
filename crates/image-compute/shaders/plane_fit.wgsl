@@ -96,6 +96,7 @@ fn reduce_image(
         planarize_out[read_idx] = z_sum_wg[0];
         count[read_idx] = z_count_wg[0];
     } else {
+        planarize_out[read_idx] = 0.;
         count[read_idx] = 0u;
     }
 }
@@ -134,6 +135,7 @@ fn reduce_image_lines(
         planarize_out[read_idx] = z_sum_wg[local_id.x];
         count[read_idx] = z_count_wg[local_id.x];
     } else {
+        planarize_out[read_idx] = 0.;
         count[read_idx] = 0u;
     }
 }
@@ -211,6 +213,11 @@ fn reduce_sums_plane(
         yz[read_idx] = yz_sum_wg[0];
         xx[read_idx] = xx_sum_wg[0];
         yy[read_idx] = yy_sum_wg[0];
+    } else {
+        xz[read_idx] = 0.;
+        yz[read_idx] = 0.;
+        xx[read_idx] = 0.;
+        yy[read_idx] = 0.;
     }
 }
 
@@ -248,6 +255,9 @@ fn reduce_sums_lines(
     if local_row == 0u {
         xz[read_idx] = xz_sum_wg[local_col];
         xx[read_idx] = xx_sum_wg[local_col];
+    } else {
+        xz[read_idx] = 0.;
+        xx[read_idx] = 0.;
     }
 }
 
@@ -360,6 +370,11 @@ fn reduce_normalizations(
         maxs[read_idx] = max_wg[0];
         std_devs[read_idx] = std_dev_sum_wg[0];
         count[read_idx] = z_count_wg[0];
+    } else {
+        mins[read_idx] = f32_pos_inf();
+        maxs[read_idx] = f32_neg_inf();
+        std_devs[read_idx] = 0.;
+        count[read_idx] = 0u;
     }
     if global_id.x == 0u {
         normalize_out.min = mins[0];
