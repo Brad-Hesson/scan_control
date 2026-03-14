@@ -529,11 +529,11 @@ impl StateModify<AppState> for MoveBackwardModifier {
 }
 
 #[repr(transparent)]
-struct MetersFmt(f64);
+struct MetersFmt(f32);
 impl Display for MetersFmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mag = (self.0.abs().log10() / 3.).floor();
-        let scaled = self.0 / (10f64).powf(mag * 3.);
+        let scaled = self.0 / (10f32).powf(mag * 3.);
         let suf = match mag as i32 {
             4 => Some("Tm"),
             3 => Some("Gm"),
@@ -548,14 +548,14 @@ impl Display for MetersFmt {
             _ => None,
         };
         if let Some(suf) = suf {
-            f64::fmt(&scaled, f)?;
+            f32::fmt(&scaled, f)?;
             write!(f, " {}", suf)?;
         } else if self.0 == 0. {
-            f64::fmt(&self.0, f)?;
+            f32::fmt(&self.0, f)?;
             write!(f, " m")?;
         } else {
             warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
-            f64::fmt(&self.0, f)?;
+            f32::fmt(&self.0, f)?;
             write!(f, " m")?;
         }
         Ok(())

@@ -6,31 +6,31 @@ var<storage, read> image_in: array<f32>;
 @group(1) @binding(0)
 var texture_out: texture_storage_2d<r32float, write>;
 @group(1) @binding(1)
-var<storage, read_write> planarize_out: array<f64>;
+var<storage, read_write> planarize_out: array<f32>;
 @group(1) @binding(2)
 var<storage, read_write> normalize_out: NormalizeData;
 
 @group(2) @binding(0)
 var<storage, read_write> count: array<u32>;
 @group(2) @binding(1)
-var<storage, read_write> mins: array<f64>;
+var<storage, read_write> mins: array<f32>;
 @group(2) @binding(2)
-var<storage, read_write> maxs: array<f64>;
+var<storage, read_write> maxs: array<f32>;
 @group(2) @binding(3)
-var<storage, read_write> std_devs: array<f64>;
+var<storage, read_write> std_devs: array<f32>;
 @group(2) @binding(4)
-var<storage, read_write> xz: array<f64>;
+var<storage, read_write> xz: array<f32>;
 @group(2) @binding(5)
-var<storage, read_write> yz: array<f64>;
+var<storage, read_write> yz: array<f32>;
 @group(2) @binding(6)
-var<storage, read_write> xx: array<f64>;
+var<storage, read_write> xx: array<f32>;
 @group(2) @binding(7)
-var<storage, read_write> yy: array<f64>;
+var<storage, read_write> yy: array<f32>;
 
 struct NormalizeData {
-    stddev: f64,
-    min: f64,
-    max: f64,
+    stddev: f32,
+    min: f32,
+    max: f32,
 }
 
 const WGS: u32 = 256u;
@@ -41,11 +41,11 @@ fn copy_image(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i = global_id.x;
     if i >= image_len() { return; }
 
-    if is_nan_f32(image_in[i]){
+    if is_nan_f32(image_in[i]) {
         planarize_out[i] = 0.;
         count[i] = 0u;
     } else {
-        planarize_out[i] = f64(image_in[i]);
+        planarize_out[i] = image_in[i];
         count[i] = 1u;
     }
 }
@@ -56,16 +56,16 @@ fn copy_image_transpose(@builtin(global_invocation_id) global_index: vec3<u32>) 
     if i >= image_len() { return; }
     let i_t = index_transpose(i);
 
-    if is_nan_f32(image_in[i]){
+    if is_nan_f32(image_in[i]) {
         planarize_out[i_t] = 0.;
         count[i_t] = 0u;
     } else {
-        planarize_out[i_t] = f64(image_in[i]);
+        planarize_out[i_t] = image_in[i];
         count[i_t] = 1u;
     }
 }
 
-var<workgroup> z_sum_wg: array<f64, WGS>;
+var<workgroup> z_sum_wg: array<f32, WGS>;
 var<workgroup> z_count_wg: array<u32, WGS>;
 @compute @workgroup_size(WGS)
 fn reduce_image(
@@ -86,7 +86,7 @@ fn reduce_image(
     }
     var stride = WGS >> 1u;
     while stride > 0u {
-        if local_index >= stride {break;}
+        if local_index >= stride { break; }
         workgroupBarrier();
         z_sum_wg[local_index] += z_sum_wg[local_index + stride];
         z_count_wg[local_index] += z_count_wg[local_index + stride];
@@ -124,7 +124,7 @@ fn reduce_image_lines(
     }
     var stride = WGS_SQUARE >> 1u;
     while stride > 0u {
-        if local_id.y >= stride {break;}
+        if local_id.y >= stride { break; }
         workgroupBarrier();
         z_sum_wg[local_index] += z_sum_wg[local_index + stride * WGS_SQUARE];
         z_count_wg[local_index] += z_count_wg[local_index + stride * WGS_SQUARE];
@@ -144,7 +144,7 @@ fn generate_sums_plane(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if i >= image_len() { return; }
 
     let basis = calc_basis(i);
-    if is_nan_f64(basis.z){
+    if is_nan_f32(basis.z) {
         xz[i] = 0.;
         yz[i] = 0.;
         xx[i] = 0.;
@@ -164,7 +164,7 @@ fn generate_sums_lines(@builtin(global_invocation_id) global_index: vec3<u32>) {
     let i_t = index_transpose(i);
 
     let basis = calc_basis_lines(i);
-    if is_nan_f64(basis.z){
+    if is_nan_f32(basis.z) {
         xz[i_t] = 0.;
         xx[i_t] = 0.;
     } else {
@@ -173,10 +173,10 @@ fn generate_sums_lines(@builtin(global_invocation_id) global_index: vec3<u32>) {
     }
 }
 
-var<workgroup> xz_sum_wg: array<f64, WGS>;
-var<workgroup> yz_sum_wg: array<f64, WGS>;
-var<workgroup> xx_sum_wg: array<f64, WGS>;
-var<workgroup> yy_sum_wg: array<f64, WGS>;
+var<workgroup> xz_sum_wg: array<f32, WGS>;
+var<workgroup> yz_sum_wg: array<f32, WGS>;
+var<workgroup> xx_sum_wg: array<f32, WGS>;
+var<workgroup> yy_sum_wg: array<f32, WGS>;
 @compute @workgroup_size(WGS)
 fn reduce_sums_plane(
     @builtin(local_invocation_index) local_index: u32,
@@ -239,7 +239,7 @@ fn reduce_sums_lines(
     }
     var stride = WGS_SQUARE >> 1u;
     while stride > 0u {
-        if local_row >= stride {break;}
+        if local_row >= stride { break; }
         workgroupBarrier();
         xz_sum_wg[local_index] += xz_sum_wg[local_index + stride * WGS_SQUARE];
         xx_sum_wg[local_index] += xx_sum_wg[local_index + stride * WGS_SQUARE];
@@ -259,8 +259,8 @@ fn generate_normalization__mean_subtract(@builtin(global_invocation_id) global_i
     let basis = calc_basis(i);
     store_value(i, basis.z);
 
-    if i == 0u{
-        planarize_out[1] = f64(count[0]);
+    if i == 0u {
+        planarize_out[1] = f32(count[0]);
     }
 }
 
@@ -274,12 +274,12 @@ fn generate_normalization__plane_fit(
 
     let basis = calc_basis(i);
     let x_slope = xz[0] / xx[0];
-    let y_slope = select(yz[0] / yy[0], f64(0), yy[0] == 0.);
+    let y_slope = select(yz[0] / yy[0], 0., yy[0] == 0.);
     let plane = x_slope * basis.x + y_slope * basis.y;
     store_value(i, basis.z - plane);
 
     if i == 0u {
-        planarize_out[1] = f64(count[0]);
+        planarize_out[1] = f32(count[0]);
         planarize_out[2] = x_slope;
         planarize_out[3] = y_slope;
     }
@@ -298,9 +298,9 @@ fn generate_normalization__line_fit(
     let x_slope = xz[row] / xx[row];
     let plane = x_slope * basis.x;
     store_value(i, basis.z - plane);
-    
+
     if col == 0 {
-        planarize_out[1u * image_size.y + row] = f64(count[row]);
+        planarize_out[1u * image_size.y + row] = f32(count[row]);
         planarize_out[2u * image_size.y + row] = x_slope;
     }
 }
@@ -318,13 +318,13 @@ fn generate_normalization__line_mean(
     store_value(i, basis.z);
 
     if col == 0 {
-        planarize_out[1u * image_size.y + row] = f64(count[row]);
+        planarize_out[1u * image_size.y + row] = f32(count[row]);
     }
 }
 
-var<workgroup> min_wg: array<f64, WGS>;
-var<workgroup> max_wg: array<f64, WGS>;
-var<workgroup> std_dev_sum_wg: array<f64, WGS>;
+var<workgroup> min_wg: array<f32, WGS>;
+var<workgroup> max_wg: array<f32, WGS>;
+var<workgroup> std_dev_sum_wg: array<f32, WGS>;
 @compute @workgroup_size(WGS)
 fn reduce_normalizations(
     @builtin(global_invocation_id) global_id: vec3<u32>,
@@ -339,8 +339,8 @@ fn reduce_normalizations(
         std_dev_sum_wg[local_index] = std_devs[read_idx];
         z_count_wg[local_index] = count[read_idx];
     } else {
-        min_wg[local_index] = f64_pos_infinity();
-        max_wg[local_index] = f64_neg_infinity();
+        min_wg[local_index] = f32_pos_inf();
+        max_wg[local_index] = f32_neg_inf();
         std_dev_sum_wg[local_index] = 0.;
         z_count_wg[local_index] = 0u;
         return;
@@ -364,7 +364,7 @@ fn reduce_normalizations(
     if global_id.x == 0u {
         normalize_out.min = mins[0];
         normalize_out.max = maxs[0];
-        normalize_out.stddev = sqrt(std_devs[0] / f64(count[0]));
+        normalize_out.stddev = sqrt(std_devs[0] / f32(count[0]));
     }
 }
 
@@ -377,24 +377,24 @@ fn clear_texture(
     let global_id = vec2(global_index.x % image_size.x, global_index.x / image_size.x);
     textureStore(texture_out, global_id, vec4(f32_nan(), 0.0, 0.0, 0.0));
     if i == 0u {
-        normalize_out.min = f64_nan();
-        normalize_out.max = f64_nan();
-        normalize_out.stddev = f64_nan();
+        normalize_out.min = f32_nan();
+        normalize_out.max = f32_nan();
+        normalize_out.stddev = f32_nan();
     }
 }
 
 // ------------ Helper Functions ------------
 
-fn index_transpose(i: u32) -> u32{
+fn index_transpose(i: u32) -> u32 {
     return (i % image_size.x) * image_size.y + i / image_size.x;
 }
 
-fn store_value(i: u32, value: f64){
+fn store_value(i: u32, value: f32) {
     let global_coord = vec2(i % image_size.x, i / image_size.x);
-    textureStore(texture_out, global_coord, vec4(f32(value), 0.0, 0.0, 0.0));
-    if is_nan_f64(value){
-        mins[i] = f64_pos_infinity();
-        maxs[i] = f64_neg_infinity();
+    textureStore(texture_out, global_coord, vec4(value, 0.0, 0.0, 0.0));
+    if is_nan_f32(value) {
+        mins[i] = f32_pos_inf();
+        maxs[i] = f32_neg_inf();
         std_devs[i] = 0.;
     } else {
         mins[i] = value;
@@ -407,41 +407,37 @@ fn image_len() -> u32 {
     return image_size.x * image_size.y;
 }
 
-fn calc_basis(i: u32) -> vec3<f64> {
+fn calc_basis(i: u32) -> vec3<f32> {
     let width = image_size.x;
     let height = image_size.y;
     let row = i / width;
     let col = i % width;
-    let mean = planarize_out[0] / f64(count[0]);
-    return vec3(norm_pos(width, col), norm_pos(height, row), f64(image_in[i]) - mean);
+    let mean = planarize_out[0] / f32(count[0]);
+    return vec3(norm_pos(width, col), norm_pos(height, row), image_in[i] - mean);
 }
 
-fn calc_basis_lines(i: u32) -> vec3<f64> {
+fn calc_basis_lines(i: u32) -> vec3<f32> {
     let width = image_size.x;
     let row = i / width;
     let col = i % width;
-    let mean = planarize_out[row] / f64(count[row]);
-    return vec3(norm_pos(width, col), 0, f64(image_in[i]) - mean);
+    let mean = planarize_out[row] / f32(count[row]);
+    return vec3(norm_pos(width, col), 0, image_in[i] - mean);
 }
 
-fn norm_pos(w: u32, x: u32) -> f64 {
-    return f64(i32(x << 1u) - i32(w) + i32(1u)) / f64((w << 1u) - 2u);
+fn norm_pos(w: u32, x: u32) -> f32 {
+    return f32(i32(x << 1u) - i32(w) + i32(1u)) / f32((w << 1u) - 2u);
 }
 
 fn idx(sz: vec2<u32>, x: u32, y: u32) -> u32 {
     return x + y * sz.x;
 }
 
-fn f64_pos_infinity() -> f64 {
-    return bitcast<f64>(u64(0x7FF00000u) << 32u);
+fn f32_pos_inf() -> f32 {
+    return bitcast<f32>(0x7F800000u);
 }
 
-fn f64_neg_infinity() -> f64 {
-    return bitcast<f64>(u64(0xFFF00000u) << 32u);
-}
-
-fn f64_nan() -> f64 {
-    return bitcast<f64>(u64(0x7FF80000u) << 32u);
+fn f32_neg_inf() -> f32 {
+    return bitcast<f32>(0xFF800000u);
 }
 
 fn f32_nan() -> f32 {
@@ -450,14 +446,7 @@ fn f32_nan() -> f32 {
 
 fn is_nan_f32(x: f32) -> bool {
     let bits = bitcast<u32>(x);
-    let exp  = extractBits(bits, 23u, 8u);
+    let exp = extractBits(bits, 23u, 8u);
     let mant = extractBits(bits, 0u, 23u);
     return exp == 0xFFu && mant != 0u;
-}
-
-fn is_nan_f64(x: f64) -> bool {
-    let bits = bitcast<u64>(x);
-    let exp = extractBits(bits, 52u, 11u);
-    let mant = extractBits(bits, 0u, 52u);
-    return exp == u64(0x7FFu) && mant != u64(0u);
 }

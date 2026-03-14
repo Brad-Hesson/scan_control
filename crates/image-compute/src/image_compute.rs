@@ -23,7 +23,7 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub enum NormalizationType {
     MinMax,
-    StdDev(f64),
+    StdDev(f32),
 }
 impl From<NormalizationType> for NormalizeControl {
     fn from(value: NormalizationType) -> Self {
@@ -51,7 +51,7 @@ pub struct ImageComputeBuffers {
     world_transform_buffer: TransformBuffer,
     image_size_buffer: StorageBuffer<u32>,
     image_data_buffer: StorageBuffer<f32>,
-    planarize_buffer: StorageBuffer<f64>,
+    planarize_buffer: StorageBuffer<f32>,
     normalize_buffer: StorageBuffer<shaders::plane_fit::NormalizeData>,
     normalize_control_buffer: StorageBuffer<shaders::scan_image::NormalizeControl>,
     image_src_bg: shaders::plane_fit::bind_groups::BindGroup0,
@@ -118,7 +118,7 @@ impl ImageComputeBuffers {
             1,
             |_| {},
         );
-        let planarize_buffer = StorageBuffer::<f64>::new(
+        let planarize_buffer = StorageBuffer::<f32>::new(
             device,
             Some("planarize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC,
@@ -246,23 +246,23 @@ impl FitType {
 #[derive(Debug, Clone)]
 pub enum FitData {
     MeanSubtract {
-        mean: f64,
+        mean: f32,
     },
     PlaneFitSubtract {
-        mean: f64,
-        x_slope: f64,
-        y_slope: f64,
+        mean: f32,
+        x_slope: f32,
+        y_slope: f32,
     },
     LineMeanSubtract {
-        means: Box<[f64]>,
+        means: Box<[f32]>,
     },
     LineFitSubtract {
-        means: Box<[f64]>,
-        slopes: Box<[f64]>,
+        means: Box<[f32]>,
+        slopes: Box<[f32]>,
     },
 }
 impl FitData {
-    pub fn mean(&self) -> f64 {
+    pub fn mean(&self) -> f32 {
         match self {
             FitData::MeanSubtract { mean } => *mean,
             FitData::PlaneFitSubtract { mean, .. } => *mean,
@@ -282,7 +282,7 @@ impl FitData {
             }
         }
     }
-    fn from_raw(data: &[f64], size: [u32; 2], fit_type: FitType) -> Self {
+    fn from_raw(data: &[f32], size: [u32; 2], fit_type: FitType) -> Self {
         assert_eq!(data.len(), fit_type.download_size(size));
         let h = size[1] as usize;
         match fit_type {

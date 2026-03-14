@@ -52,9 +52,9 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // normalize the datapoint based on NormalizeControl
     var height: f32;
     if normalize_control.max_min != 0u {
-        height = (raw - f32(normalize_data.min)) / f32(normalize_data.max - normalize_data.min);
+        height = (raw - normalize_data.min) / (normalize_data.max - normalize_data.min);
     } else {
-        let factor = f32(normalize_control.std_dev_mul * normalize_data.stddev * 3.0);
+        let factor = normalize_control.std_dev_mul * normalize_data.stddev * 3.0;
         height = (raw / factor) + 0.5;
     }
 
@@ -75,13 +75,13 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 struct NormalizeControl{
     max_min: u32,
     _pad: u32,
-    std_dev_mul: f64
+    std_dev_mul: f32
 }
 
 struct NormalizeData{
-    stddev: f64,
-    min: f64,
-    max: f64,
+    stddev: f32,
+    min: f32,
+    max: f32,
 }
 
 struct VertexOutput {
