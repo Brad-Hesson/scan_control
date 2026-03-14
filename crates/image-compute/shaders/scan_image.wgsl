@@ -104,5 +104,8 @@ var<private> uvs: array<vec2<f32>, 4> = array(
 );
 
 fn isNan(value: f32) -> bool {
-    return extractBits(bitcast<u32>(value), 23u, 8u) == 0xFF;
+    let bits = bitcast<u32>(value);
+    let exp  = extractBits(bits, 23u, 8u);
+    let mant = extractBits(bits, 0u, 23u);
+    return exp == 0xFFu && mant != 0u;
 }

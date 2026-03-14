@@ -48,7 +48,6 @@ pub enum WriteLinesError {
 
 pub struct ImageComputeBuffers {
     size: [u32; 2],
-    lines: u32,
     world_transform_buffer: TransformBuffer,
     image_size_buffer: StorageBuffer<u32>,
     image_data_buffer: StorageBuffer<f32>,
@@ -65,7 +64,6 @@ impl ImageComputeBuffers {
         queue: &Queue,
         label: Option<&str>,
         size: [u32; 2],
-        lines: u32,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
         let size_buffer_label = label.map(|name| format!("{name}_size_buffer"));
@@ -75,8 +73,7 @@ impl ImageComputeBuffers {
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             2,
             |buf| {
-                buf[0] = size[0];
-                buf[1] = lines;
+                buf.copy_from_slice(&size);
             },
         );
         let data_buffer_label = label.map(|name| format!("{name}_data_buffer"));
@@ -154,7 +151,6 @@ impl ImageComputeBuffers {
         );
         Self {
             size,
-            lines,
             image_size_buffer,
             image_data_buffer,
             world_transform_buffer,
@@ -176,30 +172,6 @@ impl ImageComputeBuffers {
     ) -> Result<(), BufferOpError> {
         self.normalize_control_buffer
             .queue_write(queue, 0, 1, |buf| buf[0] = normalization_type.into())
-    }
-    pub fn write_lines(
-        &mut self,
-        queue: &Queue,
-        num_lines: usize,
-        callback: impl Fn(&mut [f32]),
-    ) -> Result<(), WriteLinesError> {
-        if self.lines + num_lines as u32 > self.size[1] {
-            return Err(WriteLinesError::TooManyLines {
-                requested: num_lines,
-                remaining: (self.size[1] - self.lines) as usize,
-            });
-        }
-        self.image_data_buffer.queue_write(
-            queue,
-            self.lines as usize * self.size[0] as usize,
-            num_lines * self.size[0] as usize,
-            callback,
-        )?;
-        self.lines += num_lines as u32;
-        self.image_size_buffer
-            .queue_write(queue, 1, 1, |buf| buf[0] = self.lines)
-            .expect("params should be correct");
-        Ok(())
     }
     pub fn write_lines_range(
         &mut self,
@@ -224,13 +196,7 @@ impl ImageComputeBuffers {
             callback,
         )
     }
-    pub fn clear_lines(&mut self) {
-        self.lines = 0;
-    }
-    pub fn current_size(&self) -> [u32; 2] {
-        [self.size[0], self.lines]
-    }
-    pub fn capacity(&self) -> [u32; 2] {
+    pub fn size(&self) -> [u32; 2] {
         self.size
     }
     pub fn download_normalize_data(
@@ -249,7 +215,7 @@ impl ImageComputeBuffers {
         fit_type: FitType,
         callback: impl FnOnce(FitData) + Send + 'static,
     ) -> Result<(), BufferOpError> {
-        let size = self.current_size();
+        let size = self.size();
         self.planarize_buffer.queue_download(
             device,
             queue,
@@ -271,7 +237,7 @@ impl FitType {
         match self {
             FitType::MeanSubtract => 2,
             FitType::PlaneFitSubtract => 4,
-            FitType::LineMeanSubtract => size[1] as usize,
+            FitType::LineMeanSubtract => size[1] as usize * 2,
             FitType::LineFitSubtract => size[1] as usize * 3,
         }
     }
@@ -318,7 +284,6 @@ impl FitData {
     }
     fn from_raw(data: &[f64], size: [u32; 2], fit_type: FitType) -> Self {
         assert_eq!(data.len(), fit_type.download_size(size));
-        let [width, height] = [size[0] as f64, size[1] as f64];
         let h = size[1] as usize;
         match fit_type {
             FitType::MeanSubtract => Self::MeanSubtract {
@@ -326,35 +291,37 @@ impl FitData {
             },
             FitType::PlaneFitSubtract => Self::PlaneFitSubtract {
                 mean: data[0] / data[1],
-                x_slope: data[2] * width,
-                y_slope: data[3] * height,
+                x_slope: data[2],
+                y_slope: data[3],
             },
-            FitType::LineMeanSubtract => Self::LineMeanSubtract {
-                means: data
-                    .iter()
-                    .map(|v| v / width)
-                    .collect_vec()
-                    .into_boxed_slice(),
-            },
-            FitType::LineFitSubtract => Self::LineFitSubtract {
-                means: data[..h]
-                    .iter()
-                    .zip(data[h * 1..][..h].iter())
-                    .map(|(sum, count)| sum / count)
-                    .collect_vec()
-                    .into_boxed_slice(),
-                slopes: data[h * 2..][..h]
-                    .iter()
-                    .zip(data[h * 1..][..h].iter())
-                    .map(|(slope, count)| slope / count)
-                    .collect_vec()
-                    .into_boxed_slice(),
-            },
+            FitType::LineMeanSubtract => {
+                let sums = &data[0 * h..][..h];
+                let counts = &data[1 * h..][..h];
+                Self::LineMeanSubtract {
+                    means: izip!(sums, counts)
+                        .map(|(sum, count)| sum / count)
+                        .collect_vec()
+                        .into_boxed_slice(),
+                }
+            }
+            FitType::LineFitSubtract => {
+                let sums = &data[0 * h..][..h];
+                let counts = &data[1 * h..][..h];
+                let slopes = &data[2 * h..][..h];
+                Self::LineFitSubtract {
+                    means: izip!(sums, counts)
+                        .map(|(sum, count)| sum / count)
+                        .collect_vec()
+                        .into_boxed_slice(),
+                    slopes: slopes.to_vec().into_boxed_slice(),
+                }
+            }
         }
     }
 }
 
 struct ScratchBuffers {
+    size: [u32; 2],
     count_buf: StorageBuffer<u32>,
     xz: StorageBuffer<f64>,
     yz: StorageBuffer<f64>,
@@ -364,7 +331,6 @@ struct ScratchBuffers {
     maxs: StorageBuffer<f64>,
     std_devs: StorageBuffer<f64>,
     bg: shaders::plane_fit::bind_groups::BindGroup2,
-    size: [u32; 2],
 }
 impl ScratchBuffers {
     fn new(device: &Device, size: [u32; 2]) -> Self {
@@ -515,7 +481,7 @@ impl ImageComputePipeline {
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
-        let size = image.current_size();
+        let size = image.size();
 
         pass.set_pipeline(&self.copy_image);
         wts(pass);
@@ -559,7 +525,7 @@ impl ImageComputePipeline {
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
-        let size = image.current_size();
+        let size = image.size();
 
         pass.set_pipeline(&self.copy_image);
         wts(pass);
@@ -613,7 +579,7 @@ impl ImageComputePipeline {
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
-        let size = image.current_size();
+        let size = image.size();
 
         pass.set_pipeline(&self.copy_image_transpose);
         wts(pass);
@@ -667,7 +633,7 @@ impl ImageComputePipeline {
         self.scratch_buffers.bg.set(pass);
         image.image_src_bg.set(pass);
         image.normalize_bg.set(pass);
-        let size = image.current_size();
+        let size = image.size();
         pass.push_debug_group("line mean subtract");
         pass.set_pipeline(&self.copy_image_transpose);
         wts(pass);

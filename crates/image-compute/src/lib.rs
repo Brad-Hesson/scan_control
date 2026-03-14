@@ -41,7 +41,6 @@ mod tests {
             &queue,
             Some("original_image"),
             SIZE,
-            HEIGHT as u32,
             init_data,
         );
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
@@ -118,7 +117,6 @@ mod tests {
             &queue,
             Some("original_image"),
             SIZE,
-            HEIGHT as u32,
             |_| {},
         );
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;

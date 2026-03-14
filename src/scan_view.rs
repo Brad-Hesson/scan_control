@@ -147,7 +147,6 @@ impl ScanImage {
             &image_encoder.wgpu_state.queue,
             None,
             size,
-            lines,
             init_fn,
         )));
         Self {
@@ -194,9 +193,6 @@ impl ScanImage {
         resp
     }
     pub fn write_texture(&self, image_encoder: &ImageEncoder, fit_type: FitType) {
-        if self.current_size()[1] == 0 {
-            return;
-        }
         let mut encoder = image_encoder
             .wgpu_state
             .device
@@ -263,7 +259,6 @@ impl ScanImage {
         }
     }
     pub fn clear(&self, image_encoder: &mut ImageEncoder) {
-        self.image_data.write().clear_lines();
         let mut encoder = image_encoder
             .wgpu_state
             .device
@@ -283,16 +278,6 @@ impl ScanImage {
         *self.norm_data.write() = None;
         *self.fit_data.write() = None;
     }
-    pub fn write_lines(
-        &mut self,
-        image_encoder: &ImageEncoder,
-        num_lines: usize,
-        callback: impl Fn(&mut [f32]),
-    ) -> Result<(), WriteLinesError> {
-        self.image_data
-            .write()
-            .write_lines(&image_encoder.wgpu_state.queue, num_lines, callback)
-    }
     pub fn write_lines_range(
         &mut self,
         image_encoder: &ImageEncoder,
@@ -303,14 +288,11 @@ impl ScanImage {
             .write()
             .write_lines_range(&image_encoder.wgpu_state.queue, lines, callback)
     }
-    pub fn current_size(&self) -> [u32; 2] {
-        self.image_data.read().current_size()
+    pub fn size(&self) -> [u32; 2] {
+        self.image_data.read().size()
     }
     pub fn capacity(&self) -> [u32; 2] {
-        self.image_data.read().capacity()
-    }
-    pub fn is_full(&self) -> bool {
-        self.current_size() == self.image_data.read().capacity()
+        self.image_data.read().size()
     }
 }
 #[derive(Clone)]

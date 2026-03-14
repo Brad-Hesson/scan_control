@@ -53,8 +53,8 @@ fn copy_image(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(WGS)
 fn copy_image_transpose(@builtin(global_invocation_id) global_index: vec3<u32>) {
     let i = global_index.x;
-    let i_t = index_transpose(i);
     if i >= image_len() { return; }
+    let i_t = index_transpose(i);
 
     if is_nan_f32(image_in[i]){
         planarize_out[i_t] = 0.;
@@ -75,6 +75,7 @@ fn reduce_image(
     @builtin(num_workgroups) num_workgroups: vec3<u32>
 ) {
     let read_idx = num_workgroups.x * local_index + workgroup_id.x;
+
     if read_idx < image_len() {
         z_sum_wg[local_index] = planarize_out[read_idx];
         z_count_wg[local_index] = count[read_idx];
@@ -111,10 +112,11 @@ fn reduce_image_lines(
 
     let local_id = vec2(local_index % WGS_SQUARE, local_index / WGS_SQUARE);
     let col_read_idx = num_workgroups.y * local_id.y + workgroup_id.y;
+    let read_idx = idx(sz, global_id.x, col_read_idx);
 
     if col_read_idx < sz.y {
-        z_sum_wg[local_index] = planarize_out[idx(sz, global_id.x, col_read_idx)];
-        z_count_wg[local_index] = count[idx(sz, global_id.x, col_read_idx)];
+        z_sum_wg[local_index] = planarize_out[read_idx];
+        z_count_wg[local_index] = count[read_idx];
     } else {
         z_sum_wg[local_index] = 0.;
         z_count_wg[local_index] = 0u;
@@ -129,10 +131,10 @@ fn reduce_image_lines(
         stride >>= 1u;
     }
     if local_id.y == 0u {
-        planarize_out[idx(sz, global_id.x, col_read_idx)] = z_sum_wg[local_id.x];
-        count[idx(sz, global_id.x, col_read_idx)] = z_count_wg[local_id.x];
+        planarize_out[read_idx] = z_sum_wg[local_id.x];
+        count[read_idx] = z_count_wg[local_id.x];
     } else {
-        count[idx(sz, global_id.x, col_read_idx)] = 0u;
+        count[read_idx] = 0u;
     }
 }
 
@@ -142,7 +144,7 @@ fn generate_sums_plane(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if i >= image_len() { return; }
 
     let basis = calc_basis(i);
-    if is_nan_f32(image_in[i]){
+    if is_nan_f64(basis.z){
         xz[i] = 0.;
         yz[i] = 0.;
         xx[i] = 0.;
@@ -158,11 +160,11 @@ fn generate_sums_plane(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(WGS)
 fn generate_sums_lines(@builtin(global_invocation_id) global_index: vec3<u32>) {
     let i = global_index.x;
-    let i_t = index_transpose(i);
     if i >= image_len() { return; }
+    let i_t = index_transpose(i);
 
     let basis = calc_basis_lines(i);
-    if is_nan_f32(image_in[i]){
+    if is_nan_f64(basis.z){
         xz[i_t] = 0.;
         xx[i_t] = 0.;
     } else {
@@ -222,12 +224,14 @@ fn reduce_sums_lines(
     let sz = image_size.yx;
     if global_id.x >= sz.x { return; }
 
-    let local_id = vec2(local_index % WGS_SQUARE, local_index / WGS_SQUARE);
-    let col_read_idx = num_workgroups.y * local_id.y + workgroup_id.y;
+    let local_row = local_index / WGS_SQUARE;
+    let local_col = local_index % WGS_SQUARE;
+    let col_read_idx = num_workgroups.y * local_row + workgroup_id.y;
+    let read_idx = idx(sz, global_id.x, col_read_idx);
 
     if col_read_idx < sz.y {
-        xz_sum_wg[local_index] = xz[idx(sz, global_id.x, col_read_idx)];
-        xx_sum_wg[local_index] = xx[idx(sz, global_id.x, col_read_idx)];
+        xz_sum_wg[local_index] = xz[read_idx];
+        xx_sum_wg[local_index] = xx[read_idx];
     } else {
         xz_sum_wg[local_index] = 0.;
         xx_sum_wg[local_index] = 0.;
@@ -235,15 +239,15 @@ fn reduce_sums_lines(
     }
     var stride = WGS_SQUARE >> 1u;
     while stride > 0u {
-        if local_id.y >= stride {break;}
+        if local_row >= stride {break;}
         workgroupBarrier();
         xz_sum_wg[local_index] += xz_sum_wg[local_index + stride * WGS_SQUARE];
         xx_sum_wg[local_index] += xx_sum_wg[local_index + stride * WGS_SQUARE];
         stride >>= 1u;
     }
-    if local_id.y == 0u {
-        xz[idx(sz, global_id.x, col_read_idx)] = xz_sum_wg[local_id.x];
-        xx[idx(sz, global_id.x, col_read_idx)] = xx_sum_wg[local_id.x];
+    if local_row == 0u {
+        xz[read_idx] = xz_sum_wg[local_col];
+        xx[read_idx] = xx_sum_wg[local_col];
     }
 }
 
@@ -388,7 +392,7 @@ fn index_transpose(i: u32) -> u32{
 fn store_value(i: u32, value: f64){
     let global_coord = vec2(i % image_size.x, i / image_size.x);
     textureStore(texture_out, global_coord, vec4(f32(value), 0.0, 0.0, 0.0));
-    if is_nan_f32(image_in[i]){
+    if is_nan_f64(value){
         mins[i] = f64_pos_infinity();
         maxs[i] = f64_neg_infinity();
         std_devs[i] = 0.;
@@ -404,83 +408,56 @@ fn image_len() -> u32 {
 }
 
 fn calc_basis(i: u32) -> vec3<f64> {
-    if is_nan_f32(image_in[i]) {
-        return vec3(
-            f64_nan(),
-            f64_nan(),
-            f64_nan()
-        );
-    }
-    let w = image_size.x;
-    let h = image_size.y;
-    let x = i % w;
-    let y = i / w;
-    return vec3(
-        mean_center(w, x),
-        mean_center(h, y),
-        f64(image_in[i]) - planarize_out[0] / f64(count[0])
-    );
+    let width = image_size.x;
+    let height = image_size.y;
+    let row = i / width;
+    let col = i % width;
+    let mean = planarize_out[0] / f64(count[0]);
+    return vec3(norm_pos(width, col), norm_pos(height, row), f64(image_in[i]) - mean);
 }
 
 fn calc_basis_lines(i: u32) -> vec3<f64> {
-    if is_nan_f32(image_in[i]) {
-        return vec3(
-            f64_nan(),
-            f64_nan(),
-            f64_nan()
-        );
-    }
-    let w = image_size.x;
-    let x = i % w;
-    let y = i / w;
-    return vec3(
-        mean_center(w, x),
-        0,
-        f64(image_in[i]) - planarize_out[y] / f64(count[y])
-    );
+    let width = image_size.x;
+    let row = i / width;
+    let col = i % width;
+    let mean = planarize_out[row] / f64(count[row]);
+    return vec3(norm_pos(width, col), 0, f64(image_in[i]) - mean);
 }
 
-fn mean_center(w: u32, x: u32) -> f64 {
-    return f64(i32(x << 1u) - i32(w) + i32(1u)) / 2;
+fn norm_pos(w: u32, x: u32) -> f64 {
+    return f64(i32(x << 1u) - i32(w) + i32(1u)) / f64((w << 1u) - 2u);
 }
 
 fn idx(sz: vec2<u32>, x: u32, y: u32) -> u32 {
     return x + y * sz.x;
 }
 
-fn make_u64(hi: u32, lo: u32) -> u64 {
-    return (u64(hi) << 32u) | u64(lo);
-}
-
 fn f64_pos_infinity() -> f64 {
-    let bits = make_u64(0x7FF00000u, 0x00000000u);
-    return bitcast<f64>(bits);
+    return bitcast<f64>(u64(0x7FF00000u) << 32u);
 }
 
 fn f64_neg_infinity() -> f64 {
-    let bits = make_u64(0xFFF00000u, 0x00000000u);
-    return bitcast<f64>(bits);
+    return bitcast<f64>(u64(0xFFF00000u) << 32u);
 }
 
 fn f64_nan() -> f64 {
-    let exp: u64 = u64((1u << 11u) - 1u);
-    let mantissa: u64 = u64(1u) << 51u;
-    let sign: u64 = u64(0u);
-    let bits: u64 = (sign << 63u) | (exp << 52u) | mantissa;
-    return bitcast<f64>(bits);
-}
-
-fn is_nan_f32(x: f32) -> bool {
-    let bits: u32 = bitcast<u32>(x);
-    let exp: u32 = (bits >> 23u) & 0xffu;
-    let mantissa: u32 = bits & 0x007fffffu;
-    return (exp == 0xffu) && (mantissa != 0u);
+    return bitcast<f64>(u64(0x7FF80000u) << 32u);
 }
 
 fn f32_nan() -> f32 {
-    let exp: u32 = 0xffu;
-    let mantissa: u32 = 1u << 22u;
-    let sign: u32 = 0u;
-    let bits: u32 = (sign << 31u) | (exp << 23u) | mantissa;
-    return bitcast<f32>(bits);
+    return bitcast<f32>(0x7FC00000u);
+}
+
+fn is_nan_f32(x: f32) -> bool {
+    let bits = bitcast<u32>(x);
+    let exp  = extractBits(bits, 23u, 8u);
+    let mant = extractBits(bits, 0u, 23u);
+    return exp == 0xFFu && mant != 0u;
+}
+
+fn is_nan_f64(x: f64) -> bool {
+    let bits = bitcast<u64>(x);
+    let exp = extractBits(bits, 52u, 11u);
+    let mant = extractBits(bits, 0u, 52u);
+    return exp == u64(0x7FFu) && mant != u64(0u);
 }
