@@ -28,16 +28,10 @@ impl BorderRectangle {
         };
         if self.dashed {
             points.push(p0.into());
-            if t.matrix2.determinant() < 0. {
-                points.reverse();
-            }
             ctx.ui
                 .painter()
                 .add(dashes_from_line(&points, stroke, 6., 3.));
         } else {
-            if t.matrix2.determinant() < 0. {
-                points.reverse();
-            }
             ctx.ui.painter().add(PathShape {
                 points,
                 closed: true,
