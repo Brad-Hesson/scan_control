@@ -20,8 +20,8 @@ use sxmfile::SXM;
 use uuid::Uuid;
 
 use crate::{
-    app::{OkTraceExt, StaticImage},
-    scan_view::ImageEncoder,
+    app::OkTraceExt,
+    scan_view::{ImageEncoder, StaticImage},
     utils::response_group::{ResponseGroup, ResponseGroupExt as _, SyncResponse},
 };
 
@@ -212,9 +212,7 @@ impl<'a> LoadHandler for Handler<'a> {
         let sxm = SXM::parse_file(path)
             .with_context(|| format!("failed to load `{}`", path.display()))
             .ok_trace()?;
-        let image = StaticImage::load_sxm(sxm, self.encoder).ok_trace()?;
-        image.update_texture(self.encoder);
-        let file_data = FileData::new(image, path.to_path_buf());
+        let file_data = FileData::new(todo!(), path.to_path_buf());
         let id = self.hasher.hash_file(path).unwrap();
         self.files.insert(id, file_data);
         Some(id)

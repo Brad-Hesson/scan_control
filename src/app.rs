@@ -1,12 +1,8 @@
-use std::path::PathBuf;
-
 use crate::components::file_dialog::ViewportFileDialog;
-// TODO: rename to ImageTree
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::image_menu::ImageMenu;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
-use crate::nanonis_image::NanonisImage;
-use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
+use crate::scan_view::{BorderRectangle, ImageEncoder, NanonisImage, ScanView, StaticImage};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::Color32;
@@ -15,12 +11,8 @@ use egui::{
     ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
-use eyre::{Context, Result};
-use glam::{Affine2, Vec2};
-use image_compute::image_compute::{FitType, NormalizationType};
 use itertools::{izip, Itertools};
-use sxmfile::SXM;
-use tracing::{error, info};
+use tracing::error;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -80,41 +72,15 @@ impl MyApp {
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
         self.undo_queue.push(&mut self.app_state, modifier);
     }
-    fn load_files(&mut self, paths: Vec<PathBuf>) -> Result<()> {
-        let mut imgs = vec![];
-        for path in paths {
-            info!("Trying to load image `{}`", path.display());
-            let sxm_file = sxmfile::SXM::parse_file(&path)?;
-            info!("Loaded image `{}`", path.display());
-            let static_image = StaticImage::load_sxm(sxm_file, &self.image_encoder)?;
-            static_image.update_texture(&mut self.image_encoder);
-            let entry = SelectableEntry::new(static_image, image_list_item);
-            imgs.push(entry);
-        }
-        imgs.sort_by_cached_key(|img| img.image_src.get_datetime().unwrap());
-        self.mod_state(LoadImagesModifier::new(imgs));
-        Ok(())
-    }
-    // fn update_gradient(&mut self) {
-    //     if self.gradient != self.last_gradient {
-    //         self.last_gradient = self.gradient.clone();
-    //         self.scan_view.set_color_map(
-    //             self.gradient
-    //                 .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-    //                 .try_into()
-    //                 .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
-    //         );
-    //     }
-    // }
 }
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app_state.current_scan.update(&mut self.image_encoder);
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
-            self.load_files(paths)
-                .context("file load failed")
-                .ok_trace();
+            // self.load_files(paths)
+            //     .context("file load failed")
+            //     .ok_trace();
         }
         if let Some(path) = self.folder_dialog.take_picked() {
             self.app_state.file_tree.load_dir(&path).ok_trace();
@@ -299,12 +265,7 @@ impl eframe::App for MyApp {
                     .rect
                     .bottom();
                 for image in self.app_state.file_tree.files.iter_selected_mut() {
-                    let name = image
-                        .image
-                        .image_src
-                        .get_name()
-                        .ok_trace()
-                        .unwrap_or("unnamed");
+                    let name = image.image.name();
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
                     new_top = egui::Window::new(name)
@@ -337,61 +298,8 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     app.folder_dialog.update(ctx);
 }
 
-impl ImageMenu for StaticImage {
-    fn fit_type_mut(&mut self) -> &mut FitType {
-        &mut self.fit_type
-    }
-
-    fn image_data_mut(&mut self) -> &mut ScanImage {
-        &mut self.image_data
-    }
-
-    fn norm_type_mut(&mut self) -> &mut crate::components::image_menu::NormType {
-        todo!()
-    }
-
-    fn std_dev_mut(&mut self) -> &mut f32 {
-        todo!()
-    }
-}
-
-pub struct StaticImage {
-    image_data: ScanImage,
-    image_src: SXM,
-    fit_type: FitType,
-}
-impl StaticImage {
-    pub fn load_sxm(sxm_file: SXM, image_encoder: &ImageEncoder) -> Result<Self> {
-        let size = sxm_file.get_image_size()?;
-        let scale = sxm_file.get_scan_range()?;
-        let translation = sxm_file.get_scan_center()?;
-        let transform = Affine2::from_scale_angle_translation(
-            Vec2::from(scale) * 1e9,
-            0.,
-            Vec2::from(translation) * 1e9,
-        );
-        let scan_image = ScanImage::new(
-            image_encoder,
-            size,
-            transform,
-            NormalizationType::MinMax,
-            |data_mut| {
-                data_mut.copy_from_slice(&sxm_file.data[0][0]);
-            },
-        );
-        Ok(Self {
-            image_data: scan_image,
-            image_src: sxm_file,
-            fit_type: FitType::LineFitSubtract,
-        })
-    }
-    pub fn update_texture(&self, image_encoder: &ImageEncoder) {
-        self.image_data.write_texture(image_encoder, self.fit_type);
-    }
-}
-
 fn image_list_item(image: &StaticImage) -> Atoms<'_> {
-    let name = image.image_src.get_name().ok_trace().unwrap_or("unnamed");
+    let name = image.name();
     (
         Image::new(egui::include_image!("../assets/scan_image_icon.png")),
         name,

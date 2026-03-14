@@ -6,10 +6,14 @@ use image_compute::image_compute::ImageComputePipeline;
 mod border;
 mod callbacks;
 mod image;
+mod nanonis_image;
+mod static_image;
 mod view;
 
 pub use border::BorderRectangle;
 pub use image::ScanImage;
+pub use nanonis_image::NanonisImage;
+pub use static_image::StaticImage;
 pub use view::ScanView;
 
 #[derive(Clone)]
@@ -26,7 +30,6 @@ impl ImageEncoder {
         }
     }
 }
-
 
 fn v2(v: impl Into<mint::Vector2<f32>>) -> glam::Vec2 {
     v.into().into()
