@@ -7,7 +7,7 @@ use image_compute::scan_image::{ScanImageBuffers, ScanImagePipeline};
 
 use crate::app::COLOR_MAP_SIZE;
 
-pub(super) struct GlobalCallback {
+pub struct GlobalCallback {
     pub target_format: TextureFormat,
     pub screen_transform: Affine2,
     pub new_color_map: Option<Box<[egui::Color32; COLOR_MAP_SIZE]>>,

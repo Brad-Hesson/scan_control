@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::path::PathBuf;
 
 use crate::components::file_dialog::ViewportFileDialog;
@@ -10,18 +9,18 @@ use crate::nanonis_image::NanonisImage;
 use crate::scan_view::{BorderRectangle, ImageEncoder, ScanImage, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
+use egui::Color32;
 use egui::{
     widgets, Align2, Atoms, Button, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers, Shadow,
     ThemePreference, Ui,
 };
-use egui::{Color32, ComboBox};
 use egui_file_dialog::FileDialog;
 use eyre::{Context, Result};
 use glam::{Affine2, Vec2};
-use image_compute::image_compute::{FitData, FitType, NormalizationType};
+use image_compute::image_compute::{FitType, NormalizationType};
 use itertools::{izip, Itertools};
 use sxmfile::SXM;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -346,15 +345,14 @@ impl ImageMenu for StaticImage {
     fn image_data_mut(&mut self) -> &mut ScanImage {
         &mut self.image_data
     }
-    
+
     fn norm_type_mut(&mut self) -> &mut crate::components::image_menu::NormType {
         todo!()
     }
-    
+
     fn std_dev_mut(&mut self) -> &mut f32 {
         todo!()
     }
-    
 }
 
 pub struct StaticImage {

@@ -1,6 +1,6 @@
 use glam::Affine2;
-use image_compute::image_compute::{FitType, NormalizationType, NormalizeData};
-use nanonis_tcp::{commands::scan::FrameDataGrabResponse, scan_watcher::ScanWatcher, ScanDir};
+use image_compute::image_compute::{FitType, NormalizationType};
+use nanonis_tcp::{commands::scan::FrameDataGrabResponse, scan_watcher::ScanWatcher};
 
 use crate::{
     components::image_menu::{ImageMenu, NormType},
@@ -9,7 +9,7 @@ use crate::{
 
 pub struct NanonisImage {
     pub image_data: ScanImage,
-    scan_watcher: ScanWatcher<WatcherCallback>,
+    _scan_watcher: ScanWatcher<WatcherCallback>,
     nanonis: nanonis_tcp::blocking::NanonisTcp,
     event_rx: std::sync::mpsc::Receiver<Event>,
     transform: Affine2,
@@ -55,7 +55,7 @@ impl NanonisImage {
         let norm_type = NormType::FullScale;
         Self {
             image_data: image,
-            scan_watcher,
+            _scan_watcher: scan_watcher,
             nanonis,
             fit_type,
             event_rx,
@@ -80,7 +80,7 @@ impl NanonisImage {
         let mut updated = false;
         while let Ok(ev) = self.event_rx.try_recv() {
             match ev {
-                Event::Frame { frame, .. } => {
+                Event::Frame { frame } => {
                     updated = true;
                     let new_size = [
                         frame.scan_data.size[1] as u32,
@@ -126,12 +126,10 @@ impl WatcherCallback {
 impl nanonis_tcp::scan_watcher::Callback for WatcherCallback {
     fn frame(
         &mut self,
-        num_lines: usize,
+        _num_lines: usize,
         frame: nanonis_tcp::commands::scan::FrameDataGrabResponse,
     ) {
-        self.event_tx
-            .send(Event::Frame { num_lines, frame })
-            .unwrap();
+        self.event_tx.send(Event::Frame { frame }).unwrap();
         self.ctx.request_repaint();
     }
 
@@ -142,10 +140,7 @@ impl nanonis_tcp::scan_watcher::Callback for WatcherCallback {
 }
 
 pub enum Event {
-    Frame {
-        num_lines: usize,
-        frame: FrameDataGrabResponse,
-    },
+    Frame { frame: FrameDataGrabResponse },
     Clear,
 }
 

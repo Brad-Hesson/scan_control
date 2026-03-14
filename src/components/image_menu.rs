@@ -1,7 +1,7 @@
 use std::{fmt::Display, hash::Hash};
 
 use egui::{ComboBox, DragValue, Ui};
-use image_compute::image_compute::{FitData, FitType, NormalizationType};
+use image_compute::image_compute::{FitData, FitType};
 use itertools::izip;
 use tracing::warn;
 
