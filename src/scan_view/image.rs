@@ -1,7 +1,7 @@
 use std::{ops::RangeBounds, sync::Arc};
 
 use eframe::egui_wgpu;
-use egui::{mutex::RwLock, Pos2, Rect, Response, Sense};
+use egui::{mutex::RwLock, Id, Pos2, Rect, Response, Sense, Ui};
 use glam::Affine2;
 use image_compute::{
     buffers::BufferOpError,
@@ -46,9 +46,11 @@ impl ScanImage {
     pub fn uuid(&self) -> Uuid {
         self.uuid
     }
-    pub fn show(&mut self, ctx: &mut ScanViewCtx) -> Response {
-        let resp = ctx
-            .ui
+    pub fn show(&mut self, ui: &mut Ui) -> Response {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let resp = ui
             .input(|i| i.pointer.latest_pos())
             .and_then(|pos| {
                 let [x, y] =
@@ -60,14 +62,14 @@ impl ScanImage {
                         .abs()
                         .into();
                 (x < 0.5 && y < 0.5).then(|| {
-                    ctx.ui.interact(
+                    ui.interact(
                         ctx.rect,
                         egui::Id::new(self.uuid),
                         Sense::focusable_noninteractive() | Sense::click(),
                     )
                 })
             })
-            .unwrap_or_else(|| neutral_response(ctx.ui, egui::Id::new(self.uuid)));
+            .unwrap_or_else(|| neutral_response(ui, egui::Id::new(self.uuid)));
         let callback = egui_wgpu::Callback::new_paint_callback(
             ctx.rect,
             ImageCallback {
@@ -76,7 +78,7 @@ impl ScanImage {
                 image_buffers: self.image_buffers.clone(),
             },
         );
-        ctx.ui.painter().add(callback);
+        ui.painter().add(callback);
         resp
     }
     pub fn write_texture(&self, image_encoder: &ImageEncoder, fit_type: FitType) {

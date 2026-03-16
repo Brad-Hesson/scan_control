@@ -154,15 +154,15 @@ impl eframe::App for MyApp {
             .show(ctx, |ui| {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
-                let image_resp = self.app_state.scan_view.show(ui, |ctx| {
+                let image_resp = self.app_state.scan_view.show(ui, |ui| {
                     let files = &mut self.app_state.image_list;
                     for i in 0..files.len() {
                         let resp = files[i]
                             .image_data
-                            .show(ctx)
+                            .show(ui)
                             .synchronize(&mut files[i].resp_group);
                         if resp.orig.clicked() {
-                            if ctx.ui.input(|i| i.modifiers.ctrl) {
+                            if ui.input(|i| i.modifiers.ctrl) {
                                 files[i].selected = !files[i].selected;
                             } else {
                                 files.clear_selected();
@@ -175,7 +175,7 @@ impl eframe::App for MyApp {
                                 color: Color32::LIGHT_BLUE,
                                 dashed: false,
                             }
-                            .show(ctx);
+                            .show(ui);
                         }
                         if files[i].selected {
                             BorderRectangle {
@@ -183,23 +183,23 @@ impl eframe::App for MyApp {
                                 color: Color32::GREEN,
                                 dashed: false,
                             }
-                            .show(ctx);
+                            .show(ui);
                         }
                     }
-                    self.app_state.connection.live_image.image_data.show(ctx);
+                    self.app_state.connection.live_image.image_data.show(ui);
                     BorderRectangle {
                         transform: self.app_state.connection.live_image.image_data.transform,
                         color: Color32::RED,
                         dashed: false,
                     }
-                    .show(ctx);
-                    if let Some(image) = files.get_hovered(ctx.ui.ctx()) {
+                    .show(ui);
+                    if let Some(image) = files.get_hovered(ui.ctx()) {
                         BorderRectangle {
                             transform: image.image_data.transform,
                             color: Color32::LIGHT_BLUE,
                             dashed: true,
                         }
-                        .show(ctx);
+                        .show(ui);
                     }
                     for image in files.iter_selected() {
                         BorderRectangle {
@@ -207,7 +207,7 @@ impl eframe::App for MyApp {
                             color: Color32::GREEN,
                             dashed: true,
                         }
-                        .show(ctx);
+                        .show(ui);
                     }
                 });
                 if image_resp.clicked() {

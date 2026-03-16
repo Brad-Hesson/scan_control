@@ -2,7 +2,7 @@ use core::f32;
 use std::mem::MaybeUninit;
 
 use eframe::{egui_wgpu::Callback, wgpu::TextureFormat};
-use egui::{Color32, Response};
+use egui::{Color32, Id, Response, Ui};
 use glam::{Affine2, Vec2};
 
 use crate::{
@@ -20,7 +20,7 @@ impl ScanView {
     pub fn show<R>(
         &mut self,
         ui: &mut egui::Ui,
-        add_contents: impl FnOnce(&mut ScanViewCtx) -> R,
+        add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> Response {
         egui::Frame::canvas(ui.style())
             .show(ui, |ui| {
@@ -35,12 +35,12 @@ impl ScanView {
                         new_color_map: std::mem::take(&mut self.new_color_map),
                     },
                 ));
-                let mut ctx = ScanViewCtx {
-                    ui,
+                let ctx = ScanViewCtx {
                     rect,
                     world_transform: self.world_transform,
                 };
-                add_contents(&mut ctx);
+                ui.data_mut(|map| map.insert_temp(Id::new(()), ctx));
+                add_contents(ui);
                 response
             })
             .inner
@@ -104,8 +104,8 @@ impl ScanView {
     }
 }
 
-pub struct ScanViewCtx<'a> {
-    pub ui: &'a mut egui::Ui,
+#[derive(Clone)]
+pub struct ScanViewCtx {
     pub rect: egui::Rect,
     pub world_transform: Affine2,
 }

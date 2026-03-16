@@ -1,6 +1,6 @@
 use egui::{
     epaint::{ColorMode, PathShape, PathStroke},
-    Color32, Pos2, Shape, StrokeKind,
+    Color32, Id, Pos2, Shape, StrokeKind, Ui,
 };
 use glam::{Affine2, Vec2};
 
@@ -12,7 +12,10 @@ pub struct BorderRectangle {
     pub dashed: bool,
 }
 impl BorderRectangle {
-    pub fn show(&mut self, ctx: &mut ScanViewCtx) {
+    pub fn show(&mut self, ui: &mut Ui) {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
         let t = Affine2::from_translation(v2(ctx.rect.center().to_vec2()))
             * ctx.world_transform
             * self.transform;
@@ -28,11 +31,9 @@ impl BorderRectangle {
         };
         if self.dashed {
             points.push(p0.into());
-            ctx.ui
-                .painter()
-                .add(dashes_from_line(&points, stroke, 6., 3.));
+            ui.painter().add(dashes_from_line(&points, stroke, 6., 3.));
         } else {
-            ctx.ui.painter().add(PathShape {
+            ui.painter().add(PathShape {
                 points,
                 closed: true,
                 fill: Color32::TRANSPARENT,
