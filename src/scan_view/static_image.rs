@@ -9,7 +9,7 @@ pub struct StaticImage {
     pub image_data: ScanImage,
     pub fit_type: FitType,
     pub norm_type: NormType,
-    pub std_dev: f64,
+    pub std_dev: f32,
     pub name: String,
 }
 impl StaticImage {
@@ -31,10 +31,10 @@ impl ImageMenu for StaticImage {
     }
 
     fn norm_type_mut(&mut self) -> &mut crate::components::image_menu::NormType {
-        todo!()
+        &mut self.norm_type
     }
 
     fn std_dev_mut(&mut self) -> &mut f32 {
-        todo!()
+        &mut self.std_dev
     }
 }

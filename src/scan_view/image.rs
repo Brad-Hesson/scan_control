@@ -59,7 +59,7 @@ impl ScanImage {
                         .transform_point2(<[f32; 2]>::from(pos).into())
                         .abs()
                         .into();
-                (x < 1. && y < 1.).then(|| {
+                (x < 0.5 && y < 0.5).then(|| {
                     ctx.ui.interact(
                         ctx.rect,
                         egui::Id::new(self.uuid),

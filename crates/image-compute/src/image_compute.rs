@@ -22,16 +22,16 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub enum NormalizationType {
-    MinMax,
+    FullScale,
     StdDev(f32),
 }
 impl From<NormalizationType> for NormalizeControl {
     fn from(value: NormalizationType) -> Self {
         NormalizeControl {
-            max_min: matches!(value, NormalizationType::MinMax) as u32,
+            max_min: matches!(value, NormalizationType::FullScale) as u32,
             _pad: 0,
             std_dev_mul: match value {
-                NormalizationType::MinMax => 0.,
+                NormalizationType::FullScale => 0.,
                 NormalizationType::StdDev(f) => f,
             },
         }

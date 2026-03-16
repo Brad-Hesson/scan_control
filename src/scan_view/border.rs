@@ -16,10 +16,10 @@ impl BorderRectangle {
         let t = Affine2::from_translation(v2(ctx.rect.center().to_vec2()))
             * ctx.world_transform
             * self.transform;
-        let p0: [f32; 2] = t.transform_point2(Vec2::new(-1.0, -1.0)).into();
-        let p1: [f32; 2] = t.transform_point2(Vec2::new(1.0, -1.0)).into();
-        let p2: [f32; 2] = t.transform_point2(Vec2::new(1.0, 1.0)).into();
-        let p3: [f32; 2] = t.transform_point2(Vec2::new(-1.0, 1.0)).into();
+        let p0: [f32; 2] = t.transform_point2(Vec2::new(-0.5, -0.5)).into();
+        let p1: [f32; 2] = t.transform_point2(Vec2::new(0.5, -0.5)).into();
+        let p2: [f32; 2] = t.transform_point2(Vec2::new(0.5, 0.5)).into();
+        let p3: [f32; 2] = t.transform_point2(Vec2::new(-0.5, 0.5)).into();
         let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
         let stroke = PathStroke {
             width: 2.,

@@ -4,7 +4,7 @@ use nanonis_tcp::{commands::scan::FrameDataGrabResponse, scan_watcher::ScanWatch
 
 use crate::{
     components::image_menu::{ImageMenu, NormType},
-    scan_view::{ImageEncoder, ScanImage},
+    scan_view::{ImageEncoder, ScanImage, StaticImage},
 };
 
 pub struct NanonisImage {
@@ -12,13 +12,13 @@ pub struct NanonisImage {
     _scan_watcher: ScanWatcher<WatcherCallback>,
     nanonis: nanonis_tcp::blocking::NanonisTcp,
     event_rx: std::sync::mpsc::Receiver<Event>,
-    transform: Affine2,
-    fit_type: FitType,
-    norm_type: NormType,
-    std_dev: f32,
+    pub transform: Affine2,
+    pub fit_type: FitType,
+    pub norm_type: NormType,
+    pub std_dev: f32,
 }
 impl NanonisImage {
-    pub fn new(ctx: egui::Context, image_encoder: ImageEncoder) -> Self {
+    pub fn new(ctx: egui::Context, image_encoder: &ImageEncoder) -> Self {
         let mut nanonis = nanonis_tcp::blocking::NanonisTcp::new("localhost:6503").unwrap();
         let buffer = nanonis.scan_buffer_get().unwrap();
         let size = [buffer.px_per_line as u32, buffer.num_lines as u32];
@@ -45,7 +45,7 @@ impl NanonisImage {
             &image_encoder,
             size,
             transform,
-            NormalizationType::MinMax,
+            NormalizationType::FullScale,
             |buf| {
                 buf.copy_from_slice(&frame_data.scan_data.data);
             },
@@ -67,7 +67,7 @@ impl NanonisImage {
     pub fn update(&mut self, encoder: &mut ImageEncoder) {
         self.image_data.transform = self.transform;
         let new_norm_type = match self.norm_type {
-            NormType::FullScale => NormalizationType::MinMax,
+            NormType::FullScale => NormalizationType::FullScale,
             NormType::StdDev => NormalizationType::StdDev(self.std_dev),
         };
         self.image_data.norm_type = new_norm_type;
@@ -103,13 +103,34 @@ impl NanonisImage {
                     }
                 }
                 Event::Clear => {
+                    println!("started");
                     // self.image_data.clear(encoder)
                 }
             }
         }
         if updated {
-            println!("updated");
             self.image_data.write_texture(encoder, self.fit_type);
+        }
+    }
+    pub fn stamp(&mut self, encoder: &mut ImageEncoder) -> StaticImage {
+        let new_norm_type = match self.norm_type {
+            NormType::FullScale => NormalizationType::FullScale,
+            NormType::StdDev => NormalizationType::StdDev(self.std_dev),
+        };
+        let mut image_data = ScanImage::new(
+            encoder,
+            self.image_data.size(),
+            self.transform,
+            new_norm_type,
+            |_| {},
+        );
+        std::mem::swap(&mut image_data, &mut self.image_data);
+        StaticImage {
+            image_data,
+            fit_type: self.fit_type,
+            norm_type: self.norm_type,
+            std_dev: self.std_dev,
+            name: "unnamed".into(),
         }
     }
 }

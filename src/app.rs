@@ -2,6 +2,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::image_menu::ImageMenu;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
+use crate::connection::nanonis_connection::NanonisConnection;
 use crate::scan_view::{BorderRectangle, ImageEncoder, NanonisImage, ScanView, StaticImage};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
@@ -28,7 +29,7 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
-    current_scan: NanonisImage,
+    connection: NanonisConnection,
     file_tree: FileTree,
 }
 
@@ -53,13 +54,13 @@ impl MyApp {
         // );
 
         let image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = NanonisImage::new(cc.egui_ctx.clone(), image_encoder.clone());
+        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
-                current_scan,
+                connection: current_scan,
                 file_tree,
             },
             image_encoder,
@@ -76,7 +77,14 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.app_state.current_scan.update(&mut self.image_encoder);
+        self.app_state
+            .connection
+            .live_image
+            .update(&mut self.image_encoder);
+        for new_image in self.app_state.connection.get_stamps(&self.image_encoder) {
+            let entry = SelectableEntry::new(new_image, |image| image.name().into_atoms());
+            self.app_state.image_list.push(entry);
+        }
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
             // self.load_files(paths)
             //     .context("file load failed")
@@ -110,29 +118,6 @@ impl eframe::App for MyApp {
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
             self.undo_queue.redo(&mut self.app_state);
-        }
-        // if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
-        //     && !self.app_state.current_scan.image_data.is_full()
-        // {
-        //     let current_scan = &mut self.app_state.current_scan;
-        //     let [x, y] = current_scan.image_data.current_size();
-        //     let n = 1;
-        //     current_scan
-        //         .image_data
-        //         .write_lines(&self.image_encoder, n, |buf| {
-        //             buf.copy_from_slice(
-        //                 &current_scan.image_src.data[0][0][x as usize * y as usize..]
-        //                     [..x as usize * n],
-        //             )
-        //         })
-        //         .ok_trace();
-        //     current_scan.update_texture(&mut self.image_encoder);
-        // }
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::C)) {
-            self.app_state
-                .current_scan
-                .image_data
-                .clear(&mut self.image_encoder);
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::Delete)) {
             let idxs = self
@@ -170,49 +155,47 @@ impl eframe::App for MyApp {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
                 let image_resp = self.app_state.scan_view.show(ui, |ctx| {
-                    let file_tree = &mut self.app_state.file_tree;
-                    let files = &mut file_tree.files;
-                    for id in file_tree.tree.iter_files().rev().map(|file| file.data) {
-                        let resp = files[id]
-                            .image
+                    let files = &mut self.app_state.image_list;
+                    for i in 0..files.len() {
+                        let resp = files[i]
                             .image_data
                             .show(ctx)
-                            .synchronize(&mut files[id].resp_group);
+                            .synchronize(&mut files[i].resp_group);
                         if resp.orig.clicked() {
                             if ctx.ui.input(|i| i.modifiers.ctrl) {
-                                files[id].selected = !files[id].selected;
+                                files[i].selected = !files[i].selected;
                             } else {
                                 files.clear_selected();
-                                files[id].selected = true;
+                                files[i].selected = true;
                             }
                         }
                         if resp.sync.hovered() {
                             BorderRectangle {
-                                transform: files[id].image.image_data.transform,
+                                transform: files[i].image_data.transform,
                                 color: Color32::LIGHT_BLUE,
                                 dashed: false,
                             }
                             .show(ctx);
                         }
-                        if files[id].selected {
+                        if files[i].selected {
                             BorderRectangle {
-                                transform: files[id].image.image_data.transform,
+                                transform: files[i].image_data.transform,
                                 color: Color32::GREEN,
                                 dashed: false,
                             }
                             .show(ctx);
                         }
                     }
-                    self.app_state.current_scan.image_data.show(ctx);
+                    self.app_state.connection.live_image.image_data.show(ctx);
                     BorderRectangle {
-                        transform: self.app_state.current_scan.image_data.transform,
+                        transform: self.app_state.connection.live_image.image_data.transform,
                         color: Color32::RED,
                         dashed: false,
                     }
                     .show(ctx);
                     if let Some(image) = files.get_hovered(ctx.ui.ctx()) {
                         BorderRectangle {
-                            transform: image.image.image_data.transform,
+                            transform: image.image_data.transform,
                             color: Color32::LIGHT_BLUE,
                             dashed: true,
                         }
@@ -220,7 +203,7 @@ impl eframe::App for MyApp {
                     }
                     for image in files.iter_selected() {
                         BorderRectangle {
-                            transform: image.image.image_data.transform,
+                            transform: image.image_data.transform,
                             color: Color32::GREEN,
                             dashed: true,
                         }
@@ -228,7 +211,7 @@ impl eframe::App for MyApp {
                     }
                 });
                 if image_resp.clicked() {
-                    self.app_state.file_tree.files.clear_selected();
+                    self.app_state.image_list.clear_selected();
                 };
                 egui::Window::new("Images")
                     .frame(
@@ -244,7 +227,8 @@ impl eframe::App for MyApp {
                     .show(ctx, |ui| {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-                        self.app_state.file_tree.show(ui);
+                        // self.app_state.file_tree.show(ui);
+                        self.app_state.image_list.show(ui);
                     });
                 let mut new_top = egui::Window::new("Current Scan")
                     .frame(
@@ -257,15 +241,17 @@ impl eframe::App for MyApp {
                     .resizable(false)
                     .show(ctx, |ui| {
                         self.app_state
-                            .current_scan
+                            .connection
+                            .live_image
                             .show_image_menu(ui, &mut self.image_encoder);
                     })
                     .unwrap()
                     .response
                     .rect
                     .bottom();
-                for image in self.app_state.file_tree.files.iter_selected_mut() {
-                    let name = image.image.name();
+                let selected = self.app_state.image_list.iter_selected_indexes().collect_vec();
+                for i in selected {
+                    let name = self.app_state.image_list[i].name();
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
                     new_top = egui::Window::new(name)
@@ -274,7 +260,7 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            image.image.show_image_menu(ui, &mut self.image_encoder);
+                            self.app_state.image_list[i].show_image_menu(ui, &mut self.image_encoder);
                         })
                         .unwrap()
                         .response

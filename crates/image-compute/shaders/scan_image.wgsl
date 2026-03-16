@@ -90,10 +90,10 @@ struct VertexOutput {
 };
 
 var<private> verts: array<vec2<f32>, 4> = array(
-    vec2(-1.0, -1.0), // TL
-    vec2(1.0, -1.0),  // TR
-    vec2(-1.0, 1.0),  // BL
-    vec2(1.0, 1.0),   // BR
+    vec2(-0.5, -0.5), // TL
+    vec2(0.5, -0.5),  // TR
+    vec2(-0.5, 0.5),  // BL
+    vec2(0.5, 0.5),   // BR
 );
 
 var<private> uvs: array<vec2<f32>, 4> = array(
