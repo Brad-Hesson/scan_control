@@ -175,7 +175,7 @@ impl ImageComputeBuffers {
             .queue_write(queue, 0, 1, |buf| buf[0] = normalization_type.into())
     }
     pub fn write_lines_range(
-        &mut self,
+        &self,
         queue: &Queue,
         lines: impl RangeBounds<u32>,
         callback: impl Fn(&mut [f32]),

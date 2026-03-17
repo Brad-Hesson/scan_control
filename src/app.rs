@@ -1,9 +1,8 @@
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
-use crate::components::image_menu::ImageMenu;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis_connection::NanonisConnection;
-use crate::scan_view::{BorderRectangle, ImageEncoder, NanonisImage, ScanView, StaticImage};
+use crate::scan_view::{BorderRectangle, ImageEncoder, ScanView, StaticImage};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::Color32;
@@ -77,12 +76,8 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.app_state
-            .connection
-            .live_image
-            .update(&mut self.image_encoder);
-        for new_image in self.app_state.connection.get_stamps(&self.image_encoder) {
-            let entry = SelectableEntry::new(new_image, |image| image.name().into_atoms());
+        for new_image in self.app_state.connection.update(&self.image_encoder) {
+            let entry = SelectableEntry::new(new_image, |image| (&image.name).into_atoms());
             self.app_state.image_list.push(entry);
         }
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
@@ -157,10 +152,7 @@ impl eframe::App for MyApp {
                 let image_resp = self.app_state.scan_view.show(ui, |ui| {
                     let files = &mut self.app_state.image_list;
                     for i in 0..files.len() {
-                        let resp = files[i]
-                            .image_data
-                            .show(ui)
-                            .synchronize(&mut files[i].resp_group);
+                        let resp = files[i].show(ui).synchronize(&mut files[i].resp_group);
                         if resp.orig.clicked() {
                             if ui.input(|i| i.modifiers.ctrl) {
                                 files[i].selected = !files[i].selected;
@@ -171,7 +163,7 @@ impl eframe::App for MyApp {
                         }
                         if resp.sync.hovered() {
                             BorderRectangle {
-                                transform: files[i].image_data.transform,
+                                transform: files[i].transform,
                                 color: Color32::LIGHT_BLUE,
                                 dashed: false,
                             }
@@ -179,23 +171,23 @@ impl eframe::App for MyApp {
                         }
                         if files[i].selected {
                             BorderRectangle {
-                                transform: files[i].image_data.transform,
+                                transform: files[i].transform,
                                 color: Color32::GREEN,
                                 dashed: false,
                             }
                             .show(ui);
                         }
                     }
-                    self.app_state.connection.live_image.image_data.show(ui);
+                    self.app_state.connection.live_image.show(ui);
                     BorderRectangle {
-                        transform: self.app_state.connection.live_image.image_data.transform,
+                        transform: self.app_state.connection.live_image.transform,
                         color: Color32::RED,
                         dashed: false,
                     }
                     .show(ui);
                     if let Some(image) = files.get_hovered(ui.ctx()) {
                         BorderRectangle {
-                            transform: image.image_data.transform,
+                            transform: image.transform,
                             color: Color32::LIGHT_BLUE,
                             dashed: true,
                         }
@@ -203,7 +195,7 @@ impl eframe::App for MyApp {
                     }
                     for image in files.iter_selected() {
                         BorderRectangle {
-                            transform: image.image_data.transform,
+                            transform: image.transform,
                             color: Color32::GREEN,
                             dashed: true,
                         }
@@ -249,9 +241,13 @@ impl eframe::App for MyApp {
                     .response
                     .rect
                     .bottom();
-                let selected = self.app_state.image_list.iter_selected_indexes().collect_vec();
+                let selected = self
+                    .app_state
+                    .image_list
+                    .iter_selected_indexes()
+                    .collect_vec();
                 for i in selected {
-                    let name = self.app_state.image_list[i].name();
+                    let name = &self.app_state.image_list[i].name;
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
                     new_top = egui::Window::new(name)
@@ -260,7 +256,8 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            self.app_state.image_list[i].show_image_menu(ui, &mut self.image_encoder);
+                            self.app_state.image_list[i]
+                                .show_image_menu(ui, &mut self.image_encoder);
                         })
                         .unwrap()
                         .response
@@ -285,7 +282,7 @@ fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
 }
 
 fn image_list_item(image: &StaticImage) -> Atoms<'_> {
-    let name = image.name();
+    let name = &image.name;
     (
         Image::new(egui::include_image!("../assets/scan_image_icon.png")),
         name,

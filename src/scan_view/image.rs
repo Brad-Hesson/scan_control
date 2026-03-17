@@ -46,7 +46,7 @@ impl ScanImage {
     pub fn uuid(&self) -> Uuid {
         self.uuid
     }
-    pub fn show(&mut self, ui: &mut Ui) -> Response {
+    pub fn show(&self, ui: &mut Ui) -> Response {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
@@ -120,7 +120,7 @@ impl ScanImage {
                 .ok();
         }
     }
-    pub fn clear(&self, image_encoder: &mut ImageEncoder) {
+    pub fn clear(&self, image_encoder: &ImageEncoder) {
         let mut encoder = image_encoder
             .wgpu_state
             .device
@@ -140,8 +140,8 @@ impl ScanImage {
         *self.norm_data.write() = None;
         *self.fit_data.write() = None;
     }
-    pub fn write_lines_range(
-        &mut self,
+    pub fn write_lines(
+        &self,
         image_encoder: &ImageEncoder,
         lines: impl RangeBounds<u32>,
         callback: impl Fn(&mut [f32]),
