@@ -223,12 +223,17 @@ async fn line_worker(
     channel_rx: watch::Receiver<Channel>,
 ) {
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
+    let mut wanted_dir = LineDir::Forward;
     loop {
         let resp = conn.scan_wait_end_of_line(None).await.unwrap();
         let ScanMovementType::Scan(line_dir) = resp.movement_type else {
             continue;
         };
         scanning.send_replace(true);
+        if line_dir != wanted_dir {
+            continue;
+        }
+        toggle_dir(&mut wanted_dir);
         let Channel::Channel(ch) = *channel_rx.borrow() else {
             continue;
         };
@@ -241,6 +246,13 @@ async fn line_worker(
             LineDir::Backward => frame_backward_tx.send_replace(Some(frame)),
         };
         ctx.request_repaint();
+    }
+}
+
+fn toggle_dir(line_dir: &mut LineDir) {
+    match line_dir {
+        LineDir::Forward => *line_dir = LineDir::Backward,
+        LineDir::Backward => *line_dir = LineDir::Forward,
     }
 }
 
