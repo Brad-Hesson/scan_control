@@ -41,6 +41,7 @@ impl ScanView {
                 };
                 ui.data_mut(|map| map.insert_temp(Id::new(()), ctx));
                 add_contents(ui);
+                ui.data_mut(|map| map.remove::<ScanViewCtx>(Id::new(())));
                 response
             })
             .inner
