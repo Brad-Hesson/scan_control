@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    hash::Hash,
+    ops::{Deref, DerefMut},
+};
 
 use egui::{
     AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, Frame, Response, Sense,
@@ -104,14 +107,16 @@ impl<T> DerefMut for SelectableList<T> {
 }
 
 pub struct SelectableEntry<T> {
+    id: egui::Id,
     pub inner: T,
     pub selected: bool,
     pub resp_group: ResponseGroup,
     construct_fn: Box<dyn Fn(&T) -> Atoms>,
 }
 impl<T> SelectableEntry<T> {
-    pub fn new(data: T, construct_fn: impl Fn(&T) -> Atoms + 'static) -> Self {
+    pub fn new(id_salt: impl Hash, data: T, construct_fn: impl Fn(&T) -> Atoms + 'static) -> Self {
         Self {
+            id: egui::Id::new(id_salt),
             inner: data,
             selected: false,
             construct_fn: Box::new(construct_fn),

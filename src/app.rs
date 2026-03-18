@@ -13,6 +13,7 @@ use egui::{
 use egui_file_dialog::FileDialog;
 use itertools::{izip, Itertools};
 use tracing::error;
+use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -76,8 +77,22 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        for new_image in self.app_state.connection.update(&self.image_encoder) {
-            let entry = SelectableEntry::new(new_image, |image| (&image.name).into_atoms());
+        if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
+            let mut new_name_num = 0;
+            let mut new_name = new_image.name.clone();
+            while self
+                .app_state
+                .image_list
+                .iter()
+                .any(|entry| entry.name == new_name)
+            {
+                new_name_num += 1;
+                new_name = format!("{}({})", new_image.name, new_name_num);
+            }
+            new_image.name = new_name;
+            let entry = SelectableEntry::new(Uuid::new_v4(), new_image, |image| {
+                (&image.name).into_atoms()
+            });
             self.app_state.image_list.push(entry);
         }
         if let Some(paths) = self.file_dialog.take_picked_multiple() {

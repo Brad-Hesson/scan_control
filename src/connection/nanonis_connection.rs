@@ -23,7 +23,6 @@ pub struct NanonisConnection {
     signal_names_rx: watch::Receiver<Vec<String>>,
     channels_rx: watch::Receiver<Vec<usize>>,
     channel_tx: watch::Sender<Option<usize>>,
-    num_stamps: usize,
 }
 
 impl NanonisConnection {
@@ -101,7 +100,6 @@ impl NanonisConnection {
             signal_names_rx,
             channels_rx,
             channel_tx,
-            num_stamps: 0,
         }
     }
     pub fn update(&mut self, encoder: &ImageEncoder) -> Option<StaticImage> {
@@ -159,8 +157,7 @@ impl NanonisConnection {
                     self.live_image.transform,
                     |buf| buf.copy_from_slice(&frame.scan_data.data),
                 );
-                image.name = format!("{}({})", self.live_image.name, self.num_stamps);
-                self.num_stamps += 1;
+                image.name = self.live_image.name.clone();
                 image.norm_type = self.live_image.norm_type;
                 image.std_dev = self.live_image.std_dev;
                 image.fit_type = self.live_image.fit_type;
