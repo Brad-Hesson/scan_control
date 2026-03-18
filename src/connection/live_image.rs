@@ -11,13 +11,13 @@ use itertools::{izip, Itertools};
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
     scan_view::{
-        static_image::{MetersFmt, NormType},
-        ImageEncoder, ScanImage,
+        static_image::{MetersFmt, NormType, StaticImage},
+        ImageEncoder, ScanViewImage,
     },
 };
 
 pub struct LiveImage {
-    image_data: ScanImage,
+    image_data: ScanViewImage,
     pub transform: Affine2,
     pub norm_type: NormType,
     pub std_dev: f32,
@@ -29,6 +29,32 @@ pub struct LiveImage {
 }
 
 impl LiveImage {
+    pub fn new(
+        encoder: &ImageEncoder,
+        size: [u32; 2],
+        transform: Affine2,
+        init_fn: impl FnOnce(&mut [f32]),
+    ) -> Self {
+        let norm_type = NormType::FullScale;
+        let std_dev = 0.;
+        Self {
+            image_data: ScanViewImage::new(
+                encoder,
+                size,
+                transform,
+                norm_type.combined(std_dev),
+                init_fn,
+            ),
+            transform,
+            norm_type,
+            std_dev,
+            fit_type: FitType::MeanSubtract,
+            channel: Channel::None,
+            signal_names: Vec::new(),
+            channel_opts: Vec::new(),
+            name: String::new(),
+        }
+    }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
         self.image_data.norm_type = self.norm_type.combined(self.std_dev);
         self.image_data.transform = self.transform;
@@ -119,13 +145,30 @@ impl LiveImage {
         self.image_data.size()
     }
     pub fn resize(&mut self, image_encoder: &ImageEncoder, new_size: [u32; 2]) {
-        self.image_data = ScanImage::new(
+        self.image_data = ScanViewImage::new(
             image_encoder,
             new_size,
             self.transform,
             self.norm_type.combined(self.std_dev),
             |buf| buf.fill(f32::NAN),
         );
+    }
+    pub fn stamp(&self, encoder: &ImageEncoder, init_fn: impl FnOnce(&mut [f32])) -> StaticImage {
+        let channel = match self.channel {
+            Channel::None => "None".into(),
+            Channel::Channel(ch) => self
+                .signal_names
+                .get(ch)
+                .map(String::from)
+                .unwrap_or_default(),
+        };
+        let mut image = StaticImage::new(encoder, self.size(), self.transform, channel, init_fn);
+        image.fit_type = self.fit_type;
+        image.norm_type = self.norm_type;
+        image.std_dev = self.std_dev;
+        image.name = self.name.clone();
+        image.update_texture(encoder);
+        image
     }
 }
 

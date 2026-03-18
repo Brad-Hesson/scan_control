@@ -1,28 +1,25 @@
 use core::f32;
-use std::{fmt::Display, hash::Hash, ops::RangeBounds};
+use std::fmt::Display;
 
-use egui::{ComboBox, DragValue, Response, Ui};
+use egui::{DragValue, Response, Ui};
 use glam::Affine2;
-use image_compute::{
-    buffers::BufferOpError,
-    image_compute::{FitData, FitType, NormalizationType},
-};
-use itertools::{izip, Itertools};
+use image_compute::image_compute::{FitData, FitType, NormalizationType};
+use itertools::izip;
 use tracing::warn;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
-    scan_view::{ImageEncoder, ScanImage},
+    scan_view::{ImageEncoder, ScanViewImage},
 };
 
 pub struct StaticImage {
-    image_data: ScanImage,
+    image_data: ScanViewImage,
+    channel: String,
     pub transform: Affine2,
     pub fit_type: FitType,
     pub norm_type: NormType,
     pub std_dev: f32,
     pub name: String,
-    pub channel: String,
 }
 impl StaticImage {
     pub fn new(
@@ -32,7 +29,7 @@ impl StaticImage {
         channel: String,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
-        let image_data = ScanImage::new(
+        let image_data = ScanViewImage::new(
             encoder,
             size,
             transform,
@@ -52,28 +49,8 @@ impl StaticImage {
     pub fn size(&self) -> [u32; 2] {
         self.image_data.size()
     }
-    pub fn write_lines(
-        &self,
-        image_encoder: &ImageEncoder,
-        lines: impl RangeBounds<u32>,
-        callback: impl Fn(&mut [f32]),
-    ) -> Result<(), BufferOpError> {
-        self.image_data.write_lines(image_encoder, lines, callback)
-    }
     pub fn update_texture(&self, image_encoder: &ImageEncoder) {
         self.image_data.write_texture(image_encoder, self.fit_type);
-    }
-    pub fn clear_texture(&self, image_encoder: &ImageEncoder) {
-        self.image_data.clear(image_encoder);
-    }
-    pub fn resize(&mut self, image_encoder: &ImageEncoder, new_size: [u32; 2]) {
-        self.image_data = ScanImage::new(
-            image_encoder,
-            new_size,
-            self.transform,
-            self.norm_type.combined(self.std_dev),
-            |buf| buf.fill(f32::NAN),
-        );
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
         self.image_data.norm_type = self.norm_type.combined(self.std_dev);
@@ -83,7 +60,12 @@ impl StaticImage {
     pub fn show_image_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-        if combo_box(ui, (self.image_data.uuid(), "fit type"), &mut self.fit_type, &()) {
+        if combo_box(
+            ui,
+            (self.image_data.uuid(), "fit type"),
+            &mut self.fit_type,
+            &(),
+        ) {
             self.update_texture(image_encoder);
         }
         ui.horizontal(|ui| {
@@ -91,7 +73,7 @@ impl StaticImage {
                 ui,
                 (self.image_data.uuid(), "norm type"),
                 &mut self.norm_type,
-                &()
+                &(),
             );
             if self.norm_type == NormType::StdDev {
                 ui.add(
@@ -136,13 +118,13 @@ impl StaticImage {
 
 impl ComboBoxType for FitType {
     type Ctx = ();
-    
+
     fn opt_atoms(&self, _ctx: &()) -> impl Into<egui::WidgetText> {
         match self {
             FitType::MeanSubtract => "Raw",
-            FitType::PlaneFitSubtract => "Subtract Average",
-            FitType::LineMeanSubtract => "Subtract Linear Fit",
-            FitType::LineFitSubtract => "Subtract Plane",
+            FitType::LineMeanSubtract => "Subtract Average",
+            FitType::LineFitSubtract => "Subtract Linear Fit",
+            FitType::PlaneFitSubtract => "Subtract Plane",
         }
     }
 
@@ -155,7 +137,6 @@ impl ComboBoxType for FitType {
         ]
         .into_iter()
     }
-    
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

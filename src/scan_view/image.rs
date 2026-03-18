@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder};
 
-pub struct ScanImage {
+pub struct ScanViewImage {
     uuid: Uuid,
     pub transform: Affine2,
     pub norm_type: NormalizationType,
@@ -19,7 +19,7 @@ pub struct ScanImage {
     pub fit_data: Arc<RwLock<Option<FitData>>>,
     pub norm_data: Arc<RwLock<Option<NormalizeData>>>,
 }
-impl ScanImage {
+impl ScanViewImage {
     pub fn new(
         image_encoder: &ImageEncoder,
         size: [u32; 2],

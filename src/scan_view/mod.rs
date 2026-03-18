@@ -10,7 +10,7 @@ pub mod static_image;
 mod view;
 
 pub use border::BorderRectangle;
-pub use image::ScanImage;
+pub use image::ScanViewImage;
 pub use view::ScanView;
 
 #[derive(Clone)]

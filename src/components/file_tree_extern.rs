@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::{
     app::OkTraceExt,
-    scan_view::{ImageEncoder, StaticImage},
+    scan_view::{static_image::StaticImage, ImageEncoder},
     utils::response_group::{ResponseGroup, ResponseGroupExt as _, SyncResponse},
 };
 

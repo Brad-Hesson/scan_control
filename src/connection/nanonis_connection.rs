@@ -5,13 +5,13 @@ use itertools::{izip, Itertools};
 use nanonis_tcp::{
     blocking,
     commands::scan::{FrameDataGrabResponse, FrameGetResponse},
-    nonblocking, LineDir, ScanMovementType,
+    nonblocking, LineDir, ScanDir, ScanMovementType,
 };
 use tokio::{net::ToSocketAddrs, sync::watch};
 
 use crate::{
     connection::live_image::{Channel, LiveImage},
-    scan_view::{static_image::StaticImage, ImageEncoder},
+    scan_view::{static_image::StaticImage, ImageEncoder, ScanViewImage},
 };
 
 pub struct NanonisConnection {
@@ -86,8 +86,8 @@ impl NanonisConnection {
         ));
 
         let mut live_image =
-            StaticImage::new(image_encoder, size, transform, |buf| buf.fill(f32::NAN));
-        live_image.channels = channels;
+            LiveImage::new(image_encoder, size, transform, |buf| buf.fill(f32::NAN));
+        live_image.channel_opts = channels;
         live_image.signal_names = sig_names;
         live_image.name = name;
         live_image.channel = channel;
@@ -154,22 +154,12 @@ impl NanonisConnection {
         let mut stamp = None;
         if self.stamp_rx.has_changed().unwrap() {
             if let Some(frame) = self.stamp_rx.borrow_and_update().as_ref() {
-                self.live_image.clear_texture(encoder);
-                let mut image = StaticImage::new(
-                    encoder,
-                    self.live_image.size(),
-                    self.live_image.transform,
-                    |buf| buf.copy_from_slice(&frame.scan_data.data),
-                );
-                image.name = self.live_image.name.clone();
-                image.norm_type = self.live_image.norm_type;
-                image.std_dev = self.live_image.std_dev;
-                image.fit_type = self.live_image.fit_type;
-                image.update_texture(encoder);
-                image.channel = self.live_image.channel;
-                image.signal_names = self.live_image.signal_names.clone();
-                image.channels = vec![self.live_image.channel.unwrap()];
-                stamp = Some(image);
+                assert_eq!(frame.scan_data.size[0] as u32, self.live_image.size()[0]);
+                assert_eq!(frame.scan_data.size[1] as u32, self.live_image.size()[1]);
+                stamp = Some(
+                    self.live_image
+                        .stamp(encoder, |buf| buf.copy_from_slice(&frame.scan_data.data)),
+                )
             }
         }
         stamp
@@ -187,37 +177,35 @@ async fn scan_worker(
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
     loop {
         conn.scan_wait_end_of_scan(None).await.unwrap();
-        if *scanning.borrow() && channel_rx.borrow().is_some() {
-            scanning.send_replace(false);
-            if let Some(frame) = frame_rx.borrow().as_ref() {
-                if !frame_early_exited(frame) {
-                    stamp_tx.send_replace(Some(frame.clone()));
-                    ctx.request_repaint();
-                }
-            }
+        if !*scanning.borrow() {
+            continue;
         }
+        scanning.send_replace(false);
+        if !channel_rx.borrow().is_some() {
+            continue;
+        }
+        let frame_borrow = frame_rx.borrow();
+        let Some(frame) = frame_borrow.as_ref() else {
+            continue;
+        };
+        if frame_early_exited(frame) {
+            continue;
+        }
+        stamp_tx.send_replace(Some(frame.clone()));
+        ctx.request_repaint();
     }
 }
 
 fn frame_early_exited(frame: &FrameDataGrabResponse) -> bool {
+    let [height, width] = frame.scan_data.size;
+    let lines = frame.scan_data.data.iter().step_by(width);
     let trailing_nans = match frame.scan_dir {
-        nanonis_tcp::ScanDir::Down => frame
-            .scan_data
-            .data
-            .iter()
-            .step_by(frame.scan_data.size[1])
-            .rev()
-            .take_while(|v| v.is_nan())
-            .count(),
-        nanonis_tcp::ScanDir::Up => frame
-            .scan_data
-            .data
-            .iter()
-            .step_by(frame.scan_data.size[1])
-            .take_while(|v| v.is_nan())
-            .count(),
+        ScanDir::Down => lines.rev().take_while(|v| v.is_nan()).count(),
+        ScanDir::Up => lines.take_while(|v| v.is_nan()).count(),
     };
-    trailing_nans > frame.scan_data.size[0] * 3 / 4
+    let num_lines = height - trailing_nans;
+    let min_lines = height / 4;
+    num_lines < min_lines
 }
 
 async fn line_worker(
