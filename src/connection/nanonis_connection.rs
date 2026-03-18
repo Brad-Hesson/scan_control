@@ -9,11 +9,14 @@ use nanonis_tcp::{
 };
 use tokio::{net::ToSocketAddrs, sync::watch};
 
-use crate::scan_view::{ImageEncoder, StaticImage};
+use crate::{
+    connection::live_image::{Channel, LiveImage},
+    scan_view::{static_image::StaticImage, ImageEncoder},
+};
 
 pub struct NanonisConnection {
     conn: blocking::NanonisTcp,
-    pub live_image: StaticImage,
+    pub live_image: LiveImage,
     stamp_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
     frame_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
     scanning_rx: watch::Receiver<bool>,
@@ -22,7 +25,7 @@ pub struct NanonisConnection {
     name_rx: watch::Receiver<String>,
     signal_names_rx: watch::Receiver<Vec<String>>,
     channels_rx: watch::Receiver<Vec<usize>>,
-    channel_tx: watch::Sender<Option<usize>>,
+    channel_tx: watch::Sender<Channel>,
 }
 
 impl NanonisConnection {
@@ -43,8 +46,9 @@ impl NanonisConnection {
             .collect_vec();
         let channel = channels
             .contains(&30)
-            .then_some(30)
-            .or(channels.get(0).copied());
+            .then_some(Channel::Channel(30))
+            .or(channels.get(0).copied().map(Channel::Channel))
+            .unwrap_or(Channel::None);
 
         let (stamp_tx, stamp_rx) = watch::channel(None);
         let (frame_tx, frame_rx) = watch::channel(None);
@@ -115,7 +119,7 @@ impl NanonisConnection {
         // check updates on watch vars
         if self.channels_rx.has_changed().unwrap() {
             let channels = self.channels_rx.borrow_and_update().clone();
-            self.live_image.channels = channels;
+            self.live_image.channel_opts = channels;
         }
         if self.signal_names_rx.has_changed().unwrap() {
             let signal_names = self.signal_names_rx.borrow_and_update().clone();
@@ -177,7 +181,7 @@ async fn scan_worker(
     ctx: egui::Context,
     stamp_tx: watch::Sender<Option<FrameDataGrabResponse>>,
     scanning: watch::Sender<bool>,
-    channel_rx: watch::Receiver<Option<usize>>,
+    channel_rx: watch::Receiver<Channel>,
     frame_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
 ) {
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
@@ -221,16 +225,17 @@ async fn line_worker(
     ctx: egui::Context,
     scanning: watch::Sender<bool>,
     frame_tx: watch::Sender<Option<FrameDataGrabResponse>>,
-    channel_rx: watch::Receiver<Option<usize>>,
+    channel_rx: watch::Receiver<Channel>,
 ) {
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
     loop {
         let resp = conn.scan_wait_end_of_line(None).await.unwrap();
         match resp.movement_type {
             ScanMovementType::Scan(LineDir::Forward) => {
-                if channel_rx.borrow().is_some() {
+                let maybe_channel = *channel_rx.borrow();
+                if let Channel::Channel(ch) = maybe_channel {
                     scanning.send_replace(true);
-                    let channel = channel_rx.borrow().unwrap() as u32;
+                    let channel = ch as u32;
                     let frame = conn
                         .scan_frame_data_grab(channel, LineDir::Forward)
                         .await

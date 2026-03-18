@@ -2,7 +2,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis_connection::NanonisConnection;
-use crate::scan_view::{BorderRectangle, ImageEncoder, ScanView, StaticImage};
+use crate::scan_view::{BorderRectangle, ImageEncoder, ScanView, static_image::StaticImage};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::Color32;

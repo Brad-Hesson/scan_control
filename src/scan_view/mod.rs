@@ -6,12 +6,11 @@ use image_compute::image_compute::ImageComputePipeline;
 mod border;
 mod callbacks;
 mod image;
-mod static_image;
+pub mod static_image;
 mod view;
 
 pub use border::BorderRectangle;
 pub use image::ScanImage;
-pub use static_image::StaticImage;
 pub use view::ScanView;
 
 #[derive(Clone)]

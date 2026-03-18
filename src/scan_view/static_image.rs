@@ -10,7 +10,10 @@ use image_compute::{
 use itertools::{izip, Itertools};
 use tracing::warn;
 
-use crate::scan_view::{ImageEncoder, ScanImage};
+use crate::{
+    components::combo_box::{combo_box, ComboBoxType},
+    scan_view::{ImageEncoder, ScanImage},
+};
 
 pub struct StaticImage {
     image_data: ScanImage,
@@ -19,15 +22,14 @@ pub struct StaticImage {
     pub norm_type: NormType,
     pub std_dev: f32,
     pub name: String,
-    pub signal_names: Vec<String>,
-    pub channels: Vec<usize>,
-    pub channel: Option<usize>,
+    pub channel: String,
 }
 impl StaticImage {
     pub fn new(
         encoder: &ImageEncoder,
         size: [u32; 2],
         transform: Affine2,
+        channel: String,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
         let image_data = ScanImage::new(
@@ -44,9 +46,7 @@ impl StaticImage {
             std_dev: 1.5,
             transform,
             name: String::new(),
-            signal_names: vec![],
-            channels: vec![],
-            channel: None,
+            channel,
         }
     }
     pub fn size(&self) -> [u32; 2] {
@@ -71,32 +71,27 @@ impl StaticImage {
             image_encoder,
             new_size,
             self.transform,
-            norm_type(self.norm_type, self.std_dev),
+            self.norm_type.combined(self.std_dev),
             |buf| buf.fill(f32::NAN),
         );
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
-        self.image_data.norm_type = norm_type(self.norm_type, self.std_dev);
+        self.image_data.norm_type = self.norm_type.combined(self.std_dev);
         self.image_data.transform = self.transform;
         self.image_data.show(ui)
     }
     pub fn show_image_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-        if combo_box(
-            ui,
-            (self.image_data.uuid(), "fit type"),
-            FIT_TYPES,
-            &mut self.fit_type,
-        ) {
+        if combo_box(ui, (self.image_data.uuid(), "fit type"), &mut self.fit_type, &()) {
             self.update_texture(image_encoder);
         }
         ui.horizontal(|ui| {
             combo_box(
                 ui,
                 (self.image_data.uuid(), "norm type"),
-                NORM_TYPES,
                 &mut self.norm_type,
+                &()
             );
             if self.norm_type == NormType::StdDev {
                 ui.add(
@@ -106,17 +101,7 @@ impl StaticImage {
                 );
             }
         });
-        let channel_opts = self
-            .channels
-            .iter()
-            .map(|ch| (Some(*ch), self.signal_names[*ch].as_str()))
-            .collect_vec();
-        combo_box(
-            ui,
-            (self.image_data.uuid(), "channel"),
-            channel_opts.as_slice(),
-            &mut self.channel,
-        );
+        ui.label(format!("Channel: {}", self.channel));
         let norm = self.image_data.norm_data.read();
         let fit = self.image_data.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
@@ -149,57 +134,84 @@ impl StaticImage {
     }
 }
 
-fn norm_type(norm_type: NormType, std_dev: f32) -> NormalizationType {
-    match norm_type {
-        NormType::FullScale => image_compute::image_compute::NormalizationType::FullScale,
-        NormType::StdDev => image_compute::image_compute::NormalizationType::StdDev(std_dev),
+impl ComboBoxType for FitType {
+    type Ctx = ();
+    
+    fn opt_atoms(&self, _ctx: &()) -> impl Into<egui::WidgetText> {
+        match self {
+            FitType::MeanSubtract => "Raw",
+            FitType::PlaneFitSubtract => "Subtract Average",
+            FitType::LineMeanSubtract => "Subtract Linear Fit",
+            FitType::LineFitSubtract => "Subtract Plane",
+        }
     }
-}
 
-const FIT_TYPES: &[(FitType, &'static str)] = &[
-    (FitType::MeanSubtract, "Raw"),
-    (FitType::LineMeanSubtract, "Subtract Average"),
-    (FitType::LineFitSubtract, "Subtract Linear Fit"),
-    (FitType::PlaneFitSubtract, "Subtract Plane"),
-];
-const NORM_TYPES: &[(NormType, &'static str)] = &[
-    (NormType::FullScale, "Full Scale"),
-    (NormType::StdDev, "Std Dev"),
-];
+    fn options(_ctx: &()) -> impl Iterator<Item = Self> {
+        [
+            FitType::MeanSubtract,
+            FitType::LineMeanSubtract,
+            FitType::LineFitSubtract,
+            FitType::PlaneFitSubtract,
+        ]
+        .into_iter()
+    }
+    
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum NormType {
     FullScale,
     StdDev,
 }
+impl NormType {
+    pub fn combined(&self, std_dev: f32) -> NormalizationType {
+        match self {
+            NormType::FullScale => image_compute::image_compute::NormalizationType::FullScale,
+            NormType::StdDev => image_compute::image_compute::NormalizationType::StdDev(std_dev),
+        }
+    }
+}
+impl ComboBoxType for NormType {
+    type Ctx = ();
+    fn opt_atoms(&self, _ctx: &()) -> impl Into<egui::WidgetText> {
+        match self {
+            NormType::FullScale => "Full Scale",
+            NormType::StdDev => "Std Dev",
+        }
+    }
 
-fn combo_box<'s, T: Eq + Copy>(
-    ui: &mut Ui,
-    id_salt: impl Hash,
-    types: &[(T, &'s str)],
-    data: &mut T,
-) -> bool {
-    ComboBox::new((id_salt, "combo_box"), "")
-        .selected_text(
-            types
-                .iter()
-                .find(|(t, _)| *t == *data)
-                .map(|(_, name)| *name)
-                .unwrap_or(""),
-        )
-        .show_ui(ui, |ui| {
-            let clicked = types
-                .iter()
-                .map(|(typ, name)| ui.selectable_value(data, *typ, *name))
-                .any(|resp| resp.clicked());
-            clicked
-        })
-        .inner
-        .is_some_and(|clicked| clicked)
+    fn options(_ctx: &()) -> impl Iterator<Item = Self> {
+        [NormType::FullScale, NormType::StdDev].into_iter()
+    }
 }
 
+// pub fn combo_box<'s, T: Eq + Copy>(
+//     ui: &mut Ui,
+//     id_salt: impl Hash,
+//     types: &[(T, &'s str)],
+//     data: &mut T,
+// ) -> bool {
+//     ComboBox::new((id_salt, "combo_box"), "")
+//         .selected_text(
+//             types
+//                 .iter()
+//                 .find(|(t, _)| *t == *data)
+//                 .map(|(_, name)| *name)
+//                 .unwrap_or(""),
+//         )
+//         .show_ui(ui, |ui| {
+//             let clicked = types
+//                 .iter()
+//                 .map(|(typ, name)| ui.selectable_value(data, *typ, *name))
+//                 .any(|resp| resp.clicked());
+//             clicked
+//         })
+//         .inner
+//         .is_some_and(|clicked| clicked)
+// }
+
 #[repr(transparent)]
-struct MetersFmt(f32);
+pub struct MetersFmt(pub f32);
 impl Display for MetersFmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mag = (self.0.abs().log10() / 3.).floor();
