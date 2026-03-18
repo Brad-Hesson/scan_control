@@ -18,7 +18,8 @@ pub struct NanonisConnection {
     conn: blocking::NanonisTcp,
     pub live_image: LiveImage,
     stamp_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
-    frame_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
+    frame_forward_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
+    frame_backward_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
     scanning_rx: watch::Receiver<bool>,
     transform_rx: watch::Receiver<Affine2>,
     size_rx: watch::Receiver<[u32; 2]>,
@@ -51,7 +52,8 @@ impl NanonisConnection {
             .unwrap_or(Channel::None);
 
         let (stamp_tx, stamp_rx) = watch::channel(None);
-        let (frame_tx, frame_rx) = watch::channel(None);
+        let (frame_forward_tx, frame_forward_rx) = watch::channel(None);
+        let (frame_backward_tx, frame_backward_rx) = watch::channel(None);
         let (scanning_tx, scanning_rx) = watch::channel(true);
         let (transform_tx, transform_rx) = watch::channel(transform);
         let (size_tx, size_rx) = watch::channel(size);
@@ -66,13 +68,15 @@ impl NanonisConnection {
             stamp_tx,
             scanning_tx.clone(),
             channel_rx.clone(),
-            frame_rx.clone(),
+            frame_forward_rx.clone(),
+            frame_backward_rx.clone(),
         ));
         tokio::spawn(line_worker(
             (address.as_ref().to_string(), 6503),
             ctx.clone(),
             scanning_tx,
-            frame_tx,
+            frame_forward_tx,
+            frame_backward_tx,
             channel_rx,
         ));
         tokio::spawn(status_worker(
@@ -96,7 +100,8 @@ impl NanonisConnection {
             size_rx,
             transform_rx,
             stamp_rx,
-            frame_rx,
+            frame_forward_rx,
+            frame_backward_rx,
             live_image,
             scanning_rx,
             conn,
@@ -139,8 +144,8 @@ impl NanonisConnection {
             self.live_image.transform = *self.transform_rx.borrow_and_update();
         }
         // Check for new live frames
-        if self.frame_rx.has_changed().unwrap() {
-            if let Some(frame) = self.frame_rx.borrow_and_update().as_ref() {
+        if self.frame_forward_rx.has_changed().unwrap() {
+            if let Some(frame) = self.frame_forward_rx.borrow_and_update().as_ref() {
                 self.live_image
                     .write_lines(encoder, .., |buf| {
                         buf.copy_from_slice(&frame.scan_data.data)
@@ -172,7 +177,8 @@ async fn scan_worker(
     stamp_tx: watch::Sender<Option<FrameDataGrabResponse>>,
     scanning: watch::Sender<bool>,
     channel_rx: watch::Receiver<Channel>,
-    frame_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
+    frame_forward_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
+    frame_backward_rx: watch::Receiver<Option<FrameDataGrabResponse>>,
 ) {
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
     loop {
@@ -184,7 +190,7 @@ async fn scan_worker(
         if !channel_rx.borrow().is_some() {
             continue;
         }
-        let frame_borrow = frame_rx.borrow();
+        let frame_borrow = frame_forward_rx.borrow();
         let Some(frame) = frame_borrow.as_ref() else {
             continue;
         };
@@ -212,32 +218,29 @@ async fn line_worker(
     addr: impl ToSocketAddrs,
     ctx: egui::Context,
     scanning: watch::Sender<bool>,
-    frame_tx: watch::Sender<Option<FrameDataGrabResponse>>,
+    frame_forward_tx: watch::Sender<Option<FrameDataGrabResponse>>,
+    frame_backward_tx: watch::Sender<Option<FrameDataGrabResponse>>,
     channel_rx: watch::Receiver<Channel>,
 ) {
     let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
     loop {
         let resp = conn.scan_wait_end_of_line(None).await.unwrap();
-        match resp.movement_type {
-            ScanMovementType::Scan(LineDir::Forward) => {
-                let maybe_channel = *channel_rx.borrow();
-                if let Channel::Channel(ch) = maybe_channel {
-                    scanning.send_replace(true);
-                    let channel = ch as u32;
-                    let frame = conn
-                        .scan_frame_data_grab(channel, LineDir::Forward)
-                        .await
-                        .unwrap();
-                    frame_tx.send_replace(Some(frame));
-                    ctx.request_repaint();
-                }
-            }
-            ScanMovementType::StartOfScan => {
-                scanning.send_replace(true);
-                ctx.request_repaint();
-            }
-            _ => {}
-        }
+        let ScanMovementType::Scan(line_dir) = resp.movement_type else {
+            continue;
+        };
+        scanning.send_replace(true);
+        let Channel::Channel(ch) = *channel_rx.borrow() else {
+            continue;
+        };
+        let frame = conn
+            .scan_frame_data_grab(ch as u32, line_dir)
+            .await
+            .unwrap();
+        match line_dir {
+            LineDir::Forward => frame_forward_tx.send_replace(Some(frame)),
+            LineDir::Backward => frame_backward_tx.send_replace(Some(frame)),
+        };
+        ctx.request_repaint();
     }
 }
 
