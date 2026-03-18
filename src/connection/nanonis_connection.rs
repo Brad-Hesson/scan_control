@@ -187,10 +187,10 @@ async fn scan_worker(
     loop {
         conn.scan_wait_end_of_scan(None).await.unwrap();
         if *scanning.borrow() && channel_rx.borrow().is_some() {
-            scanning.send(false).unwrap();
+            scanning.send_replace(false);
             if let Some(frame) = frame_rx.borrow().as_ref() {
                 if !frame_early_exited(frame) {
-                    stamp_tx.send(Some(frame.clone())).unwrap();
+                    stamp_tx.send_replace(Some(frame.clone()));
                     ctx.request_repaint();
                 }
             }
@@ -232,18 +232,18 @@ async fn line_worker(
         match resp.movement_type {
             ScanMovementType::Scan(LineDir::Forward) => {
                 if channel_rx.borrow().is_some() {
-                    scanning.send(true).unwrap();
+                    scanning.send_replace(true);
                     let channel = channel_rx.borrow().unwrap() as u32;
                     let frame = conn
                         .scan_frame_data_grab(channel, LineDir::Forward)
                         .await
                         .unwrap();
-                    frame_tx.send(Some(frame)).unwrap();
+                    frame_tx.send_replace(Some(frame));
                     ctx.request_repaint();
                 }
             }
             ScanMovementType::StartOfScan => {
-                scanning.send(true).unwrap();
+                scanning.send_replace(true);
                 ctx.request_repaint();
             }
             _ => {}

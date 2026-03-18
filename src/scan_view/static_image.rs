@@ -74,7 +74,6 @@ impl StaticImage {
             norm_type(self.norm_type, self.std_dev),
             |buf| buf.fill(f32::NAN),
         );
-        self.clear_texture(image_encoder);
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
         self.image_data.norm_type = norm_type(self.norm_type, self.std_dev);
