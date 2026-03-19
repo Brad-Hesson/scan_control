@@ -11,7 +11,7 @@ use tokio::{net::ToSocketAddrs, sync::watch};
 
 use crate::{
     connection::live_image::{Channel, LiveImage},
-    scan_view::{static_image::StaticImage, ImageEncoder, ScanViewImage},
+    scan_view::{static_image::StaticImage, ImageEncoder},
 };
 
 pub struct NanonisConnection {
@@ -89,8 +89,7 @@ impl NanonisConnection {
             channels_tx,
         ));
 
-        let mut live_image =
-            LiveImage::new(image_encoder, size, transform, |buf| buf.fill(f32::NAN));
+        let mut live_image = LiveImage::new(image_encoder, size, transform);
         live_image.channel_opts = channels;
         live_image.signal_names = sig_names;
         live_image.name = name;
@@ -147,11 +146,21 @@ impl NanonisConnection {
         if self.frame_forward_rx.has_changed().unwrap() {
             if let Some(frame) = self.frame_forward_rx.borrow_and_update().as_ref() {
                 self.live_image
-                    .write_lines(encoder, .., |buf| {
+                    .write_lines_forward(encoder, .., |buf| {
                         buf.copy_from_slice(&frame.scan_data.data)
                     })
                     .unwrap();
-                self.live_image.update_texture(encoder);
+                self.live_image.update_texture_forward(encoder);
+            }
+        }
+        if self.frame_backward_rx.has_changed().unwrap() {
+            if let Some(frame) = self.frame_backward_rx.borrow_and_update().as_ref() {
+                self.live_image
+                    .write_lines_backward(encoder, .., |buf| {
+                        buf.copy_from_slice(&frame.scan_data.data)
+                    })
+                    .unwrap();
+                self.live_image.update_texture_backward(encoder);
             }
         }
 
@@ -159,12 +168,13 @@ impl NanonisConnection {
         let mut stamp = None;
         if self.stamp_rx.has_changed().unwrap() {
             if let Some(frame) = self.stamp_rx.borrow_and_update().as_ref() {
-                assert_eq!(frame.scan_data.size[0] as u32, self.live_image.size()[0]);
-                assert_eq!(frame.scan_data.size[1] as u32, self.live_image.size()[1]);
-                stamp = Some(
-                    self.live_image
-                        .stamp(encoder, |buf| buf.copy_from_slice(&frame.scan_data.data)),
-                )
+                let size = [
+                    frame.scan_data.size[0] as u32,
+                    frame.scan_data.size[1] as u32,
+                ];
+                stamp = Some(self.live_image.stamp(encoder, size, |buf| {
+                    buf.copy_from_slice(&frame.scan_data.data)
+                }))
             }
         }
         stamp
@@ -190,8 +200,8 @@ async fn scan_worker(
         if !channel_rx.borrow().is_some() {
             continue;
         }
-        let frame_borrow = frame_forward_rx.borrow();
-        let Some(frame) = frame_borrow.as_ref() else {
+        let frame_forward_borrow = frame_forward_rx.borrow();
+        let Some(frame) = frame_forward_borrow.as_ref() else {
             continue;
         };
         if frame_early_exited(frame) {

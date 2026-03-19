@@ -54,7 +54,7 @@ impl MyApp {
         // );
 
         let image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "icecube");
+        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
         Self {
             app_state: AppState {

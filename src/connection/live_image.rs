@@ -1,3 +1,4 @@
+use core::f32;
 use std::ops::RangeBounds;
 
 use egui::{DragValue, Response, Ui, WidgetText};
@@ -7,6 +8,7 @@ use image_compute::{
     image_compute::{FitData, FitType},
 };
 use itertools::{izip, Itertools};
+use nanonis_tcp::LineDir;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
@@ -17,7 +19,9 @@ use crate::{
 };
 
 pub struct LiveImage {
-    image_data: ScanViewImage,
+    forward_image_data: ScanViewImage,
+    backward_image_data: ScanViewImage,
+    pub line_dir: LineDir,
     pub transform: Affine2,
     pub norm_type: NormType,
     pub std_dev: f32,
@@ -29,25 +33,28 @@ pub struct LiveImage {
 }
 
 impl LiveImage {
-    pub fn new(
-        encoder: &ImageEncoder,
-        size: [u32; 2],
-        transform: Affine2,
-        init_fn: impl FnOnce(&mut [f32]),
-    ) -> Self {
+    pub fn new(encoder: &ImageEncoder, size: [u32; 2], transform: Affine2) -> Self {
         let norm_type = NormType::FullScale;
         let std_dev = 0.;
         Self {
-            image_data: ScanViewImage::new(
+            forward_image_data: ScanViewImage::new(
                 encoder,
                 size,
                 transform,
                 norm_type.combined(std_dev),
-                init_fn,
+                |buf| buf.fill(f32::NAN),
+            ),
+            backward_image_data: ScanViewImage::new(
+                encoder,
+                size,
+                transform,
+                norm_type.combined(std_dev),
+                |buf| buf.fill(f32::NAN),
             ),
             transform,
             norm_type,
             std_dev,
+            line_dir: LineDir::Forward,
             fit_type: FitType::MeanSubtract,
             channel: Channel::None,
             signal_names: Vec::new(),
@@ -56,25 +63,35 @@ impl LiveImage {
         }
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
-        self.image_data.norm_type = self.norm_type.combined(self.std_dev);
-        self.image_data.transform = self.transform;
-        self.image_data.show(ui)
+        match self.line_dir {
+            LineDir::Forward => {
+                self.forward_image_data.norm_type = self.norm_type.combined(self.std_dev);
+                self.forward_image_data.transform = self.transform;
+                self.forward_image_data.show(ui)
+            }
+            LineDir::Backward => {
+                self.backward_image_data.norm_type = self.norm_type.combined(self.std_dev);
+                self.backward_image_data.transform = self.transform;
+                self.backward_image_data.show(ui)
+            }
+        }
     }
     pub fn show_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
         if combo_box(
             ui,
-            (self.image_data.uuid(), "fit type"),
+            (self.forward_image_data.uuid(), "fit type"),
             &mut self.fit_type,
             &(),
         ) {
-            self.update_texture(image_encoder);
+            self.update_texture_forward(image_encoder);
+            self.update_texture_backward(image_encoder);
         }
         ui.horizontal(|ui| {
             combo_box(
                 ui,
-                (self.image_data.uuid(), "norm type"),
+                (self.forward_image_data.uuid(), "norm type"),
                 &mut self.norm_type,
                 &(),
             );
@@ -93,12 +110,24 @@ impl LiveImage {
             .collect_vec();
         combo_box(
             ui,
-            (self.image_data.uuid(), "channel"),
+            (self.forward_image_data.uuid(), "channel"),
             &mut self.channel,
             &channel_opts,
         );
-        let norm = self.image_data.norm_data.read();
-        let fit = self.image_data.fit_data.read();
+        combo_box(
+            ui,
+            (self.forward_image_data.uuid(), "line_dir"),
+            &mut self.line_dir,
+            &(),
+        );
+        let norm = match self.line_dir {
+            LineDir::Forward => self.forward_image_data.norm_data.read(),
+            LineDir::Backward => self.backward_image_data.norm_data.read(),
+        };
+        let fit = match self.line_dir {
+            LineDir::Forward => self.forward_image_data.fit_data.read(),
+            LineDir::Backward => self.backward_image_data.fit_data.read(),
+        };
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
             let mean = fit.mean();
             ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));
@@ -127,25 +156,48 @@ impl LiveImage {
             }
         }
     }
-    pub fn update_texture(&self, image_encoder: &ImageEncoder) {
-        self.image_data.write_texture(image_encoder, self.fit_type);
+    pub fn update_texture_forward(&self, image_encoder: &ImageEncoder) {
+        self.forward_image_data
+            .write_texture(image_encoder, self.fit_type);
+    }
+    pub fn update_texture_backward(&self, image_encoder: &ImageEncoder) {
+        self.backward_image_data
+            .write_texture(image_encoder, self.fit_type);
     }
     pub fn clear_texture(&self, image_encoder: &ImageEncoder) {
-        self.image_data.clear(image_encoder);
+        self.forward_image_data.clear(image_encoder);
+        self.backward_image_data.clear(image_encoder);
     }
-    pub fn write_lines(
+    pub fn write_lines_forward(
         &self,
         image_encoder: &ImageEncoder,
         lines: impl RangeBounds<u32>,
         callback: impl Fn(&mut [f32]),
     ) -> Result<(), BufferOpError> {
-        self.image_data.write_lines(image_encoder, lines, callback)
+        self.forward_image_data
+            .write_lines(image_encoder, lines, callback)
+    }
+    pub fn write_lines_backward(
+        &self,
+        image_encoder: &ImageEncoder,
+        lines: impl RangeBounds<u32>,
+        callback: impl Fn(&mut [f32]),
+    ) -> Result<(), BufferOpError> {
+        self.backward_image_data
+            .write_lines(image_encoder, lines, callback)
     }
     pub fn size(&self) -> [u32; 2] {
-        self.image_data.size()
+        self.forward_image_data.size()
     }
     pub fn resize(&mut self, image_encoder: &ImageEncoder, new_size: [u32; 2]) {
-        self.image_data = ScanViewImage::new(
+        self.forward_image_data = ScanViewImage::new(
+            image_encoder,
+            new_size,
+            self.transform,
+            self.norm_type.combined(self.std_dev),
+            |buf| buf.fill(f32::NAN),
+        );
+        self.backward_image_data = ScanViewImage::new(
             image_encoder,
             new_size,
             self.transform,
@@ -153,7 +205,12 @@ impl LiveImage {
             |buf| buf.fill(f32::NAN),
         );
     }
-    pub fn stamp(&self, encoder: &ImageEncoder, init_fn: impl FnOnce(&mut [f32])) -> StaticImage {
+    pub fn stamp(
+        &self,
+        encoder: &ImageEncoder,
+        size: [u32; 2],
+        init_fn: impl FnOnce(&mut [f32]),
+    ) -> StaticImage {
         let channel = match self.channel {
             Channel::None => "None".into(),
             Channel::Channel(ch) => self
@@ -162,7 +219,7 @@ impl LiveImage {
                 .map(String::from)
                 .unwrap_or_default(),
         };
-        let mut image = StaticImage::new(encoder, self.size(), self.transform, channel, init_fn);
+        let mut image = StaticImage::new(encoder, size, self.transform, channel, init_fn);
         image.fit_type = self.fit_type;
         image.norm_type = self.norm_type;
         image.std_dev = self.std_dev;
@@ -197,5 +254,20 @@ impl ComboBoxType for Channel {
 
     fn options(channels: &Self::Ctx) -> impl Iterator<Item = Self> {
         channels.iter().map(|(ch, _)| Channel::Channel(*ch))
+    }
+}
+
+impl ComboBoxType for LineDir {
+    type Ctx = ();
+
+    fn opt_atoms(&self, ctx: &Self::Ctx) -> impl Into<WidgetText> {
+        match self {
+            LineDir::Forward => "Forward",
+            LineDir::Backward => "Backward",
+        }
+    }
+
+    fn options(ctx: &Self::Ctx) -> impl Iterator<Item = Self> {
+        [LineDir::Forward, LineDir::Backward].into_iter()
     }
 }
