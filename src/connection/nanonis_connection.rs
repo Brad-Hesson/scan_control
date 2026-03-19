@@ -169,8 +169,8 @@ impl NanonisConnection {
         if self.stamp_rx.has_changed().unwrap() {
             if let Some(frame) = self.stamp_rx.borrow_and_update().as_ref() {
                 let size = [
-                    frame.scan_data.size[0] as u32,
                     frame.scan_data.size[1] as u32,
+                    frame.scan_data.size[0] as u32,
                 ];
                 stamp = Some(self.live_image.stamp(encoder, size, |buf| {
                     buf.copy_from_slice(&frame.scan_data.data)
