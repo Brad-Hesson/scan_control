@@ -12,6 +12,7 @@ use nanonis_tcp::LineDir;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
+    connection::nanonis_connection::toggle_dir,
     scan_view::{
         static_image::{MetersFmt, NormType, StaticImage},
         ImageEncoder, ScanViewImage,
@@ -114,12 +115,9 @@ impl LiveImage {
             &mut self.channel,
             &channel_opts,
         );
-        combo_box(
-            ui,
-            (self.forward_image_data.uuid(), "line_dir"),
-            &mut self.line_dir,
-            &(),
-        );
+        if ui.button(self.line_dir.opt_atoms(&())).clicked() {
+            toggle_dir(&mut self.line_dir);
+        }
         let norm = match self.line_dir {
             LineDir::Forward => self.forward_image_data.norm_data.read(),
             LineDir::Backward => self.backward_image_data.norm_data.read(),

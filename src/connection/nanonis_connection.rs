@@ -259,7 +259,7 @@ async fn line_worker(
     }
 }
 
-fn toggle_dir(line_dir: &mut LineDir) {
+pub fn toggle_dir(line_dir: &mut LineDir) {
     match line_dir {
         LineDir::Forward => *line_dir = LineDir::Backward,
         LineDir::Backward => *line_dir = LineDir::Forward,
