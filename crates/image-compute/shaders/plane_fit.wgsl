@@ -32,7 +32,6 @@ var<storage, read_write> xx: array<f32>;
 @group(3) @binding(3)
 var<storage, read_write> yy: array<f32>;
 
-
 struct NormalizeData {
     stddev: f32,
     min: f32,
@@ -456,24 +455,29 @@ fn calc_basis(i: u32) -> vec3<f32> {
     let height = image_size.y;
     let row = i / width;
     let col = i % width;
-    let mean = planarize_out[0] / f32(count[0]);
+    let z_mean = planarize_out[0] / f32(count[0]);
     let x_mean = x_sum[0] / f32(count[0]);
     let y_mean = y_sum[0] / f32(count[0]);
-    return vec3(norm_pos(width, col) - x_mean, norm_pos(height, row) - y_mean, image_in[i] - mean);
+    return vec3(
+        norm_pos(width, col) - x_mean,
+        norm_pos(height, row) - y_mean,
+        image_in[i] - z_mean
+    );
 }
 
 fn calc_basis_lines(i: u32) -> vec3<f32> {
     let width = image_size.x;
     let row = i / width;
     let col = i % width;
-    let mean = planarize_out[row] / f32(count[row]);
+    let z_mean = planarize_out[row] / f32(count[row]);
     let x_mean = x_sum[row] / f32(count[row]);
-    return vec3(norm_pos(width, col) - x_mean, 0, image_in[i] - mean);
+    return vec3(
+        norm_pos(width, col) - x_mean,
+        0,
+        image_in[i] - z_mean
+    );
 }
 
-// fn norm_pos(w: u32, x: u32) -> f32 {
-//     return f32(i32(x << 1u) - i32(w) + i32(1u)) / f32((w << 1u) - 2u);
-// }
 fn norm_pos(w: u32, x: u32) -> f32 {
     return f32(x) / f32(w - 1u);
 }
