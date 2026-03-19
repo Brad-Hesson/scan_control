@@ -11,21 +11,27 @@ var<storage, read_write> planarize_out: array<f32>;
 var<storage, read_write> normalize_out: NormalizeData;
 
 @group(2) @binding(0)
-var<storage, read_write> count: array<u32>;
+var<storage, read_write> x_sum: array<f32>;
 @group(2) @binding(1)
-var<storage, read_write> mins: array<f32>;
+var<storage, read_write> y_sum: array<f32>;
 @group(2) @binding(2)
-var<storage, read_write> maxs: array<f32>;
+var<storage, read_write> count: array<u32>;
 @group(2) @binding(3)
-var<storage, read_write> std_devs: array<f32>;
+var<storage, read_write> mins: array<f32>;
 @group(2) @binding(4)
-var<storage, read_write> xz: array<f32>;
+var<storage, read_write> maxs: array<f32>;
 @group(2) @binding(5)
+var<storage, read_write> std_devs: array<f32>;
+
+@group(3) @binding(0)
+var<storage, read_write> xz: array<f32>;
+@group(3) @binding(1)
 var<storage, read_write> yz: array<f32>;
-@group(2) @binding(6)
+@group(3) @binding(2)
 var<storage, read_write> xx: array<f32>;
-@group(2) @binding(7)
+@group(3) @binding(3)
 var<storage, read_write> yy: array<f32>;
+
 
 struct NormalizeData {
     stddev: f32,
@@ -43,9 +49,13 @@ fn copy_image(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if is_nan_f32(image_in[i]) {
         planarize_out[i] = 0.;
+        x_sum[i] = 0.;
+        y_sum[i] = 0.;
         count[i] = 0u;
     } else {
         planarize_out[i] = image_in[i];
+        x_sum[i] = norm_pos(image_size.x, i % image_size.x);
+        y_sum[i] = norm_pos(image_size.y, i / image_size.x);
         count[i] = 1u;
     }
 }
@@ -58,14 +68,18 @@ fn copy_image_transpose(@builtin(global_invocation_id) global_index: vec3<u32>) 
 
     if is_nan_f32(image_in[i]) {
         planarize_out[i_t] = 0.;
+        x_sum[i_t] = 0.;
         count[i_t] = 0u;
     } else {
         planarize_out[i_t] = image_in[i];
+        x_sum[i_t] = norm_pos(image_size.x, i % image_size.x);
         count[i_t] = 1u;
     }
 }
 
 var<workgroup> z_sum_wg: array<f32, WGS>;
+var<workgroup> x_sum_wg: array<f32, WGS>;
+var<workgroup> y_sum_wg: array<f32, WGS>;
 var<workgroup> z_count_wg: array<u32, WGS>;
 @compute @workgroup_size(WGS)
 fn reduce_image(
@@ -78,9 +92,13 @@ fn reduce_image(
 
     if read_idx < image_len() {
         z_sum_wg[local_index] = planarize_out[read_idx];
+        x_sum_wg[local_index] = x_sum[read_idx];
+        y_sum_wg[local_index] = y_sum[read_idx];
         z_count_wg[local_index] = count[read_idx];
     } else {
         z_sum_wg[local_index] = 0.;
+        x_sum_wg[local_index] = 0.;
+        y_sum_wg[local_index] = 0.;
         z_count_wg[local_index] = 0u;
         return;
     }
@@ -89,14 +107,20 @@ fn reduce_image(
         if local_index >= stride { break; }
         workgroupBarrier();
         z_sum_wg[local_index] += z_sum_wg[local_index + stride];
+        x_sum_wg[local_index] += x_sum_wg[local_index + stride];
+        y_sum_wg[local_index] += y_sum_wg[local_index + stride];
         z_count_wg[local_index] += z_count_wg[local_index + stride];
         stride >>= 1u;
     }
     if local_index == 0u {
         planarize_out[read_idx] = z_sum_wg[0];
+        x_sum[read_idx] = x_sum_wg[0];
+        y_sum[read_idx] = y_sum_wg[0];
         count[read_idx] = z_count_wg[0];
     } else {
         planarize_out[read_idx] = 0.;
+        x_sum[read_idx] = 0.;
+        y_sum[read_idx] = 0.;
         count[read_idx] = 0u;
     }
 }
@@ -117,9 +141,11 @@ fn reduce_image_lines(
 
     if col_read_idx < sz.y {
         z_sum_wg[local_index] = planarize_out[read_idx];
+        x_sum_wg[local_index] = x_sum[read_idx];
         z_count_wg[local_index] = count[read_idx];
     } else {
         z_sum_wg[local_index] = 0.;
+        x_sum_wg[local_index] = 0.;
         z_count_wg[local_index] = 0u;
         return;
     }
@@ -128,14 +154,17 @@ fn reduce_image_lines(
         if local_id.y >= stride { break; }
         workgroupBarrier();
         z_sum_wg[local_index] += z_sum_wg[local_index + stride * WGS_SQUARE];
+        x_sum_wg[local_index] += x_sum_wg[local_index + stride * WGS_SQUARE];
         z_count_wg[local_index] += z_count_wg[local_index + stride * WGS_SQUARE];
         stride >>= 1u;
     }
     if local_id.y == 0u {
         planarize_out[read_idx] = z_sum_wg[local_id.x];
+        x_sum[read_idx] = x_sum_wg[local_id.x];
         count[read_idx] = z_count_wg[local_id.x];
     } else {
         planarize_out[read_idx] = 0.;
+        x_sum[read_idx] = 0.;
         count[read_idx] = 0u;
     }
 }
@@ -428,7 +457,9 @@ fn calc_basis(i: u32) -> vec3<f32> {
     let row = i / width;
     let col = i % width;
     let mean = planarize_out[0] / f32(count[0]);
-    return vec3(norm_pos(width, col), norm_pos(height, row), image_in[i] - mean);
+    let x_mean = x_sum[0] / f32(count[0]);
+    let y_mean = y_sum[0] / f32(count[0]);
+    return vec3(norm_pos(width, col) - x_mean, norm_pos(height, row) - y_mean, image_in[i] - mean);
 }
 
 fn calc_basis_lines(i: u32) -> vec3<f32> {
@@ -436,11 +467,15 @@ fn calc_basis_lines(i: u32) -> vec3<f32> {
     let row = i / width;
     let col = i % width;
     let mean = planarize_out[row] / f32(count[row]);
-    return vec3(norm_pos(width, col), 0, image_in[i] - mean);
+    let x_mean = x_sum[row] / f32(count[row]);
+    return vec3(norm_pos(width, col) - x_mean, 0, image_in[i] - mean);
 }
 
+// fn norm_pos(w: u32, x: u32) -> f32 {
+//     return f32(i32(x << 1u) - i32(w) + i32(1u)) / f32((w << 1u) - 2u);
+// }
 fn norm_pos(w: u32, x: u32) -> f32 {
-    return f32(i32(x << 1u) - i32(w) + i32(1u)) / f32((w << 1u) - 2u);
+    return f32(x) / f32(w - 1u);
 }
 
 fn idx(sz: vec2<u32>, x: u32, y: u32) -> u32 {

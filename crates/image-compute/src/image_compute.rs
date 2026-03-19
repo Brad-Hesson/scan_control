@@ -324,15 +324,18 @@ impl FitData {
 #[derive(Clone)]
 struct ScratchBuffers {
     size: [u32; 2],
+    x_sum: StorageBuffer<f64>,
+    y_sum: StorageBuffer<f64>,
     count_buf: StorageBuffer<u32>,
+    mins: StorageBuffer<f64>,
+    maxs: StorageBuffer<f64>,
+    std_devs: StorageBuffer<f64>,
     xz: StorageBuffer<f64>,
     yz: StorageBuffer<f64>,
     xx: StorageBuffer<f64>,
     yy: StorageBuffer<f64>,
-    mins: StorageBuffer<f64>,
-    maxs: StorageBuffer<f64>,
-    std_devs: StorageBuffer<f64>,
-    bg: Arc<shaders::plane_fit::bind_groups::BindGroup2>,
+    bg_2: Arc<shaders::plane_fit::bind_groups::BindGroup2>,
+    bg_3: Arc<shaders::plane_fit::bind_groups::BindGroup3>,
 }
 impl ScratchBuffers {
     fn new(device: &Device, size: [u32; 2]) -> Self {
@@ -352,28 +355,39 @@ impl ScratchBuffers {
                 |_| {},
             )
         };
+        let x_sum = mk_buffer("x_sum");
+        let y_sum = mk_buffer("y_sum");
+        let mins = mk_buffer("mins");
+        let maxs = mk_buffer("maxs");
+        let std_devs = mk_buffer("std_devs");
         let xz = mk_buffer("xz");
         let yz = mk_buffer("yz");
         let xx = mk_buffer("xx");
         let yy = mk_buffer("yy");
-        let mins = mk_buffer("mins");
-        let maxs = mk_buffer("maxs");
-        let std_devs = mk_buffer("std_devs");
         Self {
             size,
-            bg: Arc::new(shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
+            bg_2: Arc::new(shaders::plane_fit::bind_groups::BindGroup2::from_bindings(
                 device,
                 shaders::plane_fit::bind_groups::BindGroupLayout2 {
-                    xz: xz.as_entire_buffer_binding(),
-                    yz: yz.as_entire_buffer_binding(),
-                    xx: xx.as_entire_buffer_binding(),
-                    yy: yy.as_entire_buffer_binding(),
+                    x_sum: x_sum.as_entire_buffer_binding(),
+                    y_sum: y_sum.as_entire_buffer_binding(),
                     count: count_buf.as_entire_buffer_binding(),
                     mins: mins.as_entire_buffer_binding(),
                     maxs: maxs.as_entire_buffer_binding(),
                     std_devs: std_devs.as_entire_buffer_binding(),
                 },
             )),
+            bg_3: Arc::new(shaders::plane_fit::bind_groups::BindGroup3::from_bindings(
+                device,
+                shaders::plane_fit::bind_groups::BindGroupLayout3 {
+                    xz: xz.as_entire_buffer_binding(),
+                    yz: yz.as_entire_buffer_binding(),
+                    xx: xx.as_entire_buffer_binding(),
+                    yy: yy.as_entire_buffer_binding(),
+                },
+            )),
+            x_sum,
+            y_sum,
             xz,
             yz,
             xx,
@@ -500,7 +514,8 @@ impl ImageComputePipeline {
                 info!("Reallocating scratch buffers to {:?}", image_buffers.size);
                 *scratch = ScratchBuffers::new(device, image_buffers.size);
             }
-            scratch.bg.set(pass);
+            scratch.bg_2.set(pass);
+            scratch.bg_3.set(pass);
         }
         image_buffers.image_src_bg.set(pass);
         image_buffers.normalize_bg.set(pass);
@@ -548,7 +563,8 @@ impl ImageComputePipeline {
                 info!("Reallocating scratch buffers to {:?}", image_buffers.size);
                 *scratch = ScratchBuffers::new(device, image_buffers.size);
             }
-            scratch.bg.set(pass);
+            scratch.bg_2.set(pass);
+            scratch.bg_3.set(pass);
         }
         image_buffers.image_src_bg.set(pass);
         image_buffers.normalize_bg.set(pass);
@@ -606,7 +622,8 @@ impl ImageComputePipeline {
                 info!("Reallocating scratch buffers to {:?}", image_buffers.size);
                 *scratch = ScratchBuffers::new(device, image_buffers.size);
             }
-            scratch.bg.set(pass);
+            scratch.bg_2.set(pass);
+            scratch.bg_3.set(pass);
         }
         image_buffers.image_src_bg.set(pass);
         image_buffers.normalize_bg.set(pass);
@@ -664,7 +681,8 @@ impl ImageComputePipeline {
                 info!("Reallocating scratch buffers to {:?}", image_buffers.size);
                 *scratch = ScratchBuffers::new(device, image_buffers.size);
             }
-            scratch.bg.set(pass);
+            scratch.bg_2.set(pass);
+            scratch.bg_3.set(pass);
         }
         image_buffers.image_src_bg.set(pass);
         image_buffers.normalize_bg.set(pass);
@@ -712,7 +730,8 @@ impl ImageComputePipeline {
                 info!("Reallocating scratch buffers to {:?}", image_buffers.size);
                 *scratch = ScratchBuffers::new(device, image_buffers.size);
             }
-            scratch.bg.set(pass);
+            scratch.bg_2.set(pass);
+            scratch.bg_3.set(pass);
         }
         image_buffers.image_src_bg.set(pass);
         image_buffers.normalize_bg.set(pass);
