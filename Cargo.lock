@@ -3257,6 +3257,7 @@ dependencies = [
  "mint",
  "nanonis-tcp",
  "notify-typed",
+ "parking_lot",
  "pollster",
  "serde",
  "smol",

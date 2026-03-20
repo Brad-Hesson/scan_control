@@ -5,16 +5,20 @@ use egui::{DragValue, Response, Ui};
 use glam::Affine2;
 use image_compute::image_compute::{FitData, FitType, NormalizationType};
 use itertools::izip;
+use nanonis_tcp::LineDir;
 use tracing::warn;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
+    connection::{backing::BufferState, nanonis_connection::toggle_dir},
     scan_view::{ImageEncoder, ScanViewImage},
 };
 
 pub struct StaticImage {
-    image_data: ScanViewImage,
+    image_view: ScanViewImage,
     channel: String,
+    pub buffers: BufferState,
+    pub line_dir: LineDir,
     pub transform: Affine2,
     pub fit_type: FitType,
     pub norm_type: NormType,
@@ -24,45 +28,52 @@ pub struct StaticImage {
 impl StaticImage {
     pub fn new(
         encoder: &ImageEncoder,
-        size: [u32; 2],
         transform: Affine2,
         channel: String,
-        init_fn: impl FnOnce(&mut [f32]),
+        buffers: BufferState,
     ) -> Self {
         let image_data = ScanViewImage::new(
             encoder,
-            size,
+            [buffers.size[1] as u32, buffers.size[0] as u32],
             transform,
             NormalizationType::FullScale,
-            init_fn,
+            |buf| buf.copy_from_slice(&buffers.buf_f),
         );
         Self {
-            image_data,
+            line_dir: LineDir::Forward,
+            image_view: image_data,
             fit_type: FitType::MeanSubtract,
             norm_type: NormType::FullScale,
             std_dev: 1.5,
             transform,
             name: String::new(),
             channel,
+            buffers,
         }
     }
     pub fn size(&self) -> [u32; 2] {
-        self.image_data.size()
+        self.image_view.size()
     }
     pub fn update_texture(&self, image_encoder: &ImageEncoder) {
-        self.image_data.write_texture(image_encoder, self.fit_type);
+        let src = match self.line_dir {
+            LineDir::Forward => &self.buffers.buf_f,
+            LineDir::Backward => &self.buffers.buf_b,
+        };
+        self.image_view
+            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src));
+        self.image_view.write_texture(image_encoder, self.fit_type);
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
-        self.image_data.norm_type = self.norm_type.combined(self.std_dev);
-        self.image_data.transform = self.transform;
-        self.image_data.show(ui)
+        self.image_view.norm_type = self.norm_type.combined(self.std_dev);
+        self.image_view.transform = self.transform;
+        self.image_view.show(ui)
     }
     pub fn show_image_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
         if combo_box(
             ui,
-            (self.image_data.uuid(), "fit type"),
+            (self.image_view.uuid(), "fit type"),
             &mut self.fit_type,
             &(),
         ) {
@@ -71,7 +82,7 @@ impl StaticImage {
         ui.horizontal(|ui| {
             combo_box(
                 ui,
-                (self.image_data.uuid(), "norm type"),
+                (self.image_view.uuid(), "norm type"),
                 &mut self.norm_type,
                 &(),
             );
@@ -83,9 +94,13 @@ impl StaticImage {
                 );
             }
         });
+        if ui.button(self.line_dir.opt_atoms(&())).clicked() {
+            toggle_dir(&mut self.line_dir);
+            self.update_texture(image_encoder);
+        }
         ui.label(format!("Channel: {}", self.channel));
-        let norm = self.image_data.norm_data.read();
-        let fit = self.image_data.fit_data.read();
+        let norm = self.image_view.norm_data.read();
+        let fit = self.image_view.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
             let mean = fit.mean();
             ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));

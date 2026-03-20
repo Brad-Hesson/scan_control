@@ -1,5 +1,5 @@
 use core::f32;
-use std::ops::RangeBounds;
+use std::{ops::RangeBounds, sync::Arc};
 
 use egui::{DragValue, Response, Ui, WidgetText};
 use glam::Affine2;
@@ -12,7 +12,7 @@ use nanonis_tcp::LineDir;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
-    connection::nanonis_connection::toggle_dir,
+    connection::{backing::BufferState, nanonis_connection::toggle_dir},
     scan_view::{
         static_image::{MetersFmt, NormType, StaticImage},
         ImageEncoder, ScanViewImage,
@@ -20,8 +20,8 @@ use crate::{
 };
 
 pub struct LiveImage {
-    forward_image_data: ScanViewImage,
-    backward_image_data: ScanViewImage,
+    image_view: ScanViewImage,
+    pub buffers: BufferState,
     pub line_dir: LineDir,
     pub transform: Affine2,
     pub norm_type: NormType,
@@ -34,24 +34,18 @@ pub struct LiveImage {
 }
 
 impl LiveImage {
-    pub fn new(encoder: &ImageEncoder, size: [u32; 2], transform: Affine2) -> Self {
+    pub fn new(encoder: &ImageEncoder, buffers: BufferState, transform: Affine2) -> Self {
         let norm_type = NormType::FullScale;
         let std_dev = 0.;
         Self {
-            forward_image_data: ScanViewImage::new(
+            image_view: ScanViewImage::new(
                 encoder,
-                size,
+                [buffers.size[1] as u32, buffers.size[0] as u32],
                 transform,
                 norm_type.combined(std_dev),
                 |buf| buf.fill(f32::NAN),
             ),
-            backward_image_data: ScanViewImage::new(
-                encoder,
-                size,
-                transform,
-                norm_type.combined(std_dev),
-                |buf| buf.fill(f32::NAN),
-            ),
+            buffers,
             transform,
             norm_type,
             std_dev,
@@ -64,35 +58,25 @@ impl LiveImage {
         }
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
-        match self.line_dir {
-            LineDir::Forward => {
-                self.forward_image_data.norm_type = self.norm_type.combined(self.std_dev);
-                self.forward_image_data.transform = self.transform;
-                self.forward_image_data.show(ui)
-            }
-            LineDir::Backward => {
-                self.backward_image_data.norm_type = self.norm_type.combined(self.std_dev);
-                self.backward_image_data.transform = self.transform;
-                self.backward_image_data.show(ui)
-            }
-        }
+        self.image_view.norm_type = self.norm_type.combined(self.std_dev);
+        self.image_view.transform = self.transform;
+        self.image_view.show(ui)
     }
     pub fn show_menu(&mut self, ui: &mut Ui, image_encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
         if combo_box(
             ui,
-            (self.forward_image_data.uuid(), "fit type"),
+            (self.image_view.uuid(), "fit type"),
             &mut self.fit_type,
             &(),
         ) {
-            self.update_texture_forward(image_encoder);
-            self.update_texture_backward(image_encoder);
+            self.update_texture(image_encoder);
         }
         ui.horizontal(|ui| {
             combo_box(
                 ui,
-                (self.forward_image_data.uuid(), "norm type"),
+                (self.image_view.uuid(), "norm type"),
                 &mut self.norm_type,
                 &(),
             );
@@ -111,21 +95,16 @@ impl LiveImage {
             .collect_vec();
         combo_box(
             ui,
-            (self.forward_image_data.uuid(), "channel"),
+            (self.image_view.uuid(), "channel"),
             &mut self.channel,
             &channel_opts,
         );
         if ui.button(self.line_dir.opt_atoms(&())).clicked() {
             toggle_dir(&mut self.line_dir);
+            self.update_texture(image_encoder);
         }
-        let norm = match self.line_dir {
-            LineDir::Forward => self.forward_image_data.norm_data.read(),
-            LineDir::Backward => self.backward_image_data.norm_data.read(),
-        };
-        let fit = match self.line_dir {
-            LineDir::Forward => self.forward_image_data.fit_data.read(),
-            LineDir::Backward => self.backward_image_data.fit_data.read(),
-        };
+        let norm = self.image_view.norm_data.read();
+        let fit = self.image_view.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
             let mean = fit.mean();
             ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));
@@ -154,48 +133,23 @@ impl LiveImage {
             }
         }
     }
-    pub fn update_texture_forward(&self, image_encoder: &ImageEncoder) {
-        self.forward_image_data
-            .write_texture(image_encoder, self.fit_type);
-    }
-    pub fn update_texture_backward(&self, image_encoder: &ImageEncoder) {
-        self.backward_image_data
-            .write_texture(image_encoder, self.fit_type);
+    pub fn update_texture(&self, image_encoder: &ImageEncoder) {
+        let src = match self.line_dir {
+            LineDir::Forward => &self.buffers.buf_f,
+            LineDir::Backward => &self.buffers.buf_b,
+        };
+        self.image_view
+            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src));
+        self.image_view.write_texture(image_encoder, self.fit_type);
     }
     pub fn clear_texture(&self, image_encoder: &ImageEncoder) {
-        self.forward_image_data.clear(image_encoder);
-        self.backward_image_data.clear(image_encoder);
-    }
-    pub fn write_lines_forward(
-        &self,
-        image_encoder: &ImageEncoder,
-        lines: impl RangeBounds<u32>,
-        callback: impl Fn(&mut [f32]),
-    ) -> Result<(), BufferOpError> {
-        self.forward_image_data
-            .write_lines(image_encoder, lines, callback)
-    }
-    pub fn write_lines_backward(
-        &self,
-        image_encoder: &ImageEncoder,
-        lines: impl RangeBounds<u32>,
-        callback: impl Fn(&mut [f32]),
-    ) -> Result<(), BufferOpError> {
-        self.backward_image_data
-            .write_lines(image_encoder, lines, callback)
+        self.image_view.clear(image_encoder);
     }
     pub fn size(&self) -> [u32; 2] {
-        self.forward_image_data.size()
+        self.image_view.size()
     }
     pub fn resize(&mut self, image_encoder: &ImageEncoder, new_size: [u32; 2]) {
-        self.forward_image_data = ScanViewImage::new(
-            image_encoder,
-            new_size,
-            self.transform,
-            self.norm_type.combined(self.std_dev),
-            |buf| buf.fill(f32::NAN),
-        );
-        self.backward_image_data = ScanViewImage::new(
+        self.image_view = ScanViewImage::new(
             image_encoder,
             new_size,
             self.transform,
@@ -203,12 +157,7 @@ impl LiveImage {
             |buf| buf.fill(f32::NAN),
         );
     }
-    pub fn stamp(
-        &self,
-        encoder: &ImageEncoder,
-        size: [u32; 2],
-        init_fn: impl FnOnce(&mut [f32]),
-    ) -> StaticImage {
+    pub fn stamp(&self, encoder: &ImageEncoder, buffers: BufferState) -> StaticImage {
         let channel = match self.channel {
             Channel::None => "None".into(),
             Channel::Channel(ch) => self
@@ -217,11 +166,12 @@ impl LiveImage {
                 .map(String::from)
                 .unwrap_or_default(),
         };
-        let mut image = StaticImage::new(encoder, size, self.transform, channel, init_fn);
+        let mut image = StaticImage::new(encoder, self.transform, channel, buffers);
         image.fit_type = self.fit_type;
         image.norm_type = self.norm_type;
         image.std_dev = self.std_dev;
         image.name = self.name.clone();
+        image.line_dir = self.line_dir;
         image.update_texture(encoder);
         image
     }
