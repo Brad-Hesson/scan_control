@@ -1,12 +1,8 @@
 use core::f32;
-use std::{ops::RangeBounds, sync::Arc};
 
 use egui::{DragValue, Response, Ui, WidgetText};
 use glam::Affine2;
-use image_compute::{
-    buffers::BufferOpError,
-    image_compute::{FitData, FitType},
-};
+use image_compute::image_compute::{FitData, FitType};
 use itertools::{izip, Itertools};
 use nanonis_tcp::LineDir;
 
@@ -139,7 +135,8 @@ impl LiveImage {
             LineDir::Backward => &self.buffers.buf_b,
         };
         self.image_view
-            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src));
+            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src))
+            .unwrap();
         self.image_view.write_texture(image_encoder, self.fit_type);
     }
     pub fn clear_texture(&self, image_encoder: &ImageEncoder) {
@@ -208,14 +205,14 @@ impl ComboBoxType for Channel {
 impl ComboBoxType for LineDir {
     type Ctx = ();
 
-    fn opt_atoms(&self, ctx: &Self::Ctx) -> impl Into<WidgetText> {
+    fn opt_atoms(&self, _ctx: &Self::Ctx) -> impl Into<WidgetText> {
         match self {
             LineDir::Forward => "Forward",
             LineDir::Backward => "Backward",
         }
     }
 
-    fn options(ctx: &Self::Ctx) -> impl Iterator<Item = Self> {
+    fn options(_ctx: &Self::Ctx) -> impl Iterator<Item = Self> {
         [LineDir::Forward, LineDir::Backward].into_iter()
     }
 }

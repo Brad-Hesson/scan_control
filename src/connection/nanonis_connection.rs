@@ -1,14 +1,9 @@
 use core::f32;
-use std::sync::Arc;
+use std::{net::ToSocketAddrs, sync::Arc};
 
 use glam::Affine2;
 use itertools::{izip, Itertools};
-use nanonis_tcp::{
-    blocking,
-    commands::scan::{FrameDataGrabResponse, FrameGetResponse},
-    nonblocking, LineDir, ScanDir, ScanMovementType,
-};
-use tokio::{net::ToSocketAddrs, sync::watch};
+use nanonis_tcp::{blocking, commands::scan::FrameGetResponse, LineDir, ScanDir, ScanMovementType};
 
 use crate::{
     connection::{
@@ -86,29 +81,43 @@ impl NanonisConnection {
         let channel_opts = SharedState::new(channels.clone());
         let channel = SharedState::new(channel);
 
-        tokio::spawn(scan_worker(
-            (address.as_ref().to_string(), 6502),
-            ctx.clone(),
-            stamp.clone(),
-            scanning.clone(),
-            channel.clone(),
-            frame.clone(),
-        ));
-        tokio::spawn(line_worker(
-            (address.as_ref().to_string(), 6503),
-            ctx.clone(),
-            scanning.clone(),
-            frame.clone(),
-            channel.clone(),
-        ));
-        tokio::spawn(status_worker(
-            (address.as_ref().to_string(), 6504),
-            ctx.clone(),
-            transform.clone(),
-            name.clone(),
-            signal_names.clone(),
-            channel_opts.clone(),
-        ));
+        macro_rules! clone {
+            ($i:ident) => {
+                let $i = $i.clone();
+            };
+        }
+        {
+            let addr = (address.as_ref().to_string(), 6502);
+            clone!(ctx);
+            clone!(stamp);
+            clone!(scanning);
+            clone!(channel);
+            clone!(frame);
+            std::thread::spawn(move || {
+                scan_worker(addr, ctx, stamp, scanning, channel, frame);
+            });
+        }
+        {
+            let addr = (address.as_ref().to_string(), 6503);
+            clone!(ctx);
+            clone!(scanning);
+            clone!(frame);
+            clone!(channel);
+            std::thread::spawn(move || {
+                line_worker(addr, ctx, scanning, frame, channel);
+            });
+        }
+        {
+            let addr = (address.as_ref().to_string(), 6504);
+            clone!(ctx);
+            clone!(transform);
+            clone!(name);
+            clone!(signal_names);
+            clone!(channel_opts);
+            std::thread::spawn(move || {
+                status_worker(addr, ctx, transform, name, signal_names, channel_opts)
+            });
+        }
 
         Self {
             transform,
@@ -165,7 +174,7 @@ impl NanonisConnection {
     }
 }
 
-async fn scan_worker(
+fn scan_worker(
     addr: impl ToSocketAddrs,
     ctx: egui::Context,
     mut stamp: SharedState<BufferState>,
@@ -173,9 +182,9 @@ async fn scan_worker(
     channel: SharedState<Channel>,
     buffer_state: SharedState<BufferState>,
 ) {
-    let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
+    let mut conn = blocking::NanonisTcp::new(addr).unwrap();
     loop {
-        conn.scan_wait_end_of_scan(None).await.unwrap();
+        conn.scan_wait_end_of_scan(None).unwrap();
         if !*scanning.peek() {
             continue;
         }
@@ -204,17 +213,17 @@ fn frame_early_exited(buffers: &BufferState) -> bool {
     num_lines < min_lines
 }
 
-async fn line_worker(
+fn line_worker(
     addr: impl ToSocketAddrs,
     ctx: egui::Context,
     mut scanning: SharedState<bool>,
     mut buffer_state: SharedState<BufferState>,
     channel: SharedState<Channel>,
 ) {
-    let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
+    let mut conn = blocking::NanonisTcp::new(addr).unwrap();
     let mut wanted_dir = LineDir::Forward;
     loop {
-        let resp = conn.scan_wait_end_of_line(None).await.unwrap();
+        let resp = conn.scan_wait_end_of_line(None).unwrap();
         let ScanMovementType::Scan(line_dir) = resp.movement_type else {
             continue;
         };
@@ -226,10 +235,7 @@ async fn line_worker(
         let Channel::Channel(ch) = *channel.peek() else {
             continue;
         };
-        let new_frame = conn
-            .scan_frame_data_grab(ch as u32, line_dir)
-            .await
-            .unwrap();
+        let new_frame = conn.scan_frame_data_grab(ch as u32, line_dir).unwrap();
         let new_size = new_frame.scan_data.size;
         if !buffer_state.modify_conditional(
             |prev| prev.size != new_size,
@@ -264,7 +270,7 @@ pub fn toggle_dir(line_dir: &mut LineDir) {
     }
 }
 
-async fn status_worker(
+fn status_worker(
     addr: impl ToSocketAddrs,
     ctx: egui::Context,
     mut transform: SharedState<Affine2>,
@@ -272,9 +278,9 @@ async fn status_worker(
     mut signal_names: SharedState<Vec<String>>,
     mut channel_opts: SharedState<Vec<usize>>,
 ) {
-    let mut conn = nonblocking::NanonisTcp::new(addr).await.unwrap();
+    let mut conn = blocking::NanonisTcp::new(addr).unwrap();
     loop {
-        let frame = conn.scan_frame_get().await.unwrap();
+        let frame = conn.scan_frame_get().unwrap();
         let new_transform = transform_from_frame(&frame);
         if transform.modify_conditional(
             |prev| izip!(prev.to_cols_array(), new_transform.to_cols_array()).any(|(a, b)| a != b),
@@ -282,7 +288,7 @@ async fn status_worker(
         ) {
             ctx.request_repaint();
         };
-        let buffer = conn.scan_buffer_get().await.unwrap();
+        let buffer = conn.scan_buffer_get().unwrap();
         let channels = buffer
             .channel_indexes
             .into_iter()
@@ -292,14 +298,14 @@ async fn status_worker(
         {
             ctx.request_repaint();
         }
-        let props = conn.scan_props_get().await.unwrap();
+        let props = conn.scan_props_get().unwrap();
         if name.modify_conditional(
             |prev| *prev != props.series_name,
             |val| *val = props.series_name.clone(),
         ) {
             ctx.request_repaint();
         };
-        let sig_names_resp = conn.signals_names_get().await.unwrap();
+        let sig_names_resp = conn.signals_names_get().unwrap();
         if signal_names.modify_conditional(
             |prev| *prev != sig_names_resp.names,
             |val| *val = sig_names_resp.names.clone(),

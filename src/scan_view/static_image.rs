@@ -60,7 +60,8 @@ impl StaticImage {
             LineDir::Backward => &self.buffers.buf_b,
         };
         self.image_view
-            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src));
+            .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src))
+            .unwrap();
         self.image_view.write_texture(image_encoder, self.fit_type);
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
