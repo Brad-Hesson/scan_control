@@ -5,12 +5,12 @@ use image_compute::image_compute::ImageComputePipeline;
 
 mod border;
 mod callbacks;
-mod image;
+mod scan_image;
 pub mod static_image;
 mod view;
 
 pub use border::BorderRectangle;
-pub use image::ScanViewImage;
+pub use scan_image::ScanViewImage;
 pub use view::ScanView;
 
 #[derive(Clone)]
