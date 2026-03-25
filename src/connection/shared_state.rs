@@ -19,6 +19,12 @@ impl<T> SharedState<T> {
             local_epoch: 0,
         }
     }
+    pub fn new_default() -> Self
+    where
+        T: Default,
+    {
+        Self::new(Default::default())
+    }
     pub fn peek(&self) -> RwLockReadGuard<'_, T> {
         self.inner.read()
     }
