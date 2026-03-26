@@ -9,7 +9,7 @@
     };
     brad-utils.url = "github:Brad-Hesson/brad-utils";
     wgsl-analyzer = {
-      url = "github:wgsl-analyzer/wgsl-analyzer/nightly";
+      url = "github:wgsl-analyzer/wgsl-analyzer";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
       inputs.crane.follows = "crane";
@@ -54,7 +54,7 @@
           --set LD_LIBRARY_PATH ${pkgs.lib.makeLibraryPath runtimeDeps}
         '';
       });
-      # wgsl-analyzer = flakes.wgsl-analyzer.packages.${system}.default;
+      wgsl-analyzer = flakes.wgsl-analyzer.packages.${system}.default;
     in
     {
       packages.default = crate;
@@ -66,9 +66,8 @@
         packages = [ pkgs.renderdoc ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
         shellHook = ''
-          ${brad-utils.vscodeSettingsHook {}}
+          ${brad-utils.vscodeSettingsHook {"wgsl-analyzer.server.path" =  "${wgsl-analyzer}/bin/wgsl-analyzer";}}
         '';
-        # ${brad-utils.vscodeSettingHook} '"${wgsl-analyzer}/bin/wgsl_analyzer"' "wgsl-analyzer\.server\.path"
       };
     }
   );

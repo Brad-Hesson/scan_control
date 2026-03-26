@@ -140,16 +140,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1773155685,
-        "narHash": "sha256-3VZOIgsHeA0iayibXBkkVKP5SVI2pfnKdLLDosA5kJU=",
+        "lastModified": 1774492553,
+        "narHash": "sha256-jyn+2V7KkW6mW/qJHzeUhujfzTfDM4/tnWFklgtareM=",
         "owner": "wgsl-analyzer",
         "repo": "wgsl-analyzer",
-        "rev": "5abf830db9fb88320b8bf6de1c433ae758e178fd",
+        "rev": "f1fb3b064cd036e1f48487d7ced28a037aa2382f",
         "type": "github"
       },
       "original": {
         "owner": "wgsl-analyzer",
-        "ref": "nightly",
         "repo": "wgsl-analyzer",
         "type": "github"
       }
