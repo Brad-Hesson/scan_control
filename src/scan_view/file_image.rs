@@ -1,10 +1,9 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use eframe::egui_wgpu;
-use egui::{epaint::Vertex, Color32, Context, DragValue, Id, Mesh, Pos2, Shape, TextureHandle, Ui};
-use glam::{Affine2, Mat3, Vec2};
+use egui::{DragValue, Id, Ui};
+use glam::Mat3;
 use image_compute::file_image::FileImageBuffers;
-use itertools::{izip, Itertools};
 
 use crate::scan_view::{callbacks::FileImageCallback, view::ScanViewCtx, ImageEncoder};
 

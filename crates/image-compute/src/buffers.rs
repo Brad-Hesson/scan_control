@@ -1,8 +1,13 @@
-use std::{fmt::Debug, marker::PhantomData, num::NonZero, ops::RangeBounds};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    num::NonZero,
+    ops::{DerefMut, RangeBounds},
+};
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use encase::ShaderSize as _;
-use glam::{Affine2, Mat3, Mat4};
+use glam::Mat3;
 use wgpu::{
     Buffer, BufferAddress, BufferBinding, BufferDescriptor, BufferUsages, Device, Extent3d, Queue,
     Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
@@ -127,11 +132,10 @@ impl TransformBuffer {
     }
     pub fn write(&self, queue: &Queue, transform: impl Into<Mat3>) {
         let mat3 = transform.into();
-        let mut buf = [0f32; 4*3];
-        buf[0 * 4..][..3].copy_from_slice(&mat3.x_axis.to_array());
-        buf[1 * 4..][..3].copy_from_slice(&mat3.y_axis.to_array());
-        buf[2 * 4..][..3].copy_from_slice(&mat3.z_axis.to_array());
-        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(&buf));
+        let mut buf = queue
+            .write_buffer_with(&self.0, 0, glam::Mat3::SHADER_SIZE)
+            .unwrap();
+        encase::UniformBuffer::new(&mut *buf).write(&mat3).unwrap();
     }
     pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.0.as_entire_buffer_binding()

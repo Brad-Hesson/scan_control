@@ -1,9 +1,6 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
-use glam::{Affine2, Mat3};
-use image_compute::{
-    file_image::FileImageBuffers,
-    image_compute::{ImageComputeBuffers, NormalizationType},
-};
+use glam::Mat3;
+use image_compute::file_image::FileImageBuffers;
 
 use crate::scan_view::callbacks::global::GlobalResources;
 

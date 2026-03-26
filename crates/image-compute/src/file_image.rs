@@ -1,21 +1,15 @@
 use std::sync::Arc;
 
-use egui::Color32;
-use glam::{Affine2, Mat3};
+use glam::Mat3;
 use image::DynamicImage;
 use wgpu::{
-    BlendState, ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, MultisampleState,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipeline, RenderPipelineDescriptor,
-    SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    TextureViewDescriptor, util::DeviceExt as _, wgt::TextureDataOrder,
+    BlendState, ColorTargetState, ColorWrites, Device, Extent3d, MultisampleState, PrimitiveState,
+    PrimitiveTopology, Queue, RenderPass, RenderPipeline, RenderPipelineDescriptor,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
+    util::DeviceExt as _, wgt::TextureDataOrder,
 };
 
-use crate::{
-    buffers::{ColorMapTexture, TransformBuffer},
-    image_compute::ImageComputeBuffers,
-    scan_image::ScanImageBuffers,
-    shaders,
-};
+use crate::{buffers::TransformBuffer, scan_image::ScanImageBuffers, shaders};
 
 #[derive(Clone)]
 pub struct FileImageBuffers {
