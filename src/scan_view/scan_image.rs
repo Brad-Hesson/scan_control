@@ -53,14 +53,11 @@ impl ScanViewImage {
         let resp = ui
             .input(|i| i.pointer.latest_pos())
             .and_then(|pos| {
-                let [x, y] =
-                    (Affine2::from_translation(<[f32; 2]>::from(ctx.rect.center()).into())
-                        * ctx.world_transform
-                        * self.transform)
-                        .inverse()
-                        .transform_point2(<[f32; 2]>::from(pos).into())
-                        .abs()
-                        .into();
+                let [x, y] = (ctx.world2egui() * self.transform)
+                    .inverse()
+                    .transform_point2(<[f32; 2]>::from(pos).into())
+                    .abs()
+                    .into();
                 (x < 0.5 && y < 0.5).then(|| {
                     ui.interact(
                         ctx.rect,

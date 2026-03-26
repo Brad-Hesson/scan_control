@@ -8,10 +8,12 @@ mod callbacks;
 mod scan_image;
 pub mod static_image;
 mod view;
+mod file_image;
 
 pub use border::BorderRectangle;
 pub use scan_image::ScanViewImage;
 pub use view::ScanView;
+pub use file_image::FileImage;
 
 #[derive(Clone)]
 pub struct ImageEncoder {

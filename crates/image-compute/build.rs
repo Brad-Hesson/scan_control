@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //         .fold(String::new(), |a, b| a + &b + "\n");
     // })?;
     generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
+    generate_wgsl_bindings("file_image", "file_image", |_| {})?;
     Ok(())
 }
 

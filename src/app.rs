@@ -2,7 +2,8 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis_connection::NanonisConnection;
-use crate::scan_view::{BorderRectangle, ImageEncoder, ScanView, static_image::StaticImage};
+use crate::scan_view::FileImage;
+use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::Color32;
@@ -11,6 +12,7 @@ use egui::{
     ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
+use glam::{Affine2, Mat2, Mat3};
 use itertools::{izip, Itertools};
 use tracing::error;
 use uuid::Uuid;
@@ -31,6 +33,7 @@ pub struct AppState {
     image_list: SelectableList<StaticImage>,
     connection: NanonisConnection,
     file_tree: FileTree,
+    file_image_list: SelectableList<FileImage>,
 }
 
 // trait UnwrapTraceExt{
@@ -56,12 +59,18 @@ impl MyApp {
         let image_encoder = ImageEncoder::new(wgpu);
         let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
+        let mut file_image_list = SelectableList::new();
+        let test_image = FileImage::new(&image_encoder, "./mems_afm.png", Mat3::IDENTITY);
+        file_image_list.push(SelectableEntry::new((), test_image, |img| {
+            "img".into_atoms()
+        }));
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 image_list: SelectableList::new(),
                 connection: current_scan,
                 file_tree,
+                file_image_list,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -165,6 +174,9 @@ impl eframe::App for MyApp {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
                 let image_resp = self.app_state.scan_view.show(ui, |ui| {
+                    for img in self.app_state.file_image_list.iter() {
+                        img.show(ui);
+                    }
                     let files = &mut self.app_state.image_list;
                     for i in 0..files.len() {
                         let resp = files[i].show(ui).synchronize(&mut files[i].resp_group);
@@ -273,6 +285,23 @@ impl eframe::App for MyApp {
                         .show(ctx, |ui| {
                             self.app_state.image_list[i]
                                 .show_image_menu(ui, &mut self.image_encoder);
+                        })
+                        .unwrap()
+                        .response
+                        .rect
+                        .bottom();
+                }
+                for i in 0..self.app_state.file_image_list.len() {
+                    let name = &self.app_state.file_image_list[i].name;
+                    let mut rect = ui.min_rect();
+                    rect.set_top(new_top);
+                    new_top = egui::Window::new(name)
+                        .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                        .constrain_to(rect)
+                        .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            self.app_state.file_image_list[i].show_menu(ui);
                         })
                         .unwrap()
                         .response

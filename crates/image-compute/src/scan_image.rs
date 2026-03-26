@@ -15,7 +15,7 @@ use crate::{
 pub struct ScanImageBuffers<const COLOR_MAP_SIZE: usize> {
     screen_transform_buffer: TransformBuffer,
     color_map_texture: ColorMapTexture<COLOR_MAP_SIZE>,
-    bg: shaders::scan_image::bind_groups::BindGroup0,
+    pub bg: shaders::scan_image::bind_groups::BindGroup0,
 }
 
 impl<const COLOR_MAP_SIZE: usize> ScanImageBuffers<COLOR_MAP_SIZE> {

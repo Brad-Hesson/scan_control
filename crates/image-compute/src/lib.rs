@@ -4,6 +4,7 @@ pub mod buffers;
 pub mod image_compute;
 pub mod scan_image;
 mod shaders;
+pub mod file_image;
 
 #[cfg(test)]
 mod tests {

@@ -130,6 +130,20 @@ impl TransformBuffer {
         mat4.w_axis.y = transform.translation.y;
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
     }
+    pub fn write_mat3(&self, queue: &Queue, mat3: Mat3) {
+        let mut mat4 = Mat4::IDENTITY;
+        mat4.x_axis.x = mat3.x_axis.x;
+        mat4.y_axis.x = mat3.y_axis.x;
+        mat4.x_axis.y = mat3.x_axis.y;
+        mat4.y_axis.y = mat3.y_axis.y;
+
+        mat4.w_axis.x = mat3.z_axis.x;
+        mat4.w_axis.y = mat3.z_axis.y;
+
+        mat4.x_axis.w = mat3.x_axis.z;
+        mat4.y_axis.w = mat3.y_axis.z;
+        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
+    }
     pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.0.as_entire_buffer_binding()
     }

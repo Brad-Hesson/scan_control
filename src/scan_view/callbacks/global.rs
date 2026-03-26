@@ -3,7 +3,10 @@ use eframe::{
     wgpu::{self, Device, TextureFormat},
 };
 use glam::Affine2;
-use image_compute::scan_image::{ScanImageBuffers, ScanImagePipeline};
+use image_compute::{
+    file_image::FileImagePipeline,
+    scan_image::{ScanImageBuffers, ScanImagePipeline},
+};
 
 use crate::app::COLOR_MAP_SIZE;
 
@@ -50,14 +53,17 @@ impl CallbackTrait for GlobalCallback {
 pub(super) struct GlobalResources {
     pub scan_image_pipeline: ScanImagePipeline,
     pub scan_image_buffers: ScanImageBuffers<COLOR_MAP_SIZE>,
+    pub file_image_pipeline: FileImagePipeline,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
         let scan_image_pipeline = ScanImagePipeline::new(device, target_format);
         let scan_image_buffers = ScanImageBuffers::new(device);
+        let file_image_pipeline = FileImagePipeline::new(device, target_format);
         Self {
             scan_image_pipeline,
             scan_image_buffers,
+            file_image_pipeline,
         }
     }
 }

@@ -1,7 +1,7 @@
 use core::f32;
 use std::mem::MaybeUninit;
 
-use eframe::{egui_wgpu::Callback, wgpu::TextureFormat};
+use eframe::{egui_wgpu::Callback, glow::STENCIL_FAIL, wgpu::TextureFormat};
 use egui::{Color32, Id, Response, Ui};
 use glam::{Affine2, Vec2};
 
@@ -109,4 +109,11 @@ impl ScanView {
 pub struct ScanViewCtx {
     pub rect: egui::Rect,
     pub world_transform: Affine2,
+}
+
+impl ScanViewCtx {
+    pub fn world2egui(&self) -> Affine2 {
+        Affine2::from_translation(<[f32; 2]>::from(self.rect.center()).into())
+            * self.world_transform
+    }
 }
