@@ -60,7 +60,7 @@ impl FileImageBuffers {
         }
     }
     pub fn write_world_transform(&self, queue: &Queue, transform: Mat3) {
-        self.world_transform_buffer.write_mat3(queue, transform);
+        self.world_transform_buffer.write(queue, transform);
     }
 }
 

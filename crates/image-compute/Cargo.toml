@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-glam.workspace = true
+glam = {workspace = true, features = ["encase"]}
 bytemuck.workspace = true
 itertools.workspace = true
 thiserror = "2.0"
@@ -14,7 +14,7 @@ egui.workspace = true
 eframe.workspace = true
 parking_lot = "0.12.5"
 image.workspace = true
-
+encase = "0.12"
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true

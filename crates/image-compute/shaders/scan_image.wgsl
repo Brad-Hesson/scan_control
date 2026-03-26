@@ -5,21 +5,21 @@ const IMAGE_ALPHA: f32 = 1.;
 // ------------ Vertex Shader ------------
 
 @group(0) @binding(0)
-var<uniform> world2screen: mat4x4<f32>;
+var<uniform> world2screen: mat3x3<f32>;
 
 @group(1) @binding(0)
-var<uniform> quad2world: mat4x4<f32>;
+var<uniform> quad2world: mat3x3<f32>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
-    var position = vec4(verts[vert_index], 0.0, 1.0);
+    var position = vec3(verts[vert_index], 1.0);
     var uv = uvs[vert_index];
 
     // apply the transforms
     position = world2screen * quad2world * position;
 
     var result: VertexOutput;
-    result.position = position;
+    result.position = vec4(position.xy, 0, position.z);
     result.uv = uv;
     return result;
 }

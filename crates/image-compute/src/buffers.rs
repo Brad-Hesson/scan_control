@@ -1,6 +1,7 @@
 use std::{fmt::Debug, marker::PhantomData, num::NonZero, ops::RangeBounds};
 
 use bytemuck::{AnyBitPattern, NoUninit};
+use encase::ShaderSize as _;
 use glam::{Affine2, Mat3, Mat4};
 use wgpu::{
     Buffer, BufferAddress, BufferBinding, BufferDescriptor, BufferUsages, Device, Extent3d, Queue,
@@ -118,31 +119,19 @@ impl TransformBuffer {
     pub fn new(device: &Device) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("quad2world uniform"),
-            size: std::mem::size_of::<glam::Mat4>() as u64,
+            size: glam::Mat3::SHADER_SIZE.get(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         Self(buffer)
     }
-    pub fn write(&self, queue: &Queue, transform: Affine2) {
-        let mut mat4 = Mat4::from_mat3(Mat3::from_mat2(transform.matrix2));
-        mat4.w_axis.x = transform.translation.x;
-        mat4.w_axis.y = transform.translation.y;
-        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
-    }
-    pub fn write_mat3(&self, queue: &Queue, mat3: Mat3) {
-        let mut mat4 = Mat4::IDENTITY;
-        mat4.x_axis.x = mat3.x_axis.x;
-        mat4.y_axis.x = mat3.y_axis.x;
-        mat4.x_axis.y = mat3.x_axis.y;
-        mat4.y_axis.y = mat3.y_axis.y;
-
-        mat4.w_axis.x = mat3.z_axis.x;
-        mat4.w_axis.y = mat3.z_axis.y;
-
-        mat4.x_axis.w = mat3.x_axis.z;
-        mat4.y_axis.w = mat3.y_axis.z;
-        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(mat4.as_ref()));
+    pub fn write(&self, queue: &Queue, transform: impl Into<Mat3>) {
+        let mat3 = transform.into();
+        let mut buf = [0f32; 4*3];
+        buf[0 * 4..][..3].copy_from_slice(&mat3.x_axis.to_array());
+        buf[1 * 4..][..3].copy_from_slice(&mat3.y_axis.to_array());
+        buf[2 * 4..][..3].copy_from_slice(&mat3.z_axis.to_array());
+        queue.write_buffer(&self.0, 0, bytemuck::bytes_of(&buf));
     }
     pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
         self.0.as_entire_buffer_binding()
