@@ -36,6 +36,8 @@ tokio.workspace = true
 nanonis-tcp = { path = "../nanonis-tcp", features = ["tokio"]}
 parking_lot = "0.12.5"
 image.workspace = true
+nalgebra = "0.34.1"
+float-ord = "0.3.2"
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true

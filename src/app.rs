@@ -60,7 +60,7 @@ impl MyApp {
         let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
         let mut file_image_list = SelectableList::new();
-        let test_image = FileImage::new(&image_encoder, "./mems_afm.png", Mat3::IDENTITY);
+        let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", Mat3::IDENTITY);
         file_image_list.push(SelectableEntry::new((), test_image, |img| {
             "img".into_atoms()
         }));
@@ -174,7 +174,7 @@ impl eframe::App for MyApp {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
                 let image_resp = self.app_state.scan_view.show(ui, |ui| {
-                    for img in self.app_state.file_image_list.iter() {
+                    for img in self.app_state.file_image_list.iter_mut() {
                         img.show(ui);
                     }
                     let files = &mut self.app_state.image_list;
