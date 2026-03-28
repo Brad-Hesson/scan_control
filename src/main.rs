@@ -93,9 +93,7 @@ fn init_wgpu() -> eyre::Result<(Instance, Adapter, Device, Queue)> {
     info!("Selected: {}", adapter_to_str(&adapter));
     let (dev, queue) = smol::block_on(adapter.request_device(&DeviceDescriptor {
         required_features: wgpu::Features {
-            features_wgpu: FeaturesWGPU::TIMESTAMP_QUERY_INSIDE_PASSES
-                | FeaturesWGPU::SHADER_F64
-                | FeaturesWGPU::SHADER_INT64,
+            features_wgpu: FeaturesWGPU::TIMESTAMP_QUERY_INSIDE_PASSES | FeaturesWGPU::SHADER_INT64,
             features_webgpu: FeaturesWebGPU::FLOAT32_FILTERABLE | FeaturesWebGPU::TIMESTAMP_QUERY,
         },
         ..Default::default()
