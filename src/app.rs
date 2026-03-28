@@ -2,8 +2,8 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis_connection::NanonisConnection;
-use crate::scan_view::FileImage;
 use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
+use crate::scan_view::{FileImage, GDSImage, ScaleBar};
 use crate::undo_queue::{StateModify, UndoQueue};
 use crate::utils::response_group::ResponseGroupExt as _;
 use egui::Color32;
@@ -34,6 +34,8 @@ pub struct AppState {
     connection: NanonisConnection,
     file_tree: FileTree,
     file_image_list: SelectableList<FileImage>,
+    test_gds: GDSImage,
+    scale_bar: ScaleBar,
 }
 
 // trait UnwrapTraceExt{
@@ -64,6 +66,7 @@ impl MyApp {
         file_image_list.push(SelectableEntry::new((), test_image, |img| {
             "img".into_atoms()
         }));
+        let test_gds = GDSImage::new("As_Implanted_MLA150_mod.GDS");
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
@@ -71,6 +74,8 @@ impl MyApp {
                 connection: current_scan,
                 file_tree,
                 file_image_list,
+                test_gds,
+                scale_bar: ScaleBar::new(),
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -228,6 +233,8 @@ impl eframe::App for MyApp {
                         }
                         .show(ui);
                     }
+                    self.app_state.test_gds.show(ui);
+                    self.app_state.scale_bar.show(ui);
                 });
                 if image_resp.clicked() {
                     self.app_state.image_list.clear_selected();
