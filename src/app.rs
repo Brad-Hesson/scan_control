@@ -66,7 +66,7 @@ impl MyApp {
         file_image_list.push(SelectableEntry::new((), test_image, |img| {
             "img".into_atoms()
         }));
-        let test_gds = GDSImage::new("As_Implanted_MLA150_mod.GDS");
+        let test_gds = GDSImage::new(&image_encoder, "As_Implanted_MLA150.GDS");
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),

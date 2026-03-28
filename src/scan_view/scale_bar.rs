@@ -17,7 +17,7 @@ impl ScaleBar {
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
         let mut nm = ctx.world2egui().project_egui_vec(Vec2::new(1., 0.)).x;
-        let pivot = 300.0;
+        let pivot = 500.0;
         let mut mul = 0;
         while nm < pivot {
             nm *= 10.;

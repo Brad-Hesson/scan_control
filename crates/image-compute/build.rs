@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // })?;
     generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
     generate_wgsl_bindings("file_image", "file_image", |_| {})?;
+    generate_wgsl_bindings("border_line", "border_line", |_| {})?;
     Ok(())
 }
 

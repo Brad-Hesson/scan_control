@@ -2,16 +2,16 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     num::NonZero,
-    ops::{DerefMut, RangeBounds},
+    ops::{Deref, DerefMut, RangeBounds},
 };
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use encase::ShaderSize as _;
 use glam::Mat3;
 use wgpu::{
-    Buffer, BufferAddress, BufferBinding, BufferDescriptor, BufferUsages, Device, Extent3d, Queue,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor,
+    Buffer, BufferAddress, BufferBinding, BufferDescriptor, BufferUsages, BufferViewMut, Device,
+    Extent3d, Queue, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor,
 };
 
 #[derive(Clone)]
@@ -41,6 +41,25 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
         Self {
             inner,
             pd: PhantomData,
+        }
+    }
+    pub fn new_init_handle(
+        device: &Device,
+        label: Option<&str>,
+        usage: BufferUsages,
+        size: usize,
+    ) -> StorageBufferUninit<T> {
+        let inner = device.create_buffer(&BufferDescriptor {
+            label,
+            size: (size * std::mem::size_of::<T>()) as u64,
+            usage,
+            mapped_at_creation: true,
+        });
+        StorageBufferUninit {
+            buffer: Self {
+                inner,
+                pd: PhantomData,
+            },
         }
     }
     pub fn queue_write(
@@ -85,6 +104,40 @@ impl<T: Clone + NoUninit + AnyBitPattern> StorageBuffer<T> {
     }
     pub fn buffer_ref(&self) -> &Buffer {
         &self.inner
+    }
+}
+
+pub struct StorageBufferUninit<T: Clone + NoUninit + AnyBitPattern> {
+    buffer: StorageBuffer<T>,
+}
+impl<T: Clone + NoUninit + AnyBitPattern> StorageBufferUninit<T> {
+    pub fn view_mut(&mut self) -> StorageBufferViewMut<'_, T> {
+        StorageBufferViewMut {
+            inner: self.buffer.inner.get_mapped_range_mut(..),
+            phantom: PhantomData,
+        }
+    }
+}
+impl<T: Clone + NoUninit + AnyBitPattern> StorageBufferUninit<T> {
+    pub fn finish(self) -> StorageBuffer<T> {
+        self.buffer.inner.unmap();
+        self.buffer
+    }
+}
+pub struct StorageBufferViewMut<'a, T: Clone + NoUninit + AnyBitPattern> {
+    inner: BufferViewMut<'a>,
+    phantom: PhantomData<T>,
+}
+impl<'a, T: Clone + NoUninit + AnyBitPattern> Deref for StorageBufferViewMut<'a, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        bytemuck::cast_slice(self.inner.as_ref())
+    }
+}
+impl<'a, T: Clone + NoUninit + AnyBitPattern> DerefMut for StorageBufferViewMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        bytemuck::cast_slice_mut(self.inner.as_mut())
     }
 }
 

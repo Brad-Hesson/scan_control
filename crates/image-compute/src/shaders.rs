@@ -11,3 +11,8 @@ pub mod file_image {
     include!(concat!(env!("OUT_DIR"), "/file_image.rs"));
 }
 
+pub mod border_line {
+    #![allow(dead_code, non_snake_case)]
+    include!(concat!(env!("OUT_DIR"), "/border_line.rs"));
+}
+

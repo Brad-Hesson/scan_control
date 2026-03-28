@@ -1,43 +1,118 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
+use eframe::egui_wgpu;
 use egui::{epaint::PathShape, Color32, Id, Shape, Stroke, Ui};
+use gdsr::{Cell, Element, Library};
+use glam::Affine2;
+use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
 
-use crate::scan_view::{file_image::ProjectionTransform, view::ScanViewCtx};
+use crate::scan_view::{
+    callbacks::GDSImageCallback, file_image::ProjectionTransform, view::ScanViewCtx, ImageEncoder,
+};
 
 pub struct GDSImage {
-    library: gdsr::Library,
+    transform: Affine2,
+    buffers: BTreeMap<u16, GDSImageBuffers>,
+    colors: BTreeMap<u16, Color32>,
 }
 
 impl GDSImage {
-    pub fn new(p: impl AsRef<Path>) -> Self {
-        let gds = gdsr::Library::read_file(p, Some(1e-9)).unwrap();
-        Self { library: gds }
+    pub fn new(encoder: &ImageEncoder, path: impl AsRef<Path>) -> Self {
+        let gds = gdsr::Library::read_file(path, None).unwrap();
+        let mut polys = BTreeMap::new();
+        for cell in gds.cells().values() {
+            draw_cell(&mut polys, &gds, Affine2::IDENTITY, cell);
+        }
+        let colors = polys
+            .keys()
+            .map(|layer| {
+                (
+                    *layer,
+                    *COLORS.into_iter().cycle().nth(*layer as usize).unwrap(),
+                )
+            })
+            .collect();
+        let buffers = polys
+            .into_iter()
+            .map(|(layer, polys)| {
+                (
+                    layer,
+                    GDSImageBuffers::new(&encoder.wgpu_state.device, polys),
+                )
+            })
+            .collect();
+        let transform = Affine2::IDENTITY;
+        Self {
+            transform,
+            buffers,
+            colors,
+        }
     }
     pub fn show(&self, ui: &mut Ui) {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
-        for (name, cell) in self.library.cells() {
-            let elements = cell.get_elements(None, &self.library);
-            for elem in elements {
-                match elem {
-                    gdsr::Element::Path(path) => todo!(),
-                    gdsr::Element::Polygon(polygon) => {
-                        let points = polygon
-                            .points()
-                            .iter()
-                            .map(|p| ctx.world2egui().project_egui_pos(p.to_world()))
-                            .collect_vec();
-                        let shape =
-                            Shape::Path(PathShape::line(points, Stroke::new(2., Color32::PURPLE)));
+        for (layer, bufs) in &self.buffers {
+            let callback = egui_wgpu::Callback::new_paint_callback(
+                ctx.rect,
+                GDSImageCallback {
+                    transform: self.transform.into(),
+                    image_buffers: bufs.clone(),
+                    color: *self.colors.get(layer).unwrap(),
+                },
+            );
+            ui.painter().add(callback);
+        }
+    }
+}
 
-                        ui.painter().add(shape);
-                    }
-                    gdsr::Element::Box(gds_box) => todo!(),
-                    gdsr::Element::Node(node) => todo!(),
-                    gdsr::Element::Text(text) => todo!(),
-                    gdsr::Element::Reference(reference) => todo!(),
+fn draw_cell(
+    polys: &mut BTreeMap<u16, Vec<Vec<glam::Vec2>>>,
+    lib: &Library,
+    transform: Affine2,
+    cell: &Cell,
+) {
+    for elem in cell.iter_elements() {
+        draw_element(polys, lib, transform, elem);
+    }
+}
+
+fn draw_element(
+    polys: &mut BTreeMap<u16, Vec<Vec<glam::Vec2>>>,
+    lib: &Library,
+    transform: Affine2,
+    elem: &Element,
+) {
+    match elem {
+        gdsr::Element::Path(path) => todo!(),
+        gdsr::Element::Polygon(polygon) => {
+            let points = polygon
+                .points()
+                .iter()
+                .dropping_back(1)
+                .map(|p| transform.project_glam_pos(p.to_world()))
+                .collect_vec();
+            let layer = polygon.layer().value();
+            polys.entry(layer).or_default().push(points);
+        }
+        gdsr::Element::Box(gds_box) => todo!(),
+        gdsr::Element::Node(node) => todo!(),
+        gdsr::Element::Text(text) => todo!(),
+        gdsr::Element::Reference(reference) => {
+            let origin = reference.grid().origin().to_world();
+            let transform = transform
+                * Affine2::from_angle_translation(
+                    reference.grid().angle() as f32 / 180. * 3.14159,
+                    glam::Vec2::new(origin.x, origin.y),
+                );
+            match reference.instance() {
+                gdsr::Instance::Cell(cell_name) => {
+                    let cell = lib.get_cell(cell_name).unwrap();
+                    draw_cell(polys, lib, transform, cell);
+                }
+                gdsr::Instance::Element(elem) => {
+                    draw_element(polys, lib, transform, elem);
                 }
             }
         }
@@ -45,13 +120,37 @@ impl GDSImage {
 }
 
 trait GDSPoint: Copy {
-    fn to_world(self) -> egui::Pos2;
+    fn to_world(self) -> glam::Vec2;
 }
 impl GDSPoint for gdsr::Point {
-    fn to_world(self) -> egui::Pos2 {
-        egui::Pos2 {
-            x: self.x().float_value() as f32,
-            y: self.y().float_value() as f32,
+    fn to_world(self) -> glam::Vec2 {
+        glam::Vec2 {
+            x: self.x().to_world(),
+            y: self.y().to_world(),
         }
     }
 }
+
+trait GDSUnit: Copy {
+    fn to_world(self) -> f32;
+}
+impl GDSUnit for gdsr::Unit {
+    fn to_world(self) -> f32 {
+        match self {
+            gdsr::Unit::Integer(gdsr::IntegerUnit { value, units }) => {
+                let scale = units * 1e9;
+                ((value as f64) * scale) as f32
+            }
+            gdsr::Unit::Float(gdsr::FloatUnit { value, units }) => todo!(),
+        }
+    }
+}
+
+const COLORS: &[Color32] = &[
+    Color32::from_rgb(0xff, 0x9d, 0x9d),
+    Color32::from_rgb(0xff, 0x80, 0xa8),
+    Color32::from_rgb(0xc0, 0x80, 0xff),
+    Color32::from_rgb(0x95, 0x80, 0xff),
+    Color32::from_rgb(0x80, 0x86, 0xff),
+    Color32::from_rgb(0x80, 0xa8, 0xff),
+];

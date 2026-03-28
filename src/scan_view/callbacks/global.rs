@@ -5,6 +5,7 @@ use eframe::{
 use glam::Affine2;
 use image_compute::{
     file_image::FileImagePipeline,
+    gds_image::GDSImagePipeline,
     scan_image::{ScanImageBuffers, ScanImagePipeline},
 };
 
@@ -54,16 +55,19 @@ pub(super) struct GlobalResources {
     pub scan_image_pipeline: ScanImagePipeline,
     pub scan_image_buffers: ScanImageBuffers<COLOR_MAP_SIZE>,
     pub file_image_pipeline: FileImagePipeline,
+    pub gds_image_pipeline: GDSImagePipeline,
 }
 impl GlobalResources {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
         let scan_image_pipeline = ScanImagePipeline::new(device, target_format);
         let scan_image_buffers = ScanImageBuffers::new(device);
         let file_image_pipeline = FileImagePipeline::new(device, target_format);
+        let gds_image_pipeline = GDSImagePipeline::new(device, target_format);
         Self {
             scan_image_pipeline,
             scan_image_buffers,
             file_image_pipeline,
+            gds_image_pipeline,
         }
     }
 }
