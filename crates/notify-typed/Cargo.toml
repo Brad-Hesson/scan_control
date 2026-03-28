@@ -28,5 +28,11 @@ windows = { version = ">=0.59, <=0.62", features = [
 ] }
 
 [dev-dependencies]
-tokio.workspace = true
+tokio = { version = "1.50", features = [
+    "full",
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "time",
+] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

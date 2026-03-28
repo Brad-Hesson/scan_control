@@ -2777,7 +2777,6 @@ dependencies = [
  "macro_rules_attribute",
  "num_enum",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -3963,7 +3962,6 @@ dependencies = [
  "smol",
  "sxmfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",

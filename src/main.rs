@@ -13,10 +13,10 @@ use wgpu::{
 
 mod app;
 mod components;
+mod connection;
 mod scan_view;
 mod undo_queue;
 mod utils;
-mod connection;
 
 fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
@@ -51,21 +51,31 @@ fn main() -> Result<(), Box<dyn Error>> {
         multisampling: 4,
         ..Default::default()
     };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        tokio::task::block_in_place(|| {
-            eframe::run_native(
-                "Scan Control",
-                native_options,
-                Box::new(|cc| {
-                    egui_extras::install_image_loaders(&cc.egui_ctx);
-                    cc.egui_ctx
-                        .tessellation_options_mut(|opt| opt.feathering = false);
-                    Ok(Box::new(app::MyApp::new(cc)))
-                }),
-            )
-        })
-    })?;
+    // let runtime = tokio::runtime::Runtime::new()?;
+    // runtime.block_on(async {
+    //     tokio::task::block_in_place(|| {
+    //         eframe::run_native(
+    //             "Scan Control",
+    //             native_options,
+    //             Box::new(|cc| {
+    //                 egui_extras::install_image_loaders(&cc.egui_ctx);
+    //                 cc.egui_ctx
+    //                     .tessellation_options_mut(|opt| opt.feathering = false);
+    //                 Ok(Box::new(app::MyApp::new(cc)))
+    //             }),
+    //         )
+    //     })
+    // })?;
+    eframe::run_native(
+        "Scan Control",
+        native_options,
+        Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            cc.egui_ctx
+                .tessellation_options_mut(|opt| opt.feathering = false);
+            Ok(Box::new(app::MyApp::new(cc)))
+        }),
+    )?;
     Ok(())
 }
 

@@ -32,8 +32,6 @@ impl GDSImageBuffers {
             vert_buf_len += poly.len();
             index_buf_len += poly.len() + 2; // one for closing vert, one for separator
         }
-        dbg!(vert_buf_len);
-        dbg!(index_buf_len);
         let mut vertex_buffer_uninit = StorageBuffer::<glam::Vec2>::new_init_handle(
             device,
             None,
