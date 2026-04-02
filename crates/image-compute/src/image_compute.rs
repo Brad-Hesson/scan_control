@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use itertools::{Itertools, izip};
 pub use shaders::plane_fit::NormalizeData;
 use tracing::info;
@@ -163,7 +163,7 @@ impl ImageComputeBuffers {
             normalize_bg,
         }
     }
-    pub fn write_world_transform(&self, queue: &Queue, transform: Affine2) {
+    pub fn write_world_transform(&self, queue: &Queue, transform: DAffine2) {
         self.world_transform_buffer.write(queue, transform);
     }
     pub fn write_normalization_type(

@@ -12,7 +12,7 @@ use egui::{
     ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
-use glam::{Affine2, Mat2, Mat3};
+use glam::{Affine2, DAffine2, DMat3, Mat2, Mat3};
 use itertools::{izip, Itertools};
 use tracing::error;
 use uuid::Uuid;
@@ -62,11 +62,15 @@ impl MyApp {
         let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
         let mut file_image_list = SelectableList::new();
-        let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", Mat3::IDENTITY);
+        let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", DMat3::IDENTITY);
         file_image_list.push(SelectableEntry::new((), test_image, |img| {
             "img".into_atoms()
         }));
-        let test_gds = GDSImage::new(&image_encoder, "As_Implanted_MLA150.GDS");
+        let test_gds = GDSImage::new(
+            &image_encoder,
+            "As_Implanted_MLA150.GDS",
+            DAffine2::IDENTITY,
+        );
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),

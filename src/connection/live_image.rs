@@ -1,7 +1,7 @@
 use core::f32;
 
 use egui::{DragValue, Response, Ui, WidgetText};
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::image_compute::{FitData, FitType};
 use itertools::{izip, Itertools};
 use nanonis_tcp::LineDir;
@@ -19,7 +19,7 @@ pub struct LiveImage {
     image_view: ScanViewImage,
     pub buffers: BufferState,
     pub line_dir: LineDir,
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub norm_type: NormType,
     pub std_dev: f32,
     pub fit_type: FitType,
@@ -30,7 +30,7 @@ pub struct LiveImage {
 }
 
 impl LiveImage {
-    pub fn new(encoder: &ImageEncoder, buffers: BufferState, transform: Affine2) -> Self {
+    pub fn new(encoder: &ImageEncoder, buffers: BufferState, transform: DAffine2) -> Self {
         let norm_type = NormType::FullScale;
         let std_dev = 0.;
         Self {

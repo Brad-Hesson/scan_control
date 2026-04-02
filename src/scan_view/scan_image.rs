@@ -2,7 +2,7 @@ use std::{ops::RangeBounds, sync::Arc};
 
 use eframe::egui_wgpu;
 use egui::{mutex::RwLock, Id, Pos2, Rect, Response, Sense, Ui};
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::{
     buffers::BufferOpError,
     image_compute::{FitData, FitType, ImageComputeBuffers, NormalizationType, NormalizeData},
@@ -13,7 +13,7 @@ use crate::scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder
 
 pub struct ScanViewImage {
     uuid: Uuid,
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub norm_type: NormalizationType,
     image_buffers: ImageComputeBuffers,
     pub fit_data: Arc<RwLock<Option<FitData>>>,
@@ -23,7 +23,7 @@ impl ScanViewImage {
     pub fn new(
         image_encoder: &ImageEncoder,
         size: [u32; 2],
-        transform: Affine2,
+        transform: DAffine2,
         norm_type: NormalizationType,
         init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
@@ -53,9 +53,10 @@ impl ScanViewImage {
         let resp = ui
             .input(|i| i.pointer.latest_pos())
             .and_then(|pos| {
+                let pos = glam::Vec2::new(pos.x, pos.y);
                 let [x, y] = (ctx.world2egui() * self.transform)
                     .inverse()
-                    .transform_point2(<[f32; 2]>::from(pos).into())
+                    .transform_point2(pos.into())
                     .abs()
                     .into();
                 (x < 0.5 && y < 0.5).then(|| {

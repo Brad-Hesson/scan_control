@@ -2,7 +2,7 @@ use eframe::{
     egui_wgpu::{self, CallbackTrait},
     wgpu::{self, Device, TextureFormat},
 };
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::{
     file_image::FileImagePipeline,
     gds_image::GDSImagePipeline,
@@ -13,7 +13,7 @@ use crate::app::COLOR_MAP_SIZE;
 
 pub struct GlobalCallback {
     pub target_format: TextureFormat,
-    pub screen_transform: Affine2,
+    pub screen_transform: DAffine2,
     pub new_color_map: Option<Box<[egui::Color32; COLOR_MAP_SIZE]>>,
 }
 impl CallbackTrait for GlobalCallback {

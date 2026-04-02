@@ -1,6 +1,6 @@
 use std::{hash::Hash, sync::Arc};
 
-use glam::Mat3;
+use glam::{DMat3, Mat3};
 use image::DynamicImage;
 use wgpu::{
     BlendState, ColorTargetState, ColorWrites, Device, Extent3d, MultisampleState, PrimitiveState,
@@ -53,7 +53,7 @@ impl FileImageBuffers {
             bg,
         }
     }
-    pub fn write_world_transform(&self, queue: &Queue, transform: Mat3) {
+    pub fn write_world_transform(&self, queue: &Queue, transform: DMat3) {
         self.world_transform_buffer.write(queue, transform);
     }
 }

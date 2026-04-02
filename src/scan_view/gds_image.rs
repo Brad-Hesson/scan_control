@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path};
 use eframe::egui_wgpu;
 use egui::{epaint::PathShape, Color32, Id, Shape, Stroke, Ui};
 use gdsr::{Cell, Element, Library};
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
 
@@ -12,17 +12,17 @@ use crate::scan_view::{
 };
 
 pub struct GDSImage {
-    transform: Affine2,
+    transform: DAffine2,
     buffers: BTreeMap<u16, GDSImageBuffers>,
     colors: BTreeMap<u16, Color32>,
 }
 
 impl GDSImage {
-    pub fn new(encoder: &ImageEncoder, path: impl AsRef<Path>) -> Self {
+    pub fn new(encoder: &ImageEncoder, path: impl AsRef<Path>, transform: DAffine2) -> Self {
         let gds = gdsr::Library::read_file(path, None).unwrap();
         let mut polys = BTreeMap::new();
         for cell in gds.cells().values() {
-            draw_cell(&mut polys, &gds, Affine2::IDENTITY, cell);
+            draw_cell(&mut polys, &gds, DAffine2::IDENTITY, cell);
         }
         let colors = polys
             .keys()
@@ -42,7 +42,6 @@ impl GDSImage {
                 )
             })
             .collect();
-        let transform = Affine2::IDENTITY;
         Self {
             transform,
             buffers,
@@ -70,7 +69,7 @@ impl GDSImage {
 fn draw_cell(
     polys: &mut BTreeMap<u16, Vec<Vec<glam::Vec2>>>,
     lib: &Library,
-    transform: Affine2,
+    transform: DAffine2,
     cell: &Cell,
 ) {
     for elem in cell.iter_elements() {
@@ -81,7 +80,7 @@ fn draw_cell(
 fn draw_element(
     polys: &mut BTreeMap<u16, Vec<Vec<glam::Vec2>>>,
     lib: &Library,
-    transform: Affine2,
+    transform: DAffine2,
     elem: &Element,
 ) {
     match elem {
@@ -92,6 +91,7 @@ fn draw_element(
                 .iter()
                 .dropping_back(1)
                 .map(|p| transform.project_glam_pos(p.to_world()))
+                .map(|p| glam::Vec2::new(p.x as f32, p.y as f32))
                 .collect_vec();
             let layer = polygon.layer().value();
             polys.entry(layer).or_default().push(points);
@@ -102,9 +102,9 @@ fn draw_element(
         gdsr::Element::Reference(reference) => {
             let origin = reference.grid().origin().to_world();
             let transform = transform
-                * Affine2::from_angle_translation(
-                    reference.grid().angle() as f32 / 180. * 3.14159,
-                    glam::Vec2::new(origin.x, origin.y),
+                * DAffine2::from_angle_translation(
+                    reference.grid().angle() / 180. * 3.14159,
+                    glam::DVec2::new(origin.x, origin.y),
                 );
             match reference.instance() {
                 gdsr::Instance::Cell(cell_name) => {
@@ -120,11 +120,11 @@ fn draw_element(
 }
 
 trait GDSPoint: Copy {
-    fn to_world(self) -> glam::Vec2;
+    fn to_world(self) -> glam::DVec2;
 }
 impl GDSPoint for gdsr::Point {
-    fn to_world(self) -> glam::Vec2 {
-        glam::Vec2 {
+    fn to_world(self) -> glam::DVec2 {
+        glam::DVec2 {
             x: self.x().to_world(),
             y: self.y().to_world(),
         }
@@ -132,14 +132,14 @@ impl GDSPoint for gdsr::Point {
 }
 
 trait GDSUnit: Copy {
-    fn to_world(self) -> f32;
+    fn to_world(self) -> f64;
 }
 impl GDSUnit for gdsr::Unit {
-    fn to_world(self) -> f32 {
+    fn to_world(self) -> f64 {
         match self {
             gdsr::Unit::Integer(gdsr::IntegerUnit { value, units }) => {
                 let scale = units * 1e9;
-                ((value as f64) * scale) as f32
+                value as f64 * scale
             }
             gdsr::Unit::Float(gdsr::FloatUnit { value, units }) => todo!(),
         }

@@ -1,12 +1,12 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
 use egui::Color32;
-use glam::{Affine2, Mat3};
+use glam::{Affine2, DAffine2, Mat3};
 use image_compute::gds_image::GDSImageBuffers;
 
 use crate::scan_view::callbacks::global::GlobalResources;
 
 pub struct GDSImageCallback {
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub color: Color32,
     pub image_buffers: GDSImageBuffers,
 }

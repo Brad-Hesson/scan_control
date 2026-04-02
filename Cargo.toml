@@ -13,7 +13,7 @@ env_logger = "0.11"
 eframe = { workspace = true, features = ["wgpu"] }
 egui = { workspace = true, features = ["mint", "bytemuck"] }
 # egui-colorgradient = { path = "../egui-colorgradient/egui-colorgradient" }
-glam = { workspace = true, features = ["mint", "bytemuck"] }
+glam = { workspace = true, features = ["mint", "bytemuck", "zerocopy"] }
 mint = "0.5.9"
 itertools.workspace = true
 serde = { version = "1.0", features = ["derive"] }
@@ -38,6 +38,7 @@ image.workspace = true
 nalgebra = "0.34.1"
 float-ord = "0.3.2"
 gdsr = "0.0.1-alpha.3"
+zerocopy.workspace = true
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
@@ -54,6 +55,7 @@ members = [
 ]
 
 [workspace.dependencies]
+zerocopy = "0.8.48"
 image = "0.25.10"
 bytemuck = "1.20"
 itertools = "0.14"
@@ -63,6 +65,6 @@ eyre = "0.6"
 tracing = "0.1"
 smol = "2.0.2"
 tracing-subscriber = "0.3"
-glam = "0.30"
+glam = "0.32"
 eframe = "0.32"
 egui = "0.32"

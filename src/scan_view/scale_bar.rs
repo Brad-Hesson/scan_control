@@ -29,7 +29,7 @@ impl ScaleBar {
             mul -= 1;
         }
         let pos = ctx.rect.right_bottom() - Vec2::new(5., 5.);
-        let size = egui::Vec2 { x: nm, y: 5. };
+        let size = egui::Vec2 { x: nm as f32, y: 5. };
         let rect = egui::Rect::from_center_size(pos - size / 2., size);
         // let rect = egui::Rect::from_center_size(ctx.rect.center(), egui::Vec2 { x: nm, y: 5. });
         ui.painter().add(Shape::Rect(RectShape::filled(

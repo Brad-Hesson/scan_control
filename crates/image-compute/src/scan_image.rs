@@ -1,5 +1,5 @@
 use egui::Color32;
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use wgpu::{
     BlendState, ColorTargetState, ColorWrites, Device, FilterMode, MultisampleState,
     PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipeline, RenderPipelineDescriptor,
@@ -41,7 +41,7 @@ impl<const COLOR_MAP_SIZE: usize> ScanImageBuffers<COLOR_MAP_SIZE> {
             bg,
         }
     }
-    pub fn write_screen_transform(&self, queue: &Queue, transform: Affine2) {
+    pub fn write_screen_transform(&self, queue: &Queue, transform: DAffine2) {
         self.screen_transform_buffer.write(queue, transform);
     }
     pub fn write_color_map(&self, queue: &Queue, color_map: &[Color32; COLOR_MAP_SIZE]) {

@@ -1,11 +1,11 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
-use glam::Mat3;
+use glam::{DMat3, Mat3};
 use image_compute::file_image::FileImageBuffers;
 
 use crate::scan_view::callbacks::global::GlobalResources;
 
 pub struct FileImageCallback {
-    pub transform: Mat3,
+    pub transform: DMat3,
     pub image_buffers: FileImageBuffers,
 }
 impl CallbackTrait for FileImageCallback {

@@ -1,11 +1,11 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::image_compute::{ImageComputeBuffers, NormalizationType};
 
 use crate::scan_view::callbacks::global::GlobalResources;
 
 pub struct ImageCallback {
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub norm_type: NormalizationType,
     pub image_buffers: ImageComputeBuffers,
 }

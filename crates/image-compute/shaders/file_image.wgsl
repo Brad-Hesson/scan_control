@@ -1,10 +1,10 @@
 // ------------ Vertex Shader ------------
 
 @group(0) @binding(0)
-var<uniform> world2screen: mat3x3<f32>;
+var<uniform> world2screen: mat3x3<f64>;
 
 @group(1) @binding(0)
-var<uniform> quad2world: mat3x3<f32>;
+var<uniform> quad2world: mat3x3<f64>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
@@ -15,7 +15,7 @@ fn vs_main(@builtin(vertex_index) vert_index: u32) -> VertexOutput {
     position = world2screen * quad2world * position;
 
     var result: VertexOutput;
-    result.position = vec4(position.xy, 0, position.z);
+    result.position = vec4(f32(position.x), f32(position.y), 0, f32(position.z));
     result.uv = uv;
     return result;
 }
@@ -46,7 +46,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-var<private> verts: array<vec2<f32>, 4> = array(
+var<private> verts: array<vec2<f64>, 4> = array(
     vec2(-0.5, -0.5), // TL
     vec2(0.5, -0.5),  // TR
     vec2(-0.5, 0.5),  // BL

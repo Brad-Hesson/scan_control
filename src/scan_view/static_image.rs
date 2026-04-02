@@ -2,7 +2,7 @@ use core::f32;
 use std::fmt::Display;
 
 use egui::{DragValue, Response, Ui};
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use image_compute::image_compute::{FitData, FitType, NormalizationType};
 use itertools::izip;
 use nanonis_tcp::LineDir;
@@ -19,7 +19,7 @@ pub struct StaticImage {
     channel: String,
     pub buffers: BufferState,
     pub line_dir: LineDir,
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub fit_type: FitType,
     pub norm_type: NormType,
     pub std_dev: f32,
@@ -28,7 +28,7 @@ pub struct StaticImage {
 impl StaticImage {
     pub fn new(
         encoder: &ImageEncoder,
-        transform: Affine2,
+        transform: DAffine2,
         channel: String,
         buffers: BufferState,
     ) -> Self {

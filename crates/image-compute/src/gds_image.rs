@@ -2,12 +2,13 @@ use std::{io::Cursor, sync::Arc, u32};
 
 use egui::Color32;
 use encase::ShaderSize;
-use glam::{Affine2, Mat3};
+use glam::{Affine2, DAffine2, Mat3};
 use wgpu::{
     BlendState, BufferUsages, ColorTargetState, ColorWrites, Device, IndexFormat, MultisampleState,
     PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipelineDescriptor, TextureFormat,
     VertexAttribute, VertexBufferLayout,
 };
+use zerocopy::Unalign;
 
 use crate::{
     buffers::{StorageBuffer, TransformBuffer},
@@ -88,7 +89,7 @@ impl GDSImageBuffers {
             num_indices,
         }
     }
-    pub fn write_world_transform(&self, queue: &Queue, transform: Affine2) {
+    pub fn write_world_transform(&self, queue: &Queue, transform: DAffine2) {
         self.transform_buffer.write(queue, transform);
     }
     pub fn write_color(&self, queue: &Queue, color: Color32) {
@@ -109,7 +110,7 @@ impl GDSImagePipeline {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
         let shader_module = shaders::border_line::create_shader_module(device);
         let buffer_layout = VertexBufferLayout {
-            array_stride: glam::Vec2::SHADER_SIZE.get(),
+            array_stride: size_of::<glam::Vec2>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[VertexAttribute {
                 format: wgpu::VertexFormat::Float32x2,

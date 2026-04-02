@@ -1,14 +1,14 @@
 // ------------ Vertex Shader ------------
 
 @group(0) @binding(0)
-var<uniform> world2screen: mat3x3<f32>;
+var<uniform> world2screen: mat3x3<f64>;
 
 @group(1) @binding(0)
-var<uniform> quad2world: mat3x3<f32>;
+var<uniform> quad2world: mat3x3<f64>;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
-    var position = vec3(input.vert, 1.0);
+    var position = vec3(f64(input.vert.x), f64(input.vert.y), 1.0);
 
     // apply the transforms
     // position = quad2world * position;
@@ -17,7 +17,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     position = world2screen * quad2world * position;
 
     var result: VertexOutput;
-    result.position = vec4(position.xy, 0, position.z);
+    result.position = vec4(f32(position.x), f32(position.y), 0, f32(position.z));
     return result;
 }
 

@@ -1,9 +1,9 @@
 use core::f32;
 use std::mem::MaybeUninit;
 
-use eframe::{egui_wgpu::Callback, glow::STENCIL_FAIL, wgpu::TextureFormat};
+use eframe::{egui_wgpu::Callback, wgpu::TextureFormat};
 use egui::{Color32, Id, Response, Ui};
-use glam::{Affine2, Vec2};
+use glam::{Affine2, DAffine2, Vec2};
 
 use crate::{
     app::COLOR_MAP_SIZE,
@@ -12,7 +12,7 @@ use crate::{
 
 // #[derive(Clone)]
 pub struct ScanView {
-    pub world_transform: Affine2,
+    pub world_transform: DAffine2,
     target_format: TextureFormat,
     new_color_map: Option<Box<[egui::Color32; COLOR_MAP_SIZE]>>,
 }
@@ -46,33 +46,33 @@ impl ScanView {
             })
             .inner
     }
-    fn handle_inputs(&mut self, ui: &mut egui::Ui, response: egui::Response) -> Affine2 {
+    fn handle_inputs(&mut self, ui: &mut egui::Ui, response: egui::Response) -> DAffine2 {
         let rect = response.rect;
 
         // Calculate the dragging transform
         let drag = if response.dragged_by(egui::PointerButton::Primary) {
-            Affine2::from_translation(v2(response.drag_delta()))
+            DAffine2::from_translation(v2(response.drag_delta()).into())
         } else {
-            Affine2::IDENTITY
+            DAffine2::IDENTITY
         };
         // Calculate the rotation transform
         let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
             let cursor_pos = v2(response.interact_pointer_pos().unwrap() - rect.center());
             let drag_vec = v2(response.drag_delta());
             let angle = cursor_pos.perp_dot(drag_vec) / cursor_pos.length_squared();
-            Affine2::from_angle(angle)
+            DAffine2::from_angle(angle as f64)
         } else {
-            Affine2::IDENTITY
+            DAffine2::IDENTITY
         };
 
         // Calculate the Zooming transform
         let zoom = if let Some(window_pos) = response.hover_pos() {
             let scalar = (ui.input(|is| is.raw_scroll_delta).y / 100.).exp();
-            let scale = Affine2::from_scale(Vec2::splat(scalar));
-            let trans = Affine2::from_translation(v2(window_pos - rect.center()));
+            let scale = DAffine2::from_scale(Vec2::splat(scalar).into());
+            let trans = DAffine2::from_translation(v2(window_pos - rect.center()).into());
             trans * scale * trans.inverse()
         } else {
-            Affine2::IDENTITY
+            DAffine2::IDENTITY
         };
 
         // update the world transform using the calculated transforms
@@ -80,7 +80,7 @@ impl ScanView {
 
         // calculate the screen transform
         let screen_transform =
-            Affine2::from_scale(v2(rect.size()) * Vec2::new(0.5, -0.5)).inverse();
+            DAffine2::from_scale((v2(rect.size()) * Vec2::new(0.5, -0.5)).into()).inverse();
 
         screen_transform * self.world_transform
     }
@@ -92,7 +92,7 @@ impl ScanView {
                 color_map.assume_init_mut()[i] = Color32::from_gray((color * 255.) as u8);
             }
         }
-        let mut world_transform = Affine2::IDENTITY;
+        let mut world_transform = DAffine2::IDENTITY;
         world_transform.matrix2.y_axis[1] = -1.0;
         Self {
             new_color_map: Some(unsafe { color_map.assume_init() }),
@@ -108,12 +108,12 @@ impl ScanView {
 #[derive(Clone)]
 pub struct ScanViewCtx {
     pub rect: egui::Rect,
-    pub world_transform: Affine2,
+    pub world_transform: DAffine2,
 }
 
 impl ScanViewCtx {
-    pub fn world2egui(&self) -> Affine2 {
-        Affine2::from_translation(<[f32; 2]>::from(self.rect.center()).into())
-            * self.world_transform
+    pub fn world2egui(&self) -> DAffine2 {
+        let center = glam::Vec2::new(self.rect.center().x, self.rect.center().y);
+        DAffine2::from_translation(center.into()) * self.world_transform
     }
 }

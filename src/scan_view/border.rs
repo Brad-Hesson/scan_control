@@ -2,12 +2,13 @@ use egui::{
     epaint::{ColorMode, PathShape, PathStroke},
     Color32, Id, Pos2, Shape, StrokeKind, Ui,
 };
-use glam::{Affine2, Vec2};
+use glam::{Affine2, DAffine2, DVec2, Vec2};
+use itertools::Itertools;
 
 use crate::scan_view::{v2, view::ScanViewCtx};
 
 pub struct BorderRectangle {
-    pub transform: Affine2,
+    pub transform: DAffine2,
     pub color: Color32,
     pub dashed: bool,
 }
@@ -16,13 +17,37 @@ impl BorderRectangle {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
-        let t = Affine2::from_translation(v2(ctx.rect.center().to_vec2()))
+        let t = DAffine2::from_translation(v2(ctx.rect.center().to_vec2()).into())
             * ctx.world_transform
             * self.transform;
-        let p0: [f32; 2] = t.transform_point2(Vec2::new(-0.5, -0.5)).into();
-        let p1: [f32; 2] = t.transform_point2(Vec2::new(0.5, -0.5)).into();
-        let p2: [f32; 2] = t.transform_point2(Vec2::new(0.5, 0.5)).into();
-        let p3: [f32; 2] = t.transform_point2(Vec2::new(-0.5, 0.5)).into();
+        let p0: [f32; 2] = t
+            .transform_point2(DVec2::new(-0.5, -0.5))
+            .to_array()
+            .into_iter()
+            .map(|v| v as f32)
+            .collect_array()
+            .unwrap();
+        let p1: [f32; 2] = t
+            .transform_point2(DVec2::new(0.5, -0.5))
+            .to_array()
+            .into_iter()
+            .map(|v| v as f32)
+            .collect_array()
+            .unwrap();
+        let p2: [f32; 2] = t
+            .transform_point2(DVec2::new(0.5, 0.5))
+            .to_array()
+            .into_iter()
+            .map(|v| v as f32)
+            .collect_array()
+            .unwrap();
+        let p3: [f32; 2] = t
+            .transform_point2(DVec2::new(-0.5, 0.5))
+            .to_array()
+            .into_iter()
+            .map(|v| v as f32)
+            .collect_array()
+            .unwrap();
         let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
         let stroke = PathStroke {
             width: 2.,

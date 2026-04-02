@@ -1,7 +1,7 @@
 use core::f32;
 use std::{net::ToSocketAddrs, sync::Arc};
 
-use glam::Affine2;
+use glam::{Affine2, DAffine2};
 use itertools::{izip, Itertools};
 use nanonis_tcp::{blocking, commands::scan::FrameGetResponse, LineDir, ScanDir, ScanMovementType};
 
@@ -20,7 +20,7 @@ pub struct NanonisConnection {
     stamp: SharedState<BufferState>,
     frame: SharedState<BufferState>,
     scanning: SharedState<bool>,
-    transform: SharedState<Affine2>,
+    transform: SharedState<DAffine2>,
     name: SharedState<String>,
     signal_names: SharedState<Vec<String>>,
     channel_opts: SharedState<Vec<usize>>,
@@ -273,7 +273,7 @@ pub fn toggle_dir(line_dir: &mut LineDir) {
 fn status_worker(
     addr: impl ToSocketAddrs,
     ctx: egui::Context,
-    mut transform: SharedState<Affine2>,
+    mut transform: SharedState<DAffine2>,
     mut name: SharedState<String>,
     mut signal_names: SharedState<Vec<String>>,
     mut channel_opts: SharedState<Vec<usize>>,
@@ -315,11 +315,11 @@ fn status_worker(
     }
 }
 
-fn transform_from_frame(frame: &FrameGetResponse) -> Affine2 {
-    Affine2::from_scale_angle_translation(
-        [frame.width * 1e9, frame.height * -1e9].into(),
-        frame.angle / 180. * -3.14,
-        [frame.center_x * 1e9, frame.center_y * 1e9].into(),
+fn transform_from_frame(frame: &FrameGetResponse) -> DAffine2 {
+    DAffine2::from_scale_angle_translation(
+        [frame.width as f64 * 1e9, frame.height as f64 * -1e9].into(),
+        frame.angle as f64 / 180. * -3.14,
+        [frame.center_x as f64 * 1e9, frame.center_y as f64 * 1e9].into(),
     )
 }
 
