@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use itertools::{Itertools, izip};
 pub use shaders::plane_fit::NormalizeData;
 use tracing::info;
@@ -16,7 +16,7 @@ use wgpu::{
 };
 
 use crate::{
-    buffers::{BufferOpError, StorageBuffer, TransformBuffer},
+    buffers::{BufferOpError, StorageBuffer, TransformBuffer, Unalign},
     shaders::{self, scan_image::NormalizeControl},
 };
 
@@ -60,30 +60,20 @@ pub struct ImageComputeBuffers {
     pub(crate) scan_image_bg: Arc<shaders::scan_image::bind_groups::BindGroup1>,
 }
 impl ImageComputeBuffers {
-    pub fn new(
-        device: &Device,
-        queue: &Queue,
-        label: Option<&str>,
-        size: [u32; 2],
-        init_fn: impl FnOnce(&mut [f32]),
-    ) -> Self {
+    pub fn new(device: &Device, queue: &Queue, label: Option<&str>, size: [u32; 2]) -> Self {
         let size_buffer_label = label.map(|name| format!("{name}_size_buffer"));
         let image_size_buffer = StorageBuffer::new(
             device,
             size_buffer_label.as_deref(),
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            2,
-            |buf| {
-                buf.copy_from_slice(&size);
-            },
+            size.as_slice(),
         );
         let data_buffer_label = label.map(|name| format!("{name}_data_buffer"));
-        let image_data_buffer = StorageBuffer::new(
+        let image_data_buffer = StorageBuffer::new_uninit(
             device,
             data_buffer_label.as_deref(),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
             size[0] as usize * size[1] as usize,
-            init_fn,
         );
         let world_transform_buffer = TransformBuffer::new(device);
         let image_texture = device.create_texture_with_data(
@@ -109,22 +99,19 @@ impl ImageComputeBuffers {
             device,
             None,
             BufferUsages::UNIFORM | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            1,
-            |data| data[0] = NormalizationType::StdDev(3.).into(),
+            &[NormalizationType::StdDev(3.).into()],
         );
-        let normalize_buffer = StorageBuffer::<shaders::plane_fit::NormalizeData>::new(
+        let normalize_buffer = StorageBuffer::<shaders::plane_fit::NormalizeData>::new_uninit(
             device,
             Some("normalize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::UNIFORM,
             1,
-            |_| {},
         );
-        let planarize_buffer = StorageBuffer::<f32>::new(
+        let planarize_buffer = StorageBuffer::<f32>::new_uninit(
             device,
             Some("planarize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             size[0] as usize * size[1] as usize,
-            |_| {},
         );
         let image_src_bg = Arc::new(shaders::plane_fit::bind_groups::BindGroup0::from_bindings(
             device,
@@ -164,15 +151,18 @@ impl ImageComputeBuffers {
         }
     }
     pub fn write_world_transform(&self, queue: &Queue, transform: DAffine2) {
-        self.world_transform_buffer.write(queue, transform);
+        self.world_transform_buffer.queue_write(queue, transform);
     }
     pub fn write_normalization_type(
         &self,
         queue: &Queue,
         normalization_type: NormalizationType,
     ) -> Result<(), BufferOpError> {
-        self.normalize_control_buffer
-            .queue_write(queue, 0, 1, |buf| buf[0] = normalization_type.into())
+        let mut buf = self
+            .normalize_control_buffer
+            .queue_write_with(queue, 0, 1)?;
+        buf[0] = normalization_type.into();
+        Ok(())
     }
     pub fn write_lines_range(
         &self,
@@ -190,12 +180,13 @@ impl ImageComputeBuffers {
             std::ops::Bound::Excluded(v) => v + 1 - offset,
             std::ops::Bound::Unbounded => self.size[1] - offset,
         };
-        self.image_data_buffer.queue_write(
+        let mut buf = self.image_data_buffer.queue_write_with(
             queue,
             (offset * self.size[0]) as usize,
             (size * self.size[0]) as usize,
-            callback,
-        )
+        )?;
+        callback(buf.as_mut());
+        Ok(())
     }
     pub fn size(&self) -> [u32; 2] {
         self.size
@@ -339,20 +330,18 @@ struct ScratchBuffers {
 }
 impl ScratchBuffers {
     fn new(device: &Device, size: [u32; 2]) -> Self {
-        let count_buf = StorageBuffer::new(
+        let count_buf = StorageBuffer::new_uninit(
             device,
             Some("count_buf"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             size[0] as usize * size[1] as usize,
-            |_| {},
         );
         let mk_buffer = |s: &'static str| {
-            StorageBuffer::new(
+            StorageBuffer::new_uninit(
                 device,
                 Some(s),
                 BufferUsages::STORAGE | BufferUsages::COPY_SRC,
                 size[0] as usize * size[1] as usize,
-                |_| {},
             )
         };
         let x_sum = mk_buffer("x_sum");
@@ -418,7 +407,7 @@ pub struct ImageComputePipeline {
     generate_normalization__line_mean: ComputePipeline,
     clear_texture: ComputePipeline,
     qs: QuerySet,
-    qs_buf: StorageBuffer<u64>,
+    qs_buf: StorageBuffer<Unalign<u64>>,
     scratch_buffers: Arc<parking_lot::Mutex<ScratchBuffers>>,
 }
 impl ImageComputePipeline {
@@ -469,12 +458,11 @@ impl ImageComputePipeline {
                 ty: QueryType::Timestamp,
                 count: n_timings * 2,
             }),
-            qs_buf: StorageBuffer::new(
+            qs_buf: StorageBuffer::new_uninit(
                 device,
                 Some("plane_fitter_qs_buf"),
                 BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
                 n_timings as usize * 2,
-                |_| {},
             ),
             scratch_buffers: Arc::new(parking_lot::Mutex::new(ScratchBuffers::new(
                 device,
@@ -756,10 +744,11 @@ impl ImageComputePipeline {
             .queue_download(device, queue, ..num * 2, move |data| {
                 buf.set(
                     data.iter()
+                        .map(Unalign::get)
                         .chunks(2)
                         .into_iter()
                         .map(|c| c.collect_tuple().unwrap())
-                        .map(|(a, b)| b.saturating_sub(*a))
+                        .map(|(a, b)| b.saturating_sub(a))
                         .collect_vec()
                         .into_boxed_slice(),
                 )

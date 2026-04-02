@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 pub mod buffers;
+pub mod file_image;
+pub mod gds_image;
 pub mod image_compute;
 pub mod scan_image;
 mod shaders;
-pub mod file_image;
-pub mod gds_image;
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +29,7 @@ mod tests {
         const WIDTH: usize = 512;
         const HEIGHT: usize = 5;
         const SIZE: [u32; 2] = [WIDTH as _, HEIGHT as _];
-        let mut plane_fitter = ImageComputePipeline::new(&device);
+        let plane_fitter = ImageComputePipeline::new(&device);
         let init_data = |data: &mut [f32]| {
             for y in 0..HEIGHT {
                 for x in 0..WIDTH {
@@ -38,13 +38,8 @@ mod tests {
                 }
             }
         };
-        let buffers = ImageComputeBuffers::new(
-            &device,
-            &queue,
-            Some("original_image"),
-            SIZE,
-            init_data,
-        );
+        let buffers = ImageComputeBuffers::new(&device, &queue, Some("original_image"), SIZE);
+        buffers.write_lines_range(&queue, .., init_data).unwrap();
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         unsafe { device.start_graphics_debugger_capture() };
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -114,13 +109,7 @@ mod tests {
         const HEIGHT: usize = 1024;
         const SIZE: [u32; 2] = [WIDTH as _, HEIGHT as _];
         let mut plane_fitter = ImageComputePipeline::new(&device);
-        let original = ImageComputeBuffers::new(
-            &device,
-            &queue,
-            Some("original_image"),
-            SIZE,
-            |_| {},
-        );
+        let original = ImageComputeBuffers::new(&device, &queue, Some("original_image"), SIZE);
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         let mut times = vec![];
         let mut latest = vec![];

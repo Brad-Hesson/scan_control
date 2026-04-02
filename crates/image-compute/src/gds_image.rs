@@ -1,8 +1,7 @@
-use std::{io::Cursor, sync::Arc, u32};
+use std::{sync::Arc, u32};
 
 use egui::Color32;
-use encase::ShaderSize;
-use glam::{Affine2, DAffine2, Mat3};
+use glam::DAffine2;
 use wgpu::{
     BlendState, BufferUsages, ColorTargetState, ColorWrites, Device, IndexFormat, MultisampleState,
     PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipelineDescriptor, TextureFormat,
@@ -32,18 +31,10 @@ impl GDSImageBuffers {
             vert_buf_len += poly.len();
             index_buf_len += poly.len() + 2; // one for closing vert, one for separator
         }
-        let mut vertex_buffer_uninit = StorageBuffer::<glam::Vec2>::new_init_handle(
-            device,
-            None,
-            BufferUsages::VERTEX,
-            vert_buf_len,
-        );
-        let mut index_buffer_uninit = StorageBuffer::<u32>::new_init_handle(
-            device,
-            None,
-            BufferUsages::INDEX,
-            index_buf_len,
-        );
+        let mut vertex_buffer_uninit =
+            StorageBuffer::<glam::Vec2>::new_with(device, None, BufferUsages::VERTEX, vert_buf_len);
+        let mut index_buffer_uninit =
+            StorageBuffer::<u32>::new_with(device, None, BufferUsages::INDEX, index_buf_len);
         {
             let mut verts_view = vertex_buffer_uninit.view_mut();
             let mut verts = SliceWriter::new(verts_view.as_mut());
@@ -62,12 +53,11 @@ impl GDSImageBuffers {
         let num_indices = (index_buf_len - 1) as u32;
         let vertex_buffer = vertex_buffer_uninit.finish();
         let index_buffer = index_buffer_uninit.finish();
-        let border_color_buffer = StorageBuffer::<f32>::new(
+        let border_color_buffer = StorageBuffer::<f32>::new_uninit(
             device,
             Some("border_color_buffer"),
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             3,
-            |_| {},
         );
         let transform_buffer = TransformBuffer::new(device);
         let bg = Arc::new(
@@ -89,16 +79,16 @@ impl GDSImageBuffers {
         }
     }
     pub fn write_world_transform(&self, queue: &Queue, transform: DAffine2) {
-        self.transform_buffer.write(queue, transform);
+        self.transform_buffer.queue_write(queue, transform);
     }
     pub fn write_color(&self, queue: &Queue, color: Color32) {
-        self.border_color_buffer
-            .queue_write(queue, 0, 3, |buf| {
-                buf[0] = (color.r() as f32) / 255.;
-                buf[1] = (color.g() as f32) / 255.;
-                buf[2] = (color.b() as f32) / 255.;
-            })
+        let mut buf = self
+            .border_color_buffer
+            .queue_write_with(queue, 0, 3)
             .unwrap();
+        buf[0] = (color.r() as f32) / 255.;
+        buf[1] = (color.g() as f32) / 255.;
+        buf[2] = (color.b() as f32) / 255.;
     }
 }
 
