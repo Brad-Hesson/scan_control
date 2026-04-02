@@ -162,7 +162,6 @@ impl<'a, T: FromBytes + IntoBytes + KnownLayout + Immutable> DerefMut
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let bytes = self.inner.as_mut();
-        dbg!(bytes.as_ptr());
         <[T]>::mut_from_bytes(bytes).unwrap()
     }
 }
