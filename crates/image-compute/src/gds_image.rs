@@ -8,7 +8,6 @@ use wgpu::{
     PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipelineDescriptor, TextureFormat,
     VertexAttribute, VertexBufferLayout,
 };
-use zerocopy::Unalign;
 
 use crate::{
     buffers::{StorageBuffer, TransformBuffer},

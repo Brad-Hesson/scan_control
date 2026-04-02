@@ -1888,8 +1888,6 @@ dependencies = [
  "bytemuck",
  "encase",
  "mint",
- "zerocopy",
- "zerocopy-derive",
 ]
 
 [[package]]
@@ -2248,7 +2246,6 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "wgsl_to_wgpu",
- "zerocopy",
 ]
 
 [[package]]
@@ -3976,7 +3973,6 @@ dependencies = [
  "uuid",
  "wgpu",
  "wgsl_to_wgpu",
- "zerocopy",
 ]
 
 [[package]]

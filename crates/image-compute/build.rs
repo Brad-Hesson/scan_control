@@ -51,7 +51,6 @@ fn generate_wgsl_bindings(
     )
     .inspect_err(|error| error.emit_to_stderr_with_path(&wgsl_source, &wgsl_file))
     .map_err(|_| "Failed to validate shader")?;
-    text = text.replace("bytemuck :: Zeroable", "bytemuck :: Zeroable, zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout");
 
     std::fs::write(
         format!("{}/{output}.rs", env::var("OUT_DIR")?),

@@ -14,7 +14,6 @@ use wgpu::{
     Extent3d, Queue, QueueWriteBufferView, Texture, TextureDescriptor, TextureDimension,
     TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unalign};
 
 #[derive(Clone)]
 #[repr(transparent)]
@@ -22,7 +21,7 @@ pub struct StorageBuffer<T> {
     inner: Buffer,
     pd: PhantomData<T>,
 }
-impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
+impl<T: NoUninit + AnyBitPattern> StorageBuffer<T> {
     pub fn new(
         device: &Device,
         label: Option<&str>,
@@ -36,7 +35,9 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
             usage,
             mapped_at_creation: true,
         });
-        init_fn(<[T]>::mut_from_bytes(inner.get_mapped_range_mut(..).as_mut()).unwrap());
+        init_fn(bytemuck::cast_slice_mut(
+            inner.get_mapped_range_mut(..).as_mut(),
+        ));
         inner.unmap();
         Self {
             inner,
@@ -77,7 +78,7 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
                     .map_err(|_| BufferOpError::BufferSizeZero)?,
             )
             .expect("`Queue::write_buffer_with` failed");
-        callback(<[T]>::mut_from_bytes(&mut *view).unwrap());
+        callback(bytemuck::cast_slice_mut(&mut *view));
         Ok(())
     }
     pub fn queue_write_with<'s>(
@@ -105,10 +106,7 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
         queue: &Queue,
         range: impl RangeBounds<usize>,
         callback: impl FnOnce(&[T]) + Send + 'static,
-    ) -> Result<(), BufferOpError>
-    where
-        T: Immutable,
-    {
+    ) -> Result<(), BufferOpError> {
         let range = rangebounds_map(range, |v| (*v * size_of::<T>()) as BufferAddress);
         if range_is_empty(&range) {
             return Err(BufferOpError::BufferSizeZero);
@@ -117,7 +115,7 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
             device,
             queue,
             &self.inner.slice(range),
-            move |db| callback(<[T]>::ref_from_bytes(&db.unwrap()).unwrap()),
+            move |db| callback(bytemuck::cast_slice(&db.unwrap())),
         );
         Ok(())
     }
@@ -132,7 +130,7 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBuffer<T> {
 pub struct StorageBufferUninit<T> {
     buffer: StorageBuffer<T>,
 }
-impl<T: FromBytes + IntoBytes + KnownLayout> StorageBufferUninit<T> {
+impl<T> StorageBufferUninit<T> {
     pub fn view_mut(&mut self) -> StorageBufferViewMut<'_, T> {
         StorageBufferViewMut {
             inner: self.buffer.inner.get_mapped_range_mut(..),
@@ -140,7 +138,7 @@ impl<T: FromBytes + IntoBytes + KnownLayout> StorageBufferUninit<T> {
         }
     }
 }
-impl<T: FromBytes + IntoBytes + KnownLayout> StorageBufferUninit<T> {
+impl<T> StorageBufferUninit<T> {
     pub fn finish(self) -> StorageBuffer<T> {
         self.buffer.inner.unmap();
         self.buffer
@@ -150,39 +148,37 @@ pub struct StorageBufferViewMut<'a, T> {
     inner: BufferViewMut<'a>,
     phantom: PhantomData<T>,
 }
-impl<'a, T: FromBytes + IntoBytes + KnownLayout + Immutable> Deref for StorageBufferViewMut<'a, T> {
+impl<'a, T: NoUninit + AnyBitPattern> Deref for StorageBufferViewMut<'a, T> {
     type Target = [T];
 
+    #[track_caller]
     fn deref(&self) -> &Self::Target {
-        <[T]>::ref_from_bytes(self.inner.as_ref()).unwrap()
+        bytemuck::cast_slice(self.inner.as_ref())
     }
 }
-impl<'a, T: FromBytes + IntoBytes + KnownLayout + Immutable> DerefMut
-    for StorageBufferViewMut<'a, T>
-{
+impl<'a, T: NoUninit + AnyBitPattern> DerefMut for StorageBufferViewMut<'a, T> {
+    #[track_caller]
     fn deref_mut(&mut self) -> &mut Self::Target {
         let bytes = self.inner.as_mut();
-        <[T]>::mut_from_bytes(bytes).unwrap()
+        bytemuck::cast_slice_mut(bytes)
     }
 }
 pub struct QueueWriteStorageBufferView<'a, T> {
     inner: QueueWriteBufferView<'a>,
     phantom: PhantomData<T>,
 }
-impl<'a, T: FromBytes + IntoBytes + KnownLayout + Immutable> Deref
-    for QueueWriteStorageBufferView<'a, T>
-{
+impl<'a, T: NoUninit + AnyBitPattern> Deref for QueueWriteStorageBufferView<'a, T> {
     type Target = [T];
 
+    #[track_caller]
     fn deref(&self) -> &Self::Target {
-        <[T]>::ref_from_bytes(self.inner.as_ref()).unwrap()
+        bytemuck::cast_slice(self.inner.as_ref())
     }
 }
-impl<'a, T: FromBytes + IntoBytes + KnownLayout + Immutable> DerefMut
-    for QueueWriteStorageBufferView<'a, T>
-{
+impl<'a, T: NoUninit + AnyBitPattern> DerefMut for QueueWriteStorageBufferView<'a, T> {
+    #[track_caller]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        <[T]>::mut_from_bytes(self.inner.as_mut()).unwrap()
+        bytemuck::cast_slice_mut(self.inner.as_mut())
     }
 }
 
@@ -232,8 +228,8 @@ impl TransformBuffer {
     pub fn write(&self, queue: &Queue, transform: impl Into<DMat3>) {
         let mat3 = transform.into();
         let mut buf = self.0.queue_write_with(queue, 0, 3 * 4).unwrap();
-        for (x,y) in iproduct!(0..3, 0..3){
-            buf[x*4..][y].set(mat3.to_cols_array_2d()[x][y]);
+        for (x, y) in iproduct!(0..3, 0..3) {
+            buf[x * 4..][y].set(mat3.to_cols_array_2d()[x][y]);
         }
     }
     pub fn as_entire_buffer_binding(&self) -> BufferBinding<'_> {
@@ -279,5 +275,14 @@ impl<const SIZE: usize> ColorMapTexture<SIZE> {
     }
     pub fn create_view(&self) -> TextureView {
         self.0.create_view(&TextureViewDescriptor::default())
+    }
+}
+
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C, packed)]
+pub struct Unalign<T>(T);
+impl<T> Unalign<T> {
+    pub fn set(&mut self, val: T) {
+        *self = Self(val);
     }
 }
