@@ -25,14 +25,12 @@ impl ScanViewImage {
         size: [u32; 2],
         transform: DAffine2,
         norm_type: NormalizationType,
-        init_fn: impl FnOnce(&mut [f32]),
     ) -> Self {
         let image_buffers = ImageComputeBuffers::new(
             &image_encoder.wgpu_state.device,
             &image_encoder.wgpu_state.queue,
             None,
             size,
-            init_fn,
         );
         Self {
             uuid: Uuid::new_v4(),

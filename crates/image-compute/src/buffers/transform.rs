@@ -31,7 +31,7 @@ impl TransformBuffer {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct DVec3Pad {
     vec: Unalign<DVec3>,
-    _pad: [u8; 8],
+    _pad: [u8; size_of::<f64>()],
 }
 impl DVec3Pad {
     fn set(&mut self, vec: DVec3) {

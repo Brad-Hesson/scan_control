@@ -39,7 +39,6 @@ impl LiveImage {
                 [buffers.size[1] as u32, buffers.size[0] as u32],
                 transform,
                 norm_type.combined(std_dev),
-                |buf| buf.fill(f32::NAN),
             ),
             buffers,
             transform,
@@ -151,7 +150,6 @@ impl LiveImage {
             new_size,
             self.transform,
             self.norm_type.combined(self.std_dev),
-            |buf| buf.fill(f32::NAN),
         );
     }
     pub fn stamp(&self, encoder: &ImageEncoder, buffers: BufferState) -> StaticImage {

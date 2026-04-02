@@ -37,7 +37,6 @@ impl StaticImage {
             [buffers.size[1] as u32, buffers.size[0] as u32],
             transform,
             NormalizationType::FullScale,
-            |buf| buf.copy_from_slice(&buffers.buf_f),
         );
         Self {
             line_dir: LineDir::Forward,
