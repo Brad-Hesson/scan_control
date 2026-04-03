@@ -3,11 +3,14 @@ use std::path::Path;
 use eframe::egui_wgpu;
 use egui::{Color32, DragValue, Id, PointerButton, Pos2, Response, Sense, Stroke, Ui, Vec2};
 use float_ord::FloatOrd;
-use glam::{Affine2, DAffine2, DMat3, Mat3, Vec3Swizzles};
+use glam::{Affine2, DAffine2, DMat3, DVec2, Mat3, Vec3Swizzles};
 use image_compute::file_image::FileImageBuffers;
 use itertools::{izip, Itertools};
 
-use crate::scan_view::{ImageEncoder, callbacks::FileImageCallback, v2, view::ScanViewCtx};
+use crate::{
+    scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx},
+    utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection},
+};
 
 pub struct FileImage {
     pub transform: DMat3,
@@ -40,7 +43,7 @@ impl FileImage {
         ];
         let world_points = local_points
             .iter()
-            .map(|p| transform.project_glam_pos(*p))
+            .map(|p| transform.project_pos2(*p))
             .collect_array()
             .unwrap();
         Self {
@@ -68,22 +71,26 @@ impl FileImage {
         if self.editing {
             for (i, c) in POINT_COLORS.into_iter().enumerate() {
                 let p = &mut self.world_points[i];
-                let center = ctx.world2egui().project_glam_pos(*p);
-                let resp = drag_point((self.id, i), ui, center, 8., c)
+                let screen_pos = ctx.world2egui().transform_point2(*p).to_egui_pos2();
+                let resp = drag_point((self.id, i), ui, screen_pos, 8., c)
                     .on_hover_cursor(egui::CursorIcon::Move);
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     *p += ctx
                         .world2egui()
                         .inverse()
-                        .transform_vector2(v2(resp.drag_delta()).into());
+                        .transform_vector2(resp.drag_delta().to_glam());
                     self.update_transform();
                 } else if resp.dragged_by(egui::PointerButton::Secondary) {
                     *p += ctx
                         .world2egui()
                         .inverse()
-                        .transform_vector2(v2(resp.drag_delta()).into());
+                        .transform_vector2(resp.drag_delta().to_glam());
                     self.update_local_points();
                 }
+            }
+            if ui.input(|i| i.modifiers.ctrl) {
+                let tf = world_delta_transform(ui, self.center());
+                self.transform_world_points(tf);
             }
         }
     }
@@ -91,7 +98,7 @@ impl FileImage {
         self.local_points = self
             .world_points
             .iter()
-            .map(|p| self.transform.inverse().project_glam_pos(*p))
+            .map(|p| self.transform.inverse().project_pos2(*p))
             .collect_array()
             .unwrap();
     }
@@ -134,59 +141,34 @@ impl FileImage {
                 self.editing = false;
             }
             if ui.button("Flip X").clicked() {
-                self.flip_x();
+                let tran = DAffine2::from_translation(self.center());
+                let tf = DAffine2::from_scale(DVec2::new(-1., 1.));
+                let tf = tran * tf * tran.inverse();
+                self.transform_world_points(tf);
             }
             if ui.button("Flip Y").clicked() {
-                self.flip_y();
+                let tran = DAffine2::from_translation(self.center());
+                let tf = DAffine2::from_scale(DVec2::new(1., -1.));
+                let tf = tran * tf * tran.inverse();
+                self.transform_world_points(tf);
             }
         } else {
             if ui.button("Edit").clicked() {
                 self.editing = true;
             }
         }
+        ui.label(format!("{:?}", self.transform));
+        ui.label(format!("{:?}", self.world_points));
+        ui.label(format!("{:?}", self.local_points));
     }
-    fn flip_x(&mut self) {
-        let c_x = self.world_points.iter().map(|p| p.x).sum::<f64>() / 4.;
+    fn center(&self) -> glam::DVec2 {
+        self.world_points.iter().sum::<glam::DVec2>() / 4.
+    }
+    fn transform_world_points(&mut self, tf: DAffine2) {
         for p in &mut self.world_points {
-            let del = p.x - c_x;
-            p.x -= 2. * del;
+            *p = tf.transform_point2(*p);
         }
         self.update_transform();
-    }
-    fn flip_y(&mut self) {
-        let c_y = self.world_points.iter().map(|p| p.y).sum::<f64>() / 4.;
-        for p in &mut self.world_points {
-            let del = p.y - c_y;
-            p.y -= 2. * del;
-        }
-        self.update_transform();
-    }
-}
-
-pub trait ProjectionTransform: Copy {
-    #[inline]
-    fn project_egui_pos(self, p: egui::Pos2) -> glam::DVec2 {
-        self.project_glam_pos(glam::DVec2::new(p.x as f64, p.y as f64))
-    }
-    #[inline]
-    fn project_glam_pos(self, p: glam::DVec2) -> glam::DVec2 {
-        let p = self.mat3() * p.extend(1.0);
-        p.xy() / p.z
-    }
-    fn mat3(self) -> DMat3;
-}
-impl ProjectionTransform for DMat3 {
-    #[inline]
-    fn mat3(self) -> DMat3 {
-        self
-    }
-}
-impl ProjectionTransform for DAffine2 {
-    fn mat3(self) -> DMat3 {
-        self.into()
-    }
-    fn project_glam_pos(self, p: glam::DVec2) -> glam::DVec2 {
-        self.transform_point2(p)
     }
 }
 
@@ -200,11 +182,10 @@ const POINT_COLORS: [Color32; 4] = [
 fn drag_point(
     id_salt: impl std::hash::Hash,
     ui: &mut Ui,
-    center: glam::DVec2,
+    center: egui::Pos2,
     radius: f32,
     color: impl Into<Color32>,
 ) -> Response {
-    let center = egui::Pos2::new(center.x as f32, center.y as f32);
     let resp = ui.interact(
         egui::Rect::from_center_size(
             center,
@@ -224,4 +205,43 @@ fn drag_point(
     ui.painter().circle_filled(center, radius, color);
 
     resp
+}
+
+pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
+    let ctx = ui
+        .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+        .unwrap();
+    let screen_to_world = ctx.world2egui().inverse();
+    let response = ctx.screen_response;
+    // Calculate the dragging transform
+    let drag = if response.dragged_by(egui::PointerButton::Primary) {
+        let screen_drag = response.drag_delta().to_glam();
+        let world_drag = screen_to_world.transform_vector2(screen_drag);
+        DAffine2::from_translation(world_drag)
+    } else {
+        DAffine2::IDENTITY
+    };
+    // Calculate the rotation transform
+    let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
+        let cursor_pos =
+            screen_to_world.transform_point2(response.interact_pointer_pos().unwrap().to_glam());
+        let cursor_vec = cursor_pos - center;
+        let drag_vec = screen_to_world.transform_vector2(response.drag_delta().to_glam());
+        let angle = cursor_vec.perp_dot(drag_vec) / cursor_vec.length_squared();
+
+        let trans = DAffine2::from_translation(center);
+        let rot = DAffine2::from_angle(angle as f64);
+        trans * rot * trans.inverse()
+    } else {
+        DAffine2::IDENTITY
+    };
+
+    // Calculate the Zooming transform
+    let zoom = {
+        let scalar = (ui.input(|is| is.raw_scroll_delta).y / 100.).exp() as f64;
+        let scale = DAffine2::from_scale(DVec2::splat(scalar).into());
+        let trans = DAffine2::from_translation(center);
+        trans * scale * trans.inverse()
+    };
+    rotate * zoom * drag
 }

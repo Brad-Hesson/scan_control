@@ -2,10 +2,10 @@ use egui::{
     epaint::{ColorMode, PathShape, PathStroke},
     Color32, Id, Pos2, Shape, StrokeKind, Ui,
 };
-use glam::{Affine2, DAffine2, DVec2, Vec2};
+use glam::{DAffine2, DVec2};
 use itertools::Itertools;
 
-use crate::scan_view::{v2, view::ScanViewCtx};
+use crate::{scan_view::view::ScanViewCtx, utils::vec_interop::IntoGlam as _};
 
 pub struct BorderRectangle {
     pub transform: DAffine2,
@@ -17,7 +17,7 @@ impl BorderRectangle {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
-        let t = DAffine2::from_translation(v2(ctx.rect.center().to_vec2()).into())
+        let t = DAffine2::from_translation(ctx.rect.center().to_glam())
             * ctx.world_transform
             * self.transform;
         let p0: [f32; 2] = t

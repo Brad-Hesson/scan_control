@@ -7,9 +7,7 @@ use glam::{Affine2, DAffine2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
 
-use crate::scan_view::{
-    callbacks::GDSImageCallback, file_image::ProjectionTransform, view::ScanViewCtx, ImageEncoder,
-};
+use crate::scan_view::{callbacks::GDSImageCallback, view::ScanViewCtx, ImageEncoder};
 
 pub struct GDSImage {
     transform: DAffine2,
@@ -90,8 +88,7 @@ fn draw_element(
                 .points()
                 .iter()
                 .dropping_back(1)
-                .map(|p| transform.project_glam_pos(p.to_world()))
-                .map(|p| glam::Vec2::new(p.x as f32, p.y as f32))
+                .map(|p| transform.transform_point2(p.to_world()).as_vec2())
                 .collect_vec();
             let layer = polygon.layer().value();
             polys.entry(layer).or_default().push(points);
@@ -104,7 +101,7 @@ fn draw_element(
             let transform = transform
                 * DAffine2::from_angle_translation(
                     reference.grid().angle() / 180. * 3.14159,
-                    glam::DVec2::new(origin.x, origin.y),
+                    origin,
                 );
             match reference.instance() {
                 gdsr::Instance::Cell(cell_name) => {

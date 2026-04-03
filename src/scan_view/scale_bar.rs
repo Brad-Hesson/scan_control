@@ -3,9 +3,7 @@ use egui::{
     Align, Color32, CornerRadius, Id, Pos2, Shape, Ui, Vec2,
 };
 
-use crate::scan_view::{
-    file_image::ProjectionTransform, static_image::MetersFmt, view::ScanViewCtx,
-};
+use crate::scan_view::{static_image::MetersFmt, view::ScanViewCtx};
 
 pub struct ScaleBar {}
 impl ScaleBar {
@@ -16,7 +14,7 @@ impl ScaleBar {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
-        let (scale,_,_) = ctx.world2egui().to_scale_angle_translation();
+        let (scale, _, _) = ctx.world2egui().to_scale_angle_translation();
         let mut nm = scale.x.abs();
         let pivot = 500.0;
         let mut mul = 0;
@@ -29,7 +27,10 @@ impl ScaleBar {
             mul -= 1;
         }
         let pos = ctx.rect.right_bottom() - Vec2::new(5., 5.);
-        let size = egui::Vec2 { x: nm as f32, y: 5. };
+        let size = egui::Vec2 {
+            x: nm as f32,
+            y: 5.,
+        };
         let rect = egui::Rect::from_center_size(pos - size / 2., size);
         // let rect = egui::Rect::from_center_size(ctx.rect.center(), egui::Vec2 { x: nm, y: 5. });
         ui.painter().add(Shape::Rect(RectShape::filled(

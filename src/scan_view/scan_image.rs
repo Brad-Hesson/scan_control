@@ -9,7 +9,10 @@ use image_compute::{
 };
 use uuid::Uuid;
 
-use crate::scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder};
+use crate::{
+    scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder},
+    utils::vec_interop::IntoGlam as _,
+};
 
 pub struct ScanViewImage {
     uuid: Uuid,
@@ -51,10 +54,9 @@ impl ScanViewImage {
         let resp = ui
             .input(|i| i.pointer.latest_pos())
             .and_then(|pos| {
-                let pos = glam::Vec2::new(pos.x, pos.y);
                 let [x, y] = (ctx.world2egui() * self.transform)
                     .inverse()
-                    .transform_point2(pos.into())
+                    .transform_point2(pos.to_glam())
                     .abs()
                     .into();
                 (x < 0.5 && y < 0.5).then(|| {

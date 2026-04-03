@@ -33,7 +33,3 @@ impl ImageEncoder {
         }
     }
 }
-
-fn v2(v: impl Into<mint::Vector2<f32>>) -> glam::Vec2 {
-    v.into().into()
-}

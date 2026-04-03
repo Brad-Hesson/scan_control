@@ -2,12 +2,13 @@ use core::f32;
 use std::mem::MaybeUninit;
 
 use eframe::{egui_wgpu::Callback, wgpu::TextureFormat};
-use egui::{Color32, Id, Response, Ui};
-use glam::{Affine2, DAffine2, Vec2};
+use egui::{epaint::CircleShape, Color32, Id, Pos2, Rect, Response, Shape, Stroke, Ui};
+use glam::{Affine2, DAffine2, DVec2, Vec2};
 
 use crate::{
     app::COLOR_MAP_SIZE,
-    scan_view::{callbacks::GlobalCallback, v2, ImageEncoder},
+    scan_view::{callbacks::GlobalCallback, ImageEncoder},
+    utils::vec_interop::IntoGlam as _,
 };
 
 // #[derive(Clone)]
@@ -38,6 +39,7 @@ impl ScanView {
                 let ctx = ScanViewCtx {
                     rect,
                     world_transform: self.world_transform,
+                    screen_response: response.clone(),
                 };
                 ui.data_mut(|map| map.insert_temp(Id::new(()), ctx));
                 add_contents(ui);
@@ -47,40 +49,16 @@ impl ScanView {
             .inner
     }
     fn handle_inputs(&mut self, ui: &mut egui::Ui, response: egui::Response) -> DAffine2 {
-        let rect = response.rect;
-
-        // Calculate the dragging transform
-        let drag = if response.dragged_by(egui::PointerButton::Primary) {
-            DAffine2::from_translation(v2(response.drag_delta()).into())
-        } else {
-            DAffine2::IDENTITY
-        };
-        // Calculate the rotation transform
-        let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
-            let cursor_pos = v2(response.interact_pointer_pos().unwrap() - rect.center());
-            let drag_vec = v2(response.drag_delta());
-            let angle = cursor_pos.perp_dot(drag_vec) / cursor_pos.length_squared();
-            DAffine2::from_angle(angle as f64)
-        } else {
-            DAffine2::IDENTITY
-        };
-
-        // Calculate the Zooming transform
-        let zoom = if let Some(window_pos) = response.hover_pos() {
-            let scalar = (ui.input(|is| is.raw_scroll_delta).y / 100.).exp();
-            let scale = DAffine2::from_scale(Vec2::splat(scalar).into());
-            let trans = DAffine2::from_translation(v2(window_pos - rect.center()).into());
-            trans * scale * trans.inverse()
-        } else {
-            DAffine2::IDENTITY
-        };
-
         // update the world transform using the calculated transforms
-        self.world_transform = rotate * zoom * drag * self.world_transform;
+        if ui.input(|i| !i.modifiers.ctrl) {
+            let tf = transform_from_response(&response, ui);
+            self.world_transform = tf * self.world_transform;
+        }
 
         // calculate the screen transform
+        let rect = response.rect;
         let screen_transform =
-            DAffine2::from_scale((v2(rect.size()) * Vec2::new(0.5, -0.5)).into()).inverse();
+            DAffine2::from_scale(rect.size().to_glam() * DVec2::new(0.5, -0.5)).inverse();
 
         screen_transform * self.world_transform
     }
@@ -109,11 +87,42 @@ impl ScanView {
 pub struct ScanViewCtx {
     pub rect: egui::Rect,
     pub world_transform: DAffine2,
+    pub screen_response: Response,
 }
 
 impl ScanViewCtx {
     pub fn world2egui(&self) -> DAffine2 {
-        let center = glam::Vec2::new(self.rect.center().x, self.rect.center().y);
-        DAffine2::from_translation(center.into()) * self.world_transform
+        DAffine2::from_translation(self.rect.center().to_glam()) * self.world_transform
     }
+}
+
+pub fn transform_from_response(response: &Response, ui: &Ui) -> DAffine2 {
+    let rect = response.rect;
+    // Calculate the dragging transform
+    let drag = if response.dragged_by(egui::PointerButton::Primary) {
+        DAffine2::from_translation(response.drag_delta().to_glam())
+    } else {
+        DAffine2::IDENTITY
+    };
+    // Calculate the rotation transform
+    let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
+        let cursor_pos = (response.interact_pointer_pos().unwrap() - rect.center()).to_glam();
+        let drag_vec = response.drag_delta().to_glam();
+        let angle = cursor_pos.perp_dot(drag_vec) / cursor_pos.length_squared();
+        DAffine2::from_angle(angle as f64)
+    } else {
+        DAffine2::IDENTITY
+    };
+
+    // Calculate the Zooming transform
+    let zoom = if let Some(window_pos) = response.hover_pos() {
+        let scalar = (ui.input(|is| is.smooth_scroll_delta).y / 100.).exp();
+        let scale = DAffine2::from_scale(Vec2::splat(scalar).into());
+        let trans = DAffine2::from_translation((window_pos - rect.center()).to_glam());
+        trans * scale * trans.inverse()
+    } else {
+        DAffine2::IDENTITY
+    };
+
+    rotate * zoom * drag
 }
