@@ -1,6 +1,6 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
 use egui::Color32;
-use glam::{Affine2, DAffine2, Mat3};
+use glam::DAffine2;
 use image_compute::gds_image::GDSImageBuffers;
 
 use crate::scan_view::callbacks::global::GlobalResources;

@@ -1,13 +1,13 @@
 use std::{collections::BTreeMap, path::Path};
 
 use eframe::egui_wgpu;
-use egui::{epaint::PathShape, Color32, Id, Shape, Stroke, Ui};
+use egui::{Color32, Id, Ui};
 use gdsr::{Cell, Element, Library};
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
 
-use crate::scan_view::{callbacks::GDSImageCallback, view::ScanViewCtx, ImageEncoder};
+use crate::{scan_view::{ImageEncoder, callbacks::GDSImageCallback, view::ScanViewCtx}, utils::vec_interop::Projection};
 
 pub struct GDSImage {
     transform: DAffine2,
@@ -81,6 +81,7 @@ fn draw_element(
     transform: DAffine2,
     elem: &Element,
 ) {
+    #[allow(unused_variables)]
     match elem {
         gdsr::Element::Path(path) => todo!(),
         gdsr::Element::Polygon(polygon) => {
@@ -88,7 +89,7 @@ fn draw_element(
                 .points()
                 .iter()
                 .dropping_back(1)
-                .map(|p| transform.transform_point2(p.to_world()).as_vec2())
+                .map(|p| transform.project_pos2(p.to_world()).as_vec2())
                 .collect_vec();
             let layer = polygon.layer().value();
             polys.entry(layer).or_default().push(points);
@@ -138,6 +139,7 @@ impl GDSUnit for gdsr::Unit {
                 let scale = units * 1e9;
                 value as f64 * scale
             }
+            #[allow(unused_variables)]
             gdsr::Unit::Float(gdsr::FloatUnit { value, units }) => todo!(),
         }
     }

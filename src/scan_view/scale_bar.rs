@@ -1,7 +1,4 @@
-use egui::{
-    epaint::{RectShape, TextShape},
-    Align, Color32, CornerRadius, Id, Pos2, Shape, Ui, Vec2,
-};
+use egui::{epaint::RectShape, Color32, CornerRadius, Id, Shape, Ui, Vec2};
 
 use crate::scan_view::{static_image::MetersFmt, view::ScanViewCtx};
 

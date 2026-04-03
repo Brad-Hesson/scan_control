@@ -1,11 +1,10 @@
 use std::path::Path;
 
 use eframe::egui_wgpu;
-use egui::{Color32, DragValue, Id, PointerButton, Pos2, Response, Sense, Stroke, Ui, Vec2};
-use float_ord::FloatOrd;
-use glam::{Affine2, DAffine2, DMat3, DVec2, Mat3, Vec3Swizzles};
+use egui::{Color32, Id, Response, Sense, Ui};
+use glam::{DAffine2, DMat3, DVec2};
 use image_compute::file_image::FileImageBuffers;
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 
 use crate::{
     scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx},
@@ -71,20 +70,20 @@ impl FileImage {
         if self.editing {
             for (i, c) in POINT_COLORS.into_iter().enumerate() {
                 let p = &mut self.world_points[i];
-                let screen_pos = ctx.world2egui().transform_point2(*p).to_egui_pos2();
+                let screen_pos = ctx.world2egui().project_pos2(*p).to_egui_pos2();
                 let resp = drag_point((self.id, i), ui, screen_pos, 8., c)
                     .on_hover_cursor(egui::CursorIcon::Move);
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     *p += ctx
                         .world2egui()
                         .inverse()
-                        .transform_vector2(resp.drag_delta().to_glam());
+                        .project_vec2(resp.drag_delta().to_glam());
                     self.update_transform();
                 } else if resp.dragged_by(egui::PointerButton::Secondary) {
                     *p += ctx
                         .world2egui()
                         .inverse()
-                        .transform_vector2(resp.drag_delta().to_glam());
+                        .project_vec2(resp.drag_delta().to_glam());
                     self.update_local_points();
                 }
             }
@@ -166,7 +165,7 @@ impl FileImage {
     }
     fn transform_world_points(&mut self, tf: DAffine2) {
         for p in &mut self.world_points {
-            *p = tf.transform_point2(*p);
+            *p = tf.project_pos2(*p);
         }
         self.update_transform();
     }
@@ -216,7 +215,7 @@ pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
     // Calculate the dragging transform
     let drag = if response.dragged_by(egui::PointerButton::Primary) {
         let screen_drag = response.drag_delta().to_glam();
-        let world_drag = screen_to_world.transform_vector2(screen_drag);
+        let world_drag = screen_to_world.project_vec2(screen_drag);
         DAffine2::from_translation(world_drag)
     } else {
         DAffine2::IDENTITY
@@ -224,9 +223,9 @@ pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
     // Calculate the rotation transform
     let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
         let cursor_pos =
-            screen_to_world.transform_point2(response.interact_pointer_pos().unwrap().to_glam());
+            screen_to_world.project_pos2(response.interact_pointer_pos().unwrap().to_glam());
         let cursor_vec = cursor_pos - center;
-        let drag_vec = screen_to_world.transform_vector2(response.drag_delta().to_glam());
+        let drag_vec = screen_to_world.project_vec2(response.drag_delta().to_glam());
         let angle = cursor_vec.perp_dot(drag_vec) / cursor_vec.length_squared();
 
         let trans = DAffine2::from_translation(center);

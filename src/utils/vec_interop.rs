@@ -20,6 +20,7 @@ impl IntoGlam for egui::Vec2 {
     }
 }
 
+#[allow(unused)]
 pub trait IntoEgui {
     fn to_egui_pos2(self) -> egui::Pos2;
     fn to_egui_vec2(self) -> egui::Vec2;
@@ -41,10 +42,22 @@ impl IntoEgui for glam::DVec2 {
 
 pub trait Projection {
     fn project_pos2(&self, pos: DVec2) -> DVec2;
+    fn project_vec2(&self, pos: DVec2) -> DVec2;
 }
 impl Projection for DMat3 {
     fn project_pos2(&self, pos: DVec2) -> DVec2 {
         let pos_p = self * pos.extend(1.);
         pos_p.xy() / pos_p.z
+    }
+    fn project_vec2(&self, _pos: DVec2) -> DVec2 {
+        todo!()
+    }
+}
+impl Projection for DAffine2 {
+    fn project_pos2(&self, pos: DVec2) -> DVec2 {
+        self.transform_point2(pos)
+    }
+    fn project_vec2(&self, pos: DVec2) -> DVec2 {
+        self.transform_vector2(pos)
     }
 }

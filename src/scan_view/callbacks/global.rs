@@ -2,7 +2,7 @@ use eframe::{
     egui_wgpu::{self, CallbackTrait},
     wgpu::{self, Device, TextureFormat},
 };
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use image_compute::{
     file_image::FileImagePipeline,
     gds_image::GDSImagePipeline,

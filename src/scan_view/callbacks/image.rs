@@ -1,5 +1,5 @@
 use eframe::egui_wgpu::{self, CallbackTrait};
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use image_compute::image_compute::{ImageComputeBuffers, NormalizationType};
 
 use crate::scan_view::callbacks::global::GlobalResources;

@@ -2,7 +2,7 @@ use core::f32;
 use std::fmt::Display;
 
 use egui::{DragValue, Response, Ui};
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use image_compute::image_compute::{FitData, FitType, NormalizationType};
 use itertools::izip;
 use nanonis_tcp::LineDir;

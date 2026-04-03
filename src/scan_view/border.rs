@@ -5,7 +5,7 @@ use egui::{
 use glam::{DAffine2, DVec2};
 use itertools::Itertools;
 
-use crate::{scan_view::view::ScanViewCtx, utils::vec_interop::IntoGlam as _};
+use crate::{scan_view::view::ScanViewCtx, utils::vec_interop::{IntoGlam as _, Projection}};
 
 pub struct BorderRectangle {
     pub transform: DAffine2,
@@ -21,28 +21,28 @@ impl BorderRectangle {
             * ctx.world_transform
             * self.transform;
         let p0: [f32; 2] = t
-            .transform_point2(DVec2::new(-0.5, -0.5))
+            .project_pos2(DVec2::new(-0.5, -0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)
             .collect_array()
             .unwrap();
         let p1: [f32; 2] = t
-            .transform_point2(DVec2::new(0.5, -0.5))
+            .project_pos2(DVec2::new(0.5, -0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)
             .collect_array()
             .unwrap();
         let p2: [f32; 2] = t
-            .transform_point2(DVec2::new(0.5, 0.5))
+            .project_pos2(DVec2::new(0.5, 0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)
             .collect_array()
             .unwrap();
         let p3: [f32; 2] = t
-            .transform_point2(DVec2::new(-0.5, 0.5))
+            .project_pos2(DVec2::new(-0.5, 0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)

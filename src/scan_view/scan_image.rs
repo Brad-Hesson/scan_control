@@ -2,7 +2,7 @@ use std::{ops::RangeBounds, sync::Arc};
 
 use eframe::egui_wgpu;
 use egui::{mutex::RwLock, Id, Pos2, Rect, Response, Sense, Ui};
-use glam::{Affine2, DAffine2};
+use glam::DAffine2;
 use image_compute::{
     buffers::BufferOpError,
     image_compute::{FitData, FitType, ImageComputeBuffers, NormalizationType, NormalizeData},
@@ -10,8 +10,8 @@ use image_compute::{
 use uuid::Uuid;
 
 use crate::{
-    scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder},
-    utils::vec_interop::IntoGlam as _,
+    scan_view::{ImageEncoder, callbacks::ImageCallback, view::ScanViewCtx},
+    utils::vec_interop::{IntoGlam as _, Projection},
 };
 
 pub struct ScanViewImage {
@@ -56,7 +56,7 @@ impl ScanViewImage {
             .and_then(|pos| {
                 let [x, y] = (ctx.world2egui() * self.transform)
                     .inverse()
-                    .transform_point2(pos.to_glam())
+                    .project_pos2(pos.to_glam())
                     .abs()
                     .into();
                 (x < 0.5 && y < 0.5).then(|| {

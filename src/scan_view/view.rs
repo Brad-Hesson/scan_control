@@ -2,8 +2,8 @@ use core::f32;
 use std::mem::MaybeUninit;
 
 use eframe::{egui_wgpu::Callback, wgpu::TextureFormat};
-use egui::{epaint::CircleShape, Color32, Id, Pos2, Rect, Response, Shape, Stroke, Ui};
-use glam::{Affine2, DAffine2, DVec2, Vec2};
+use egui::{Color32, Id, Response, Ui};
+use glam::{DAffine2, DVec2, Vec2};
 
 use crate::{
     app::COLOR_MAP_SIZE,
