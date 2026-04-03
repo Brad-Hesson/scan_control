@@ -1,4 +1,5 @@
 use core::f32;
+use std::sync::Arc;
 
 use egui::{DragValue, Response, Ui, WidgetText};
 use glam::{Affine2, DAffine2};
@@ -17,7 +18,8 @@ use crate::{
 
 pub struct LiveImage {
     image_view: ScanViewImage,
-    pub buffers: BufferState,
+    pub forward_data: Arc<Box<[f32]>>,
+    pub backward_data: Arc<Box<[f32]>>,
     pub line_dir: LineDir,
     pub transform: DAffine2,
     pub norm_type: NormType,
@@ -30,26 +32,32 @@ pub struct LiveImage {
 }
 
 impl LiveImage {
-    pub fn new(encoder: &ImageEncoder, buffers: BufferState, transform: DAffine2) -> Self {
+    pub fn new(
+        encoder: &ImageEncoder,
+        transform: DAffine2,
+        size: [u32; 2],
+        forward_data: Arc<Box<[f32]>>,
+        backward_data: Arc<Box<[f32]>>,
+        signal_names: Vec<String>,
+        channel_opts: Vec<usize>,
+        channel: Channel,
+        name: String,
+    ) -> Self {
         let norm_type = NormType::FullScale;
         let std_dev = 0.;
         Self {
-            image_view: ScanViewImage::new(
-                encoder,
-                [buffers.size[1] as u32, buffers.size[0] as u32],
-                transform,
-                norm_type.combined(std_dev),
-            ),
-            buffers,
+            image_view: ScanViewImage::new(encoder, size, transform, norm_type.combined(std_dev)),
             transform,
             norm_type,
             std_dev,
             line_dir: LineDir::Forward,
             fit_type: FitType::MeanSubtract,
-            channel: Channel::None,
-            signal_names: Vec::new(),
-            channel_opts: Vec::new(),
-            name: String::new(),
+            channel,
+            signal_names,
+            channel_opts,
+            name,
+            forward_data,
+            backward_data,
         }
     }
     pub fn show(&mut self, ui: &mut Ui) -> Response {
@@ -130,8 +138,8 @@ impl LiveImage {
     }
     pub fn update_texture(&self, image_encoder: &ImageEncoder) {
         let src = match self.line_dir {
-            LineDir::Forward => &self.buffers.buf_f,
-            LineDir::Backward => &self.buffers.buf_b,
+            LineDir::Forward => &self.forward_data,
+            LineDir::Backward => &self.backward_data,
         };
         self.image_view
             .write_lines(image_encoder, .., |buf| buf.copy_from_slice(src))
@@ -181,6 +189,12 @@ impl Channel {
     pub fn is_some(&self) -> bool {
         *self != Channel::None
     }
+    pub fn as_opt(self) -> Option<usize> {
+        match self {
+            Channel::None => None,
+            Channel::Channel(ch) => Some(ch),
+        }
+    }
 }
 impl ComboBoxType for Channel {
     type Ctx = Vec<(usize, String)>;
@@ -197,6 +211,11 @@ impl ComboBoxType for Channel {
 
     fn options(channels: &Self::Ctx) -> impl Iterator<Item = Self> {
         channels.iter().map(|(ch, _)| Channel::Channel(*ch))
+    }
+}
+impl Default for Channel {
+    fn default() -> Self {
+        Self::None
     }
 }
 

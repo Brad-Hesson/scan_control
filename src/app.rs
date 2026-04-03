@@ -2,6 +2,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis_connection::NanonisConnection;
+use crate::connection::LiveImage;
 use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
 use crate::scan_view::{FileImage, GDSImage, ScaleBar};
 use crate::undo_queue::{StateModify, UndoQueue};
@@ -36,6 +37,7 @@ pub struct AppState {
     file_image_list: SelectableList<FileImage>,
     test_gds: GDSImage,
     scale_bar: ScaleBar,
+    live_image: Option<LiveImage>,
 }
 
 // trait UnwrapTraceExt{
@@ -59,7 +61,7 @@ impl MyApp {
         // );
 
         let image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), &image_encoder, "localhost");
+        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), "localhost");
         let file_tree = FileTree::new(image_encoder.clone());
         let mut file_image_list = SelectableList::new();
         let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", DMat3::IDENTITY);
@@ -80,6 +82,7 @@ impl MyApp {
                 file_image_list,
                 test_gds,
                 scale_bar: ScaleBar::new(),
+                live_image: None,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -95,24 +98,37 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
-            let mut new_name_num = 0;
-            let mut new_name = new_image.name.clone();
-            while self
-                .app_state
-                .image_list
-                .iter()
-                .any(|entry| entry.name == new_name)
-            {
-                new_name_num += 1;
-                new_name = format!("{}({})", new_image.name, new_name_num);
+        match &mut self.app_state.live_image {
+            None => {
+                self.app_state.live_image = self
+                    .app_state
+                    .connection
+                    .poll_connected(&self.image_encoder);
             }
-            new_image.name = new_name;
-            let entry = SelectableEntry::new(Uuid::new_v4(), new_image, |image| {
-                (&image.name).into_atoms()
-            });
-            self.app_state.image_list.push(entry);
+            Some(live_image) => {
+                self.app_state
+                    .connection
+                    .update(&self.image_encoder, live_image);
+            }
         }
+        // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
+        //     let mut new_name_num = 0;
+        //     let mut new_name = new_image.name.clone();
+        //     while self
+        //         .app_state
+        //         .image_list
+        //         .iter()
+        //         .any(|entry| entry.name == new_name)
+        //     {
+        //         new_name_num += 1;
+        //         new_name = format!("{}({})", new_image.name, new_name_num);
+        //     }
+        //     new_image.name = new_name;
+        //     let entry = SelectableEntry::new(Uuid::new_v4(), new_image, |image| {
+        //         (&image.name).into_atoms()
+        //     });
+        //     self.app_state.image_list.push(entry);
+        // }
         if let Some(paths) = self.file_dialog.take_picked_multiple() {
             // self.load_files(paths)
             //     .context("file load failed")
@@ -214,13 +230,15 @@ impl eframe::App for MyApp {
                             .show(ui);
                         }
                     }
-                    self.app_state.connection.live_image.show(ui);
-                    BorderRectangle {
-                        transform: self.app_state.connection.live_image.transform,
-                        color: Color32::RED,
-                        dashed: false,
+                    if let Some(live_image) = &mut self.app_state.live_image {
+                        live_image.show(ui);
+                        BorderRectangle {
+                            transform: live_image.transform,
+                            color: Color32::RED,
+                            dashed: false,
+                        }
+                        .show(ui);
                     }
-                    .show(ui);
                     if let Some(image) = files.get_hovered(ui.ctx()) {
                         BorderRectangle {
                             transform: image.transform,
@@ -260,25 +278,25 @@ impl eframe::App for MyApp {
                         // self.app_state.file_tree.show(ui);
                         self.app_state.image_list.show(ui);
                     });
-                let mut new_top = egui::Window::new("Current Scan")
-                    .frame(
-                        Frame::window(&ctx.style())
-                            .multiply_with_opacity(0.5)
-                            .shadow(Shadow::NONE),
-                    )
-                    .constrain_to(ui.min_rect())
-                    .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
-                    .resizable(false)
-                    .show(ctx, |ui| {
-                        self.app_state
-                            .connection
-                            .live_image
-                            .show_menu(ui, &mut self.image_encoder);
-                    })
-                    .unwrap()
-                    .response
-                    .rect
-                    .bottom();
+                let mut new_top = ui.clip_rect().top();
+                if let Some(live_image) = &mut self.app_state.live_image {
+                    new_top = egui::Window::new("Current Scan")
+                        .frame(
+                            Frame::window(&ctx.style())
+                                .multiply_with_opacity(0.5)
+                                .shadow(Shadow::NONE),
+                        )
+                        .constrain_to(ui.min_rect())
+                        .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            live_image.show_menu(ui, &mut self.image_encoder);
+                        })
+                        .unwrap()
+                        .response
+                        .rect
+                        .bottom();
+                }
                 let selected = self
                     .app_state
                     .image_list

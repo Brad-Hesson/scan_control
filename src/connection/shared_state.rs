@@ -15,7 +15,7 @@ impl<T> SharedState<T> {
     pub fn new(init: T) -> Self {
         Self {
             inner: Arc::new(RwLock::new(init)),
-            shared_epoch: Arc::new(AtomicUsize::new(1)),
+            shared_epoch: Arc::new(AtomicUsize::new(0)),
             local_epoch: 0,
         }
     }
@@ -31,6 +31,9 @@ impl<T> SharedState<T> {
     pub fn read(&mut self) -> RwLockReadGuard<'_, T> {
         self.local_epoch = self.shared_epoch.load(Ordering::Relaxed);
         self.inner.read()
+    }
+    pub fn is_new(&self) -> bool {
+        self.local_epoch < self.shared_epoch.load(Ordering::Relaxed)
     }
     pub fn read_new(&mut self) -> Option<RwLockReadGuard<'_, T>> {
         let shared_epoch = self.shared_epoch.load(Ordering::Relaxed);
@@ -61,5 +64,14 @@ impl<T> SharedState<T> {
             self.local_epoch = shared_epoch + 1;
         }
         wants_modify
+    }
+}
+
+pub trait Updating {
+    fn is_new(&self) -> bool;
+}
+impl<T> Updating for SharedState<T> {
+    fn is_new(&self) -> bool {
+        SharedState::is_new(&self)
     }
 }
