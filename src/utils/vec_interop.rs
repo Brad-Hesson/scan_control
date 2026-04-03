@@ -50,7 +50,9 @@ impl Projection for DMat3 {
         pos_p.xy() / pos_p.z
     }
     fn project_vec2(&self, _pos: DVec2) -> DVec2 {
-        todo!()
+        // the projection of a vector depends on where it is, so
+        // this function does not apply in this scenario
+        panic!("Cannot project a vector with an arbitrary projection matrix")
     }
 }
 impl Projection for DAffine2 {
