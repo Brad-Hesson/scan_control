@@ -1,7 +1,7 @@
 use std::{ops::RangeBounds, sync::Arc};
 
 use eframe::egui_wgpu;
-use egui::{mutex::RwLock, Id, Pos2, Rect, Response, Sense, Ui};
+use egui::{mutex::RwLock, Id, Response, Sense, Ui};
 use glam::DAffine2;
 use image_compute::{
     buffers::BufferOpError,
@@ -10,8 +10,11 @@ use image_compute::{
 use uuid::Uuid;
 
 use crate::{
-    scan_view::{ImageEncoder, callbacks::ImageCallback, view::ScanViewCtx},
-    utils::vec_interop::{IntoGlam as _, Projection},
+    scan_view::{callbacks::ImageCallback, view::ScanViewCtx, ImageEncoder},
+    utils::{
+        response_group::neutral_response,
+        vec_interop::{IntoGlam as _, Projection},
+    },
 };
 
 pub struct ScanViewImage {
@@ -43,6 +46,9 @@ impl ScanViewImage {
             fit_data: Arc::new(RwLock::new(None)),
             norm_data: Arc::new(RwLock::new(None)),
         }
+    }
+    pub fn resized(&self, image_encoder: &ImageEncoder, size: [u32; 2]) -> Self {
+        Self::new(image_encoder, size, self.transform, self.norm_type)
     }
     pub fn uuid(&self) -> Uuid {
         self.uuid
@@ -150,12 +156,4 @@ impl ScanViewImage {
     pub fn size(&self) -> [u32; 2] {
         self.image_buffers.size()
     }
-}
-
-fn neutral_response(ui: &egui::Ui, id: egui::Id) -> Response {
-    ui.interact(
-        Rect::from_center_size(Pos2::ZERO, egui::Vec2::ZERO),
-        id,
-        Sense::empty(),
-    )
 }

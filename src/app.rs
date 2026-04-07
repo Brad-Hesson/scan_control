@@ -1,7 +1,7 @@
 use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
-use crate::connection::nanonis_connection::NanonisConnection;
+use crate::connection::nanonis::NanonisConnection;
 use crate::connection::LiveImage;
 use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
 use crate::scan_view::{FileImage, GDSImage, ScaleBar};
@@ -108,7 +108,7 @@ impl eframe::App for MyApp {
             Some(live_image) => {
                 self.app_state
                     .connection
-                    .update(&self.image_encoder, live_image);
+                    .update_live_image(live_image, &self.image_encoder);
             }
         }
         // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
@@ -231,7 +231,7 @@ impl eframe::App for MyApp {
                         }
                     }
                     if let Some(live_image) = &mut self.app_state.live_image {
-                        live_image.show(ui);
+                        live_image.show_image(ui);
                         BorderRectangle {
                             transform: live_image.transform,
                             color: Color32::RED,

@@ -9,9 +9,7 @@ use nanonis_tcp::LineDir;
 use tracing::warn;
 
 use crate::{
-    components::combo_box::{combo_box, ComboBoxType},
-    connection::{backing::BufferState, nanonis_connection::toggle_dir},
-    scan_view::{ImageEncoder, ScanViewImage},
+    components::combo_box::{ComboBoxType, combo_box}, connection::backing::BufferState, scan_view::{ImageEncoder, ScanViewImage}
 };
 
 pub struct StaticImage {
@@ -95,7 +93,10 @@ impl StaticImage {
             }
         });
         if ui.button(self.line_dir.opt_atoms(&())).clicked() {
-            toggle_dir(&mut self.line_dir);
+            match self.line_dir {
+                LineDir::Forward => self.line_dir = LineDir::Backward,
+                LineDir::Backward => self.line_dir = LineDir::Forward,
+            }
             self.update_texture(image_encoder);
         }
         ui.label(format!("Channel: {}", self.channel));

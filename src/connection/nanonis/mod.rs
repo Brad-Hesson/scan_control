@@ -1,0 +1,205 @@
+mod channel_state;
+mod frame_worker;
+mod line_worker;
+mod status_worker;
+
+use std::thread::JoinHandle;
+
+use glam::DAffine2;
+use nanonis_tcp::{
+    blocking::{self, NanonisTcp},
+    error::{NanonisTcpError, NanonisTcpResult},
+    LineDir,
+};
+
+use crate::{
+    connection::{
+        live_image::{FrameData, LiveImage},
+        nanonis::{
+            channel_state::ChannelState, frame_worker::FrameWorker, line_worker::LineWorker,
+            status_worker::StatusWorker,
+        },
+        shared_state::SharedState,
+    },
+    scan_view::ImageEncoder,
+};
+
+pub struct NanonisConnection {
+    forward_data: SharedState<FrameData>,
+    backward_data: SharedState<FrameData>,
+    transform: SharedState<DAffine2>,
+    channel_state: SharedState<ChannelState>,
+    frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
+}
+
+impl NanonisConnection {
+    pub fn new(ctx: egui::Context, address: impl AsRef<str>) -> Self {
+        let transform = SharedState::new_default();
+        let channel_state = SharedState::new_default();
+        let forward_data = SharedState::new_default();
+        let backward_data = SharedState::new_default();
+        let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::channel();
+        let address = address.as_ref();
+        LineWorker::new(&frame_queue_tx, &channel_state).run(address, 6501);
+        FrameWorker::new(&ctx, &forward_data, &backward_data, frame_queue_rx).run(address, 6502);
+        StatusWorker::new(&ctx, &transform, &channel_state).run(address, 6503);
+        Self {
+            transform,
+            channel_state,
+            backward_data,
+            forward_data,
+            frame_queue_tx,
+        }
+    }
+    pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<LiveImage> {
+        if let Some(transform) = self.transform.read_new().as_deref().copied() {
+            Some(LiveImage::new(encoder, transform))
+        } else {
+            None
+        }
+    }
+    pub fn update_live_image(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
+        self.update_channel(live_image, encoder);
+        self.update_transform(live_image);
+        self.update_image_data(live_image, encoder);
+    }
+    pub fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
+        if let Some(forward_data) = self.forward_data.read_new() {
+            live_image.forward_data = forward_data.clone();
+            parking_lot::RwLockReadGuard::unlock_fair(forward_data);
+            if live_image.line_dir == LineDir::Forward {
+                live_image.write_and_update_texture(encoder);
+            }
+        }
+        if let Some(backward_data) = self.backward_data.read_new() {
+            live_image.backward_data = backward_data.clone();
+            parking_lot::RwLockReadGuard::unlock_fair(backward_data);
+            if live_image.line_dir == LineDir::Backward {
+                live_image.write_and_update_texture(encoder);
+            }
+        }
+    }
+    pub fn update_transform(&mut self, live_image: &mut LiveImage) {
+        if let Some(new_transform) = self.transform.read_new().as_deref().copied() {
+            live_image.transform = new_transform;
+            return;
+        }
+        self.transform.modify_conditional(
+            |prev| *prev != live_image.transform,
+            |old| *old = live_image.transform,
+        );
+    }
+    pub fn update_channel(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
+        if let Some(state) = self.channel_state.read_new() {
+            live_image.channel_opts = state.channel_opts_names().collect();
+            live_image.channel_selected = state.selected_as_string();
+            if let Some(ch) = state.selection {
+                self.frame_queue_tx
+                    .send((LineDir::Forward, ch as u32))
+                    .unwrap();
+                self.frame_queue_tx
+                    .send((LineDir::Backward, ch as u32))
+                    .unwrap();
+            } else {
+                live_image.clear_texture(encoder);
+            }
+            return;
+        }
+        if self.channel_state.modify_conditional(
+            |prev| prev.selected_as_string() != live_image.channel_selected,
+            |old| match &live_image.channel_selected {
+                Some(ch_name) => old.set_selection_by_name(&ch_name),
+                None => old.selection = None,
+            },
+        ) {
+            if let Some(ch) = self.channel_state.peek().selection {
+                self.frame_queue_tx
+                    .send((LineDir::Forward, ch as u32))
+                    .unwrap();
+                self.frame_queue_tx
+                    .send((LineDir::Backward, ch as u32))
+                    .unwrap();
+            } else {
+                live_image.clear_texture(encoder);
+            }
+        }
+    }
+}
+
+// fn scan_worker(
+//     addr: impl ToSocketAddrs,
+//     ctx: egui::Context,
+//     mut stamp: SharedState<BufferState>,
+//     mut scanning: SharedState<bool>,
+//     channel: SharedState<Channel>,
+//     buffer_state: SharedState<BufferState>,
+// ) {
+//     let mut conn = blocking::NanonisTcp::new(addr).unwrap();
+//     loop {
+//         conn.scan_wait_end_of_scan(None).unwrap();
+//         if !*scanning.peek() {
+//             continue;
+//         }
+//         scanning.write(false);
+//         if !channel.peek().is_some() {
+//             continue;
+//         }
+//         let frame = buffer_state.peek().clone();
+//         if frame_early_exited(&frame) {
+//             continue;
+//         }
+//         stamp.write(frame);
+//         ctx.request_repaint();
+//     }
+// }
+
+// fn frame_early_exited(buffers: &BufferState) -> bool {
+//     let [height, width] = buffers.size;
+//     let lines = buffers.buf_f.iter().step_by(width);
+//     let trailing_nans = match buffers.scan_dir {
+//         ScanDir::Down => lines.rev().take_while(|v| v.is_nan()).count(),
+//         ScanDir::Up => lines.take_while(|v| v.is_nan()).count(),
+//     };
+//     let num_lines = height - trailing_nans;
+//     let min_lines = height / 4;
+//     num_lines < min_lines
+// }
+
+trait Worker: Sized + Send + 'static {
+    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
+    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
+    fn run(mut self, addr: impl AsRef<str>, port: u16) -> JoinHandle<()> {
+        let addr = addr.as_ref().to_string();
+        std::thread::spawn(move || self.run_inner(addr, port))
+    }
+    fn run_inner(&mut self, addr: String, port: u16) {
+        'reconnect: loop {
+            let mut conn = loop {
+                if let Ok(conn) = blocking::NanonisTcp::new((addr.as_str(), port)) {
+                    break conn;
+                }
+            };
+            'retry: loop {
+                match self.init(&mut conn) {
+                    Ok(_) => break,
+                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                        continue 'retry;
+                    }
+                    Err(NanonisTcpError::Io(_)) => {
+                        continue 'reconnect;
+                    }
+                }
+            }
+            'retry: loop {
+                match self.work(&mut conn).inspect_err(|e| println!("{e}")) {
+                    Ok(_) | Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                        continue 'retry;
+                    }
+                    Err(NanonisTcpError::Io(_)) => {
+                        continue 'reconnect;
+                    }
+                }
+            }
+        }
+    }
+}

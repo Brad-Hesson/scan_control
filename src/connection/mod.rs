@@ -1,6 +1,6 @@
-pub mod nanonis_connection;
+pub mod backing;
 mod live_image;
 mod shared_state;
-pub mod backing;
 
 pub use live_image::LiveImage;
+pub mod nanonis;

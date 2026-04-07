@@ -5,7 +5,6 @@ use std::sync::{
 
 use parking_lot::{RwLock, RwLockReadGuard};
 
-#[derive(Clone)]
 pub struct SharedState<T> {
     inner: Arc<RwLock<T>>,
     shared_epoch: Arc<AtomicUsize>,
@@ -66,12 +65,12 @@ impl<T> SharedState<T> {
         wants_modify
     }
 }
-
-pub trait Updating {
-    fn is_new(&self) -> bool;
-}
-impl<T> Updating for SharedState<T> {
-    fn is_new(&self) -> bool {
-        SharedState::is_new(&self)
+impl<T> Clone for SharedState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            shared_epoch: self.shared_epoch.clone(),
+            local_epoch: self.local_epoch.clone(),
+        }
     }
 }

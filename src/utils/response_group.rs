@@ -1,6 +1,6 @@
 use egui::{
     ahash::{HashSet, HashSetExt as _},
-    Context, Response,
+    Context, Rect, Response,
 };
 
 pub struct ResponseGroup {
@@ -39,4 +39,12 @@ impl ResponseGroupExt for Response {
 pub struct SyncResponse {
     pub orig: Response,
     pub sync: Response,
+}
+
+pub fn neutral_response(ui: &egui::Ui, id: egui::Id) -> Response {
+    ui.interact(
+        Rect::from_center_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+        id,
+        egui::Sense::empty(),
+    )
 }

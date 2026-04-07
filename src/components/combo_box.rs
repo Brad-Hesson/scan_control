@@ -22,13 +22,12 @@ pub fn combo_box<'s, T: ComboBoxType>(
                 .unwrap(),
         )
         .show_ui(ui, |ui| {
-            let clicked = T::options(ctx)
+            T::options(ctx)
                 .map(|opt| {
                     let text = opt.opt_atoms(ctx).into();
                     ui.selectable_value(data, opt, text)
                 })
-                .any(|resp| resp.clicked());
-            clicked
+                .any(|resp| resp.clicked())
         })
         .inner
         .is_some_and(|clicked| clicked)
