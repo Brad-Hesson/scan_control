@@ -30,7 +30,7 @@ pub struct LiveImage {
 impl LiveImage {
     pub fn new(encoder: &ImageEncoder, transform: DAffine2) -> Self {
         let norm_type = NormType::FullScale;
-        let std_dev = 0.;
+        let std_dev = 3.;
         let empty_data = FrameData::default();
         Self {
             image_view: ScanViewImage::new(
@@ -57,9 +57,13 @@ impl LiveImage {
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &mut ImageEncoder) {
         let vis = &mut ui.style_mut().visuals.widgets.inactive;
         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
+        ui.label("Channel:");
         self.show_channel_control(ui);
+        ui.label("Processing:");
         self.show_fit_control(ui, encoder);
+        ui.label("Normalization:");
         self.show_normalization_control(ui);
+        ui.label("Scan Direction:");
         self.show_line_dir_control(ui, encoder);
         self.show_metadata(ui);
     }
