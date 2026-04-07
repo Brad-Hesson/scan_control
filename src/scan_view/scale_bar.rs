@@ -29,11 +29,11 @@ impl ScaleBar {
             y: 5.,
         };
         let rect = egui::Rect::from_center_size(pos - size / 2., size);
-        // let rect = egui::Rect::from_center_size(ctx.rect.center(), egui::Vec2 { x: nm, y: 5. });
+        let color = ui.style().visuals.strong_text_color();
         ui.painter().add(Shape::Rect(RectShape::filled(
             rect,
             CornerRadius::ZERO,
-            Color32::WHITE,
+            color,
         )));
         let text = format!("{:.0}", MetersFmt(10f32.powi(mul - 9)));
         ui.painter().text(
@@ -41,7 +41,7 @@ impl ScaleBar {
             egui::Align2::RIGHT_BOTTOM,
             text,
             egui::FontId::monospace(24.),
-            Color32::WHITE,
+            color,
         );
     }
 }
