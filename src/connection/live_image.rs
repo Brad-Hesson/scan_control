@@ -51,7 +51,8 @@ impl LiveImage {
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
-        self.update_image_view();
+        self.image_view.transform = self.transform;
+        self.image_view.norm_type = self.norm_type.combined(self.std_dev);
         self.image_view.show(ui)
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &mut ImageEncoder) {
@@ -134,10 +135,6 @@ impl LiveImage {
         {
             self.channel_selected = selection.map(|s| s.to_string());
         }
-    }
-    fn update_image_view(&mut self) {
-        self.image_view.transform = self.transform;
-        self.image_view.norm_type = self.norm_type.combined(self.std_dev);
     }
     pub fn update_texture(&self, encoder: &ImageEncoder) {
         self.image_view.write_texture(encoder, self.fit_type);
