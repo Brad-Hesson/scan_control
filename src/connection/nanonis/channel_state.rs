@@ -11,9 +11,15 @@ impl ChannelState {
         mod_fn(&mut self.opts);
         if self
             .selection
-            .is_some_and(|selection| !self.opts.contains(&selection))
+            .is_none_or(|selection| !self.opts.contains(&selection))
         {
-            self.selection = None;
+            if self.opts.contains(&30) {
+                self.selection = Some(30);
+            } else if self.opts.len() > 0 {
+                self.selection = Some(self.opts[0]);
+            } else {
+                self.selection = None;
+            }
         }
     }
     pub fn options(&self) -> &[usize] {
