@@ -1,11 +1,7 @@
-use std::sync::Arc;
-
-use crossbeam::queue::ArrayQueue;
 use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
-use tracing::warn;
 
 use crate::connection::{
-    nanonis::{channel_state::ChannelState, OverwriteQueueSender, ScanStatus, Worker},
+    nanonis::{channel_state::ChannelState, worker::Worker, OverwriteQueueSender, ScanStatus},
     shared_state::SharedState,
 };
 
@@ -13,7 +9,6 @@ pub struct LineWorker {
     queue: OverwriteQueueSender<(LineDir, u32)>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
-    overloaded: bool,
 }
 impl LineWorker {
     pub fn new(
@@ -25,7 +20,6 @@ impl LineWorker {
             queue: queue.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
-            overloaded: false,
         }
     }
 }

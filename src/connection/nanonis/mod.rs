@@ -1,29 +1,24 @@
 mod channel_state;
-mod frame_worker;
-mod line_worker;
-mod status_worker;
+mod worker;
 
-use std::{sync::Arc, thread::JoinHandle, time::Duration};
+use std::{thread::JoinHandle, time::Duration};
 
-use crossbeam::{
-    queue::ArrayQueue,
-    sync::{Parker, Unparker},
-};
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
     error::{NanonisTcpError, NanonisTcpResult},
     LineDir, ScanDir,
 };
-use tracing::{error, info, instrument, warn, Level};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
     connection::{
         live_image::{FrameData, LiveImage},
         nanonis::{
-            channel_state::ChannelState, frame_worker::FrameWorker, line_worker::LineWorker,
-            status_worker::StatusWorker,
+            channel_state::ChannelState,
+            worker::{FastStatusWorker, FrameWorker, LineWorker, SlowStatusWorker, Worker as _},
         },
+        queue::{overwrite_queue, OverwriteQueueSender},
         scan_area::ScanArea,
         shared_state::SharedState,
     },
@@ -61,15 +56,8 @@ impl NanonisConnection {
             &scan_status,
         )
         .run(address, 6502);
-        StatusWorker::new(
-            &ctx,
-            &image_transform,
-            &area_size,
-            &channel_state,
-            &scan_status,
-            &tip_pos,
-        )
-        .run(address, 6503);
+        FastStatusWorker::new(&ctx, &image_transform, &tip_pos).run(address, 6503);
+        SlowStatusWorker::new(&ctx, &area_size, &channel_state, &scan_status).run(address, 6504);
         Self {
             image_transform,
             area_size,
@@ -215,113 +203,5 @@ impl ScanStatus {
             pos *= -1.;
         }
         Some(pos)
-    }
-}
-
-trait Worker: Sized + Send + 'static {
-    fn name(&self) -> String;
-    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
-    fn run(mut self, addr: impl AsRef<str>, port: u16) -> JoinHandle<()> {
-        let addr = addr.as_ref().to_string();
-        std::thread::Builder::new()
-            .name(self.name())
-            .spawn(move || self.run_inner(addr, port))
-            .unwrap()
-    }
-    #[instrument(name = "worker", skip(self), fields(name = self.name()))]
-    fn run_inner(&mut self, addr: String, port: u16) {
-        'reconnect: loop {
-            info!("connecting");
-            let mut conn = loop {
-                if let Ok(conn) = blocking::NanonisTcp::new((addr.as_str(), port)) {
-                    break conn;
-                }
-            };
-            info!("connected");
-            'retry: loop {
-                match self
-                    .init(&mut conn)
-                    .inspect_err(|e| error!("failed initializing: {}", e))
-                {
-                    Ok(_) => break,
-                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue 'retry;
-                    }
-                    Err(NanonisTcpError::Io(_)) => {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue 'reconnect;
-                    }
-                }
-            }
-            info!("initialized");
-            let mut num_retries = 0;
-            'retry: loop {
-                match self
-                    .work(&mut conn)
-                    .inspect_err(|e| error!("failed working: {}", e))
-                {
-                    Ok(_) => {
-                        num_retries = 0;
-                    }
-                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
-                        let dur = (2f32.powi(num_retries) * 1e-3).min(1.0);
-                        let dur = Duration::from_secs_f32(dur);
-                        info!("retrying after {dur:?}");
-                        std::thread::sleep(dur);
-                        num_retries += 1;
-                        continue 'retry;
-                    }
-                    Err(NanonisTcpError::Io(_)) => {
-                        let dur = Duration::from_secs(1);
-                        info!("reconnecting after {dur:?}");
-                        std::thread::sleep(dur);
-                        continue 'reconnect;
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub fn overwrite_queue<T>(cap: usize) -> (OverwriteQueueSender<T>, OverwriteQueueReceiver<T>) {
-    let queue = Arc::new(ArrayQueue::new(cap));
-    let parker = Parker::new();
-    let unparker = parker.unparker().clone();
-    (
-        OverwriteQueueSender {
-            queue: Arc::clone(&queue),
-            unparker,
-        },
-        OverwriteQueueReceiver { queue, parker },
-    )
-}
-
-#[derive(Clone)]
-struct OverwriteQueueSender<T> {
-    queue: Arc<ArrayQueue<T>>,
-    unparker: Unparker,
-}
-impl<T> OverwriteQueueSender<T> {
-    pub fn send(&self, value: T) -> Option<T> {
-        let overwrote = self.queue.force_push(value);
-        self.unparker.unpark();
-        overwrote
-    }
-}
-
-struct OverwriteQueueReceiver<T> {
-    queue: Arc<ArrayQueue<T>>,
-    parker: Parker,
-}
-impl<T> OverwriteQueueReceiver<T> {
-    pub fn recv(&self) -> T {
-        loop {
-            if let Some(val) = self.queue.pop() {
-                return val;
-            }
-            self.parker.park();
-        }
     }
 }

@@ -2,6 +2,7 @@ pub mod backing;
 mod live_image;
 mod shared_state;
 mod scan_area;
+pub mod queue;
 
 pub use live_image::LiveImage;
 pub use scan_area::ScanArea;

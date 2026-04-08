@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use crossbeam::queue::ArrayQueue;
 use nanonis_tcp::{
     blocking::NanonisTcp, commands::scan::FrameDataGrabResponse, error::NanonisTcpResult, LineDir,
 };
 
 use crate::connection::{
     live_image::FrameData,
-    nanonis::{OverwriteQueueReceiver, ScanStatus, Worker},
+    nanonis::{worker::Worker, ScanStatus},
+    queue::OverwriteQueueReceiver,
     shared_state::SharedState,
 };
 
