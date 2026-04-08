@@ -1,6 +1,7 @@
 use nanonis_tcp::{
     blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanDir, ScanMovementType,
 };
+use tracing::{error, warn};
 
 use crate::connection::{
     nanonis::{channel_state::ChannelState, ScanStatus, Worker},
@@ -8,13 +9,13 @@ use crate::connection::{
 };
 
 pub struct LineWorker {
-    queue: std::sync::mpsc::Sender<(LineDir, u32)>,
+    queue: std::sync::mpsc::SyncSender<(LineDir, u32)>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
 }
 impl LineWorker {
     pub fn new(
-        queue: &std::sync::mpsc::Sender<(LineDir, u32)>,
+        queue: &std::sync::mpsc::SyncSender<(LineDir, u32)>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
     ) -> Self {
@@ -46,7 +47,12 @@ impl Worker for LineWorker {
         let Some(ch) = self.channel_state.read().selection else {
             return Ok(());
         };
-        self.queue.send((dir, ch as u32)).unwrap();
+        if self.queue.try_send((dir, ch as u32)).is_err() {
+            warn!("Frame downloader is overloaded");
+        }
         Ok(())
+    }
+    fn name(&self) -> String {
+        "Line Waiter".to_string()
     }
 }

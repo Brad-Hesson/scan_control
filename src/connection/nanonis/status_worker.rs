@@ -124,6 +124,10 @@ impl Worker for StatusWorker {
             .modify(|state| state.write_names(Arc::new(sig_names_resp.names.into_boxed_slice())));
         Ok(())
     }
+
+    fn name(&self) -> String {
+        "Status Worker".to_string()
+    }
 }
 
 fn transform_from_frame(frame: &FrameGetResponse) -> DAffine2 {

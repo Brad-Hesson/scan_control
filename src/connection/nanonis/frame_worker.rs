@@ -58,6 +58,9 @@ impl Worker for FrameWorker {
         }
         Ok(())
     }
+    fn name(&self) -> String {
+        "Frame Downloader".to_string()
+    }
 }
 
 impl From<FrameDataGrabResponse> for FrameData {

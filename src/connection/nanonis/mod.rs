@@ -3,7 +3,7 @@ mod frame_worker;
 mod line_worker;
 mod status_worker;
 
-use std::thread::JoinHandle;
+use std::{thread::JoinHandle, time::Duration};
 
 use glam::{DAffine2, DVec2};
 use itertools::izip;
@@ -12,6 +12,7 @@ use nanonis_tcp::{
     error::{NanonisTcpError, NanonisTcpResult},
     LineDir, ScanDir,
 };
+use tracing::{error, warn};
 
 use crate::{
     connection::{
@@ -33,7 +34,7 @@ pub struct NanonisConnection {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
-    frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
+    frame_queue_tx: std::sync::mpsc::SyncSender<(LineDir, u32)>,
     tip_pos: SharedState<DVec2>,
 }
 
@@ -46,7 +47,7 @@ impl NanonisConnection {
         let backward_data = SharedState::new_default();
         let scan_status = SharedState::new_default();
         let tip_pos = SharedState::new_default();
-        let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::channel();
+        let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::sync_channel(8);
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &channel_state, &scan_status).run(address, 6501);
         FrameWorker::new(
@@ -138,17 +139,19 @@ impl NanonisConnection {
             scan_area.area_size = new_size;
         }
     }
+    fn request_full_frame(tx: &std::sync::mpsc::SyncSender<(LineDir, u32)>, channel: usize) {
+        if tx.try_send((LineDir::Forward, channel as u32)).is_err()
+            || tx.try_send((LineDir::Backward, channel as u32)).is_err()
+        {
+            warn!("Frame downloader is overloaded");
+        }
+    }
     fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
         if let Some(state) = self.channel_state.read_new() {
             scan_area.channel_opts = state.channel_opts_names().collect();
             scan_area.channel_selected = state.selected_as_string();
             if let Some(ch) = state.selection {
-                self.frame_queue_tx
-                    .send((LineDir::Forward, ch as u32))
-                    .unwrap();
-                self.frame_queue_tx
-                    .send((LineDir::Backward, ch as u32))
-                    .unwrap();
+                Self::request_full_frame(&self.frame_queue_tx, ch);
             } else {
                 scan_area.live_image.clear_texture(encoder);
             }
@@ -162,12 +165,7 @@ impl NanonisConnection {
             },
         ) {
             if let Some(ch) = self.channel_state.peek().selection {
-                self.frame_queue_tx
-                    .send((LineDir::Forward, ch as u32))
-                    .unwrap();
-                self.frame_queue_tx
-                    .send((LineDir::Backward, ch as u32))
-                    .unwrap();
+                Self::request_full_frame(&self.frame_queue_tx, ch);
             } else {
                 scan_area.live_image.clear_texture(encoder);
             }
@@ -207,11 +205,15 @@ impl ScanStatus {
 }
 
 trait Worker: Sized + Send + 'static {
+    fn name(&self) -> String;
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;
     fn run(mut self, addr: impl AsRef<str>, port: u16) -> JoinHandle<()> {
         let addr = addr.as_ref().to_string();
-        std::thread::spawn(move || self.run_inner(addr, port))
+        std::thread::Builder::new()
+            .name(self.name())
+            .spawn(move || self.run_inner(addr, port))
+            .unwrap()
     }
     fn run_inner(&mut self, addr: String, port: u16) {
         'reconnect: loop {
@@ -221,22 +223,38 @@ trait Worker: Sized + Send + 'static {
                 }
             };
             'retry: loop {
-                match self.init(&mut conn) {
+                match self
+                    .init(&mut conn)
+                    .inspect_err(|e| error!("while `{}` initializing: {}", self.name(), e))
+                {
                     Ok(_) => break,
                     Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                        std::thread::sleep(Duration::from_secs(1));
                         continue 'retry;
                     }
                     Err(NanonisTcpError::Io(_)) => {
+                        std::thread::sleep(Duration::from_secs(1));
                         continue 'reconnect;
                     }
                 }
             }
+            let mut num_retries = 0;
             'retry: loop {
-                match self.work(&mut conn).inspect_err(|e| println!("{e}")) {
-                    Ok(_) | Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                match self
+                    .work(&mut conn)
+                    .inspect_err(|e| error!("while `{}` working: {}", self.name(), e))
+                {
+                    Ok(_) => {
+                        num_retries = 0;
+                    }
+                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                        let dur = 10f32.powi(num_retries) / 1000.;
+                        std::thread::sleep(Duration::from_secs_f32(dur));
+                        num_retries += 1;
                         continue 'retry;
                     }
                     Err(NanonisTcpError::Io(_)) => {
+                        std::thread::sleep(Duration::from_secs(1));
                         continue 'reconnect;
                     }
                 }
