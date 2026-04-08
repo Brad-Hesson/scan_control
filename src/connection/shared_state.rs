@@ -44,9 +44,6 @@ impl<T> SharedState<T> {
     pub fn write(&mut self, val: T) {
         self.modify(|state| *state = val);
     }
-    pub fn modify_silent(&mut self, mod_fn: impl FnOnce(&mut T)) {
-        mod_fn(&mut self.inner.write());
-    }
     pub fn modify(&mut self, mod_fn: impl FnOnce(&mut T)) {
         mod_fn(&mut self.inner.write());
         // Data race here with multiple writers

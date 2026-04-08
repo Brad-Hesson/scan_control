@@ -6,7 +6,6 @@ mod status_worker;
 use std::{thread::JoinHandle, time::Duration};
 
 use glam::{DAffine2, DVec2};
-use itertools::izip;
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
     error::{NanonisTcpError, NanonisTcpResult},

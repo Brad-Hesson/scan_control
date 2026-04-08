@@ -2,7 +2,7 @@ use core::f64;
 use std::sync::Arc;
 
 use glam::{DAffine2, DVec2};
-use itertools::{izip, Itertools as _};
+use itertools::Itertools as _;
 use nanonis_tcp::{
     blocking::NanonisTcp,
     commands::{

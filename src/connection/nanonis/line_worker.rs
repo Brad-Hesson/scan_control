@@ -1,7 +1,5 @@
-use nanonis_tcp::{
-    blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanDir, ScanMovementType,
-};
-use tracing::{error, warn};
+use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
+use tracing::warn;
 
 use crate::connection::{
     nanonis::{channel_state::ChannelState, ScanStatus, Worker},

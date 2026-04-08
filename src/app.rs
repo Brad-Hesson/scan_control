@@ -2,7 +2,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis::NanonisConnection;
-use crate::connection::{LiveImage, ScanArea};
+use crate::connection::ScanArea;
 use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
 use crate::scan_view::{FileImage, GDSImage, ScaleBar};
 use crate::undo_queue::{StateModify, UndoQueue};
@@ -13,10 +13,9 @@ use egui::{
     ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
-use glam::{Affine2, DAffine2, DMat3, Mat2, Mat3};
+use glam::{DAffine2, DMat3};
 use itertools::{izip, Itertools};
 use tracing::error;
-use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 

@@ -1,4 +1,4 @@
-use egui::{Color32, DragValue, Id, Shape, Stroke, Ui};
+use egui::{Color32, Id, Shape, Stroke, Ui};
 use glam::{DAffine2, DVec2};
 
 use crate::{
