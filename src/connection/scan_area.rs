@@ -37,24 +37,31 @@ impl ScanArea {
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
+        self.show_image(ui);
+        self.show_scan_line(ui);
+        self.show_area_border(ui);
+        self.show_tip(ui);
+        if ui.input(|i| i.modifiers.ctrl) {
+            let tf = world_delta_transform(ui, self.live_image.transform.translation);
+            self.image_transform = tf * self.image_transform;
+        }
+    }
+    fn show_image(&mut self, ui: &mut Ui) {
         self.live_image.transform = self.world_transform * self.image_transform;
         self.live_image.show_image(ui);
-        if self.scan_status.scanning {
-            self.show_scan_line(ui);
-        }
-        self.show_tip(ui);
+    }
+    fn show_area_border(&self, ui: &mut Ui) {
         BorderRectangle {
             transform: DAffine2::from_scale(self.area_size),
             color: Color32::YELLOW,
             dashed: false,
         }
         .show(ui);
-        if ui.input(|i| i.modifiers.ctrl) {
-            let tf = world_delta_transform(ui, self.live_image.transform.translation);
-            self.image_transform = tf * self.image_transform;
-        }
     }
     fn show_scan_line(&self, ui: &mut Ui) {
+        if !self.scan_status.scanning {
+            return;
+        }
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();

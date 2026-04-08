@@ -1,8 +1,8 @@
 use core::f32;
 use std::sync::Arc;
 
-use egui::{Color32, DragValue, Response, Ui, WidgetText};
-use glam::DAffine2;
+use egui::{Color32, DragValue, Id, Response, Ui, WidgetText};
+use glam::{DAffine2, DVec2};
 use image_compute::image_compute::{FitData, FitType};
 use nanonis_tcp::LineDir;
 use uuid::Uuid;
@@ -11,8 +11,9 @@ use crate::{
     components::combo_box::{combo_box, ComboBoxType},
     scan_view::{
         static_image::{MetersFmt, NormType},
-        BorderRectangle, ImageEncoder, ScanViewImage,
+        BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage,
     },
+    utils::vec_interop::IntoEgui,
 };
 
 pub struct LiveImage {
@@ -48,15 +49,23 @@ impl LiveImage {
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
         self.image_view.transform = self.transform;
         self.image_view.norm_type = self.norm_type.combined(self.std_dev);
         let resp = self.image_view.show(ui);
+        let bottom_left = ((ctx.world2egui() * self.transform)
+            .transform_point2(DVec2::new(-0.5, 0.5))
+            + DVec2::new(-1., 1.))
+        .to_egui_pos2();
         BorderRectangle {
             transform: self.transform,
             color: Color32::RED,
             dashed: false,
         }
         .show(ui);
+        ui.painter().circle_filled(bottom_left, 3., Color32::RED);
         resp
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {

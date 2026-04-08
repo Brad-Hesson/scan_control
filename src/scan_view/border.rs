@@ -28,7 +28,7 @@ impl BorderRectangle {
             .collect_array()
             .unwrap();
         let p1: [f32; 2] = t
-            .project_pos2(DVec2::new(0.5, -0.5))
+            .project_pos2(DVec2::new(-0.5, 0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)
@@ -42,13 +42,16 @@ impl BorderRectangle {
             .collect_array()
             .unwrap();
         let p3: [f32; 2] = t
-            .project_pos2(DVec2::new(-0.5, 0.5))
+            .project_pos2(DVec2::new(0.5, -0.5))
             .to_array()
             .into_iter()
             .map(|v| v as f32)
             .collect_array()
             .unwrap();
         let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
+        if self.transform.matrix2.determinant() < 0.{
+            points.reverse();
+        }
         let stroke = PathStroke {
             width: 2.,
             color: ColorMode::Solid(self.color),
