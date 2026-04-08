@@ -20,7 +20,7 @@ use crate::connection::{
 pub struct StatusWorker {
     ctx: egui::Context,
     image_transform: SharedState<DAffine2>,
-    area_transform: SharedState<DAffine2>,
+    area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
     tip_pos: SharedState<DVec2>,
@@ -29,7 +29,7 @@ impl StatusWorker {
     pub fn new(
         ctx: &egui::Context,
         image_transform: &SharedState<DAffine2>,
-        area_transform: &SharedState<DAffine2>,
+        area_size: &SharedState<DVec2>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
         tip_pos: &SharedState<DVec2>,
@@ -37,7 +37,7 @@ impl StatusWorker {
         Self {
             ctx: ctx.clone(),
             image_transform: image_transform.clone(),
-            area_transform: area_transform.clone(),
+            area_size: area_size.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
             tip_pos: tip_pos.clone(),
@@ -75,11 +75,11 @@ impl StatusWorker {
     }
     fn update_area_transform(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let piezo_range = conn.piezo_range_get()?;
-        let area_transform = DAffine2::from_scale(DVec2::new(
+        let area_transform = DVec2::new(
             piezo_range.range_x as f64 * 1e9,
             piezo_range.range_y as f64 * 1e9,
-        ));
-        if self.area_transform.modify_conditional(
+        );
+        if self.area_size.modify_conditional(
             |prev| *prev != area_transform,
             |prev| *prev = area_transform,
         ) {

@@ -9,7 +9,7 @@ use crate::{
 
 pub struct ScanArea {
     pub world_transform: DAffine2,
-    pub area_transform: DAffine2,
+    pub area_size: DVec2,
     pub image_transform: DAffine2,
     pub live_image: LiveImage,
     pub channel_opts: Vec<String>,
@@ -20,14 +20,14 @@ pub struct ScanArea {
 impl ScanArea {
     pub fn new(
         encoder: &ImageEncoder,
-        area_transform: DAffine2,
+        area_size: DVec2,
         image_transform: DAffine2,
         tip_pos: DVec2,
     ) -> Self {
         let live_image = LiveImage::new(encoder, image_transform);
         Self {
             world_transform: DAffine2::IDENTITY,
-            area_transform,
+            area_size,
             image_transform,
             live_image,
             channel_opts: vec![],
@@ -44,7 +44,7 @@ impl ScanArea {
         }
         self.show_tip(ui);
         BorderRectangle {
-            transform: self.world_transform * self.area_transform,
+            transform: DAffine2::from_scale(self.area_size),
             color: Color32::YELLOW,
             dashed: false,
         }

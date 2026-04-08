@@ -30,7 +30,7 @@ pub struct NanonisConnection {
     forward_data: SharedState<FrameData>,
     backward_data: SharedState<FrameData>,
     image_transform: SharedState<DAffine2>,
-    area_transform: SharedState<DAffine2>,
+    area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
     frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
@@ -40,7 +40,7 @@ pub struct NanonisConnection {
 impl NanonisConnection {
     pub fn new(ctx: egui::Context, address: impl AsRef<str>) -> Self {
         let image_transform = SharedState::new_default();
-        let area_transform = SharedState::new_default();
+        let area_size = SharedState::new_default();
         let channel_state = SharedState::new_default();
         let forward_data = SharedState::new_default();
         let backward_data = SharedState::new_default();
@@ -60,7 +60,7 @@ impl NanonisConnection {
         StatusWorker::new(
             &ctx,
             &image_transform,
-            &area_transform,
+            &area_size,
             &channel_state,
             &scan_status,
             &tip_pos,
@@ -68,7 +68,7 @@ impl NanonisConnection {
         .run(address, 6503);
         Self {
             image_transform,
-            area_transform,
+            area_size,
             channel_state,
             backward_data,
             forward_data,
@@ -78,10 +78,10 @@ impl NanonisConnection {
         }
     }
     pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
-        if self.image_transform.is_new() && self.area_transform.is_new() && self.tip_pos.is_new() {
+        if self.image_transform.is_new() && self.area_size.is_new() && self.tip_pos.is_new() {
             Some(ScanArea::new(
                 encoder,
-                *self.area_transform.read(),
+                *self.area_size.read(),
                 *self.image_transform.read(),
                 *self.tip_pos.read(),
             ))
@@ -91,7 +91,7 @@ impl NanonisConnection {
     }
     pub fn update_live_image(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
         self.update_channel(scan_area, encoder);
-        self.update_area_transform(scan_area);
+        self.update_area_size(scan_area);
         self.update_image_transform(scan_area);
         self.update_image_data(&mut scan_area.live_image, encoder);
         self.update_scan_status(scan_area);
@@ -136,9 +136,9 @@ impl NanonisConnection {
             |old| *old = scan_area.image_transform,
         );
     }
-    fn update_area_transform(&mut self, scan_area: &mut ScanArea) {
-        if let Some(new_transform) = self.area_transform.read_new().as_deref().copied() {
-            scan_area.area_transform = new_transform;
+    fn update_area_size(&mut self, scan_area: &mut ScanArea) {
+        if let Some(new_size) = self.area_size.read_new().as_deref().copied() {
+            scan_area.area_size = new_size;
         }
     }
     fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
