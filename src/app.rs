@@ -1,16 +1,20 @@
-use crate::components::file_dialog::ViewportFileDialog;
-use crate::components::file_tree_extern::ImageTree as FileTree;
-use crate::components::selectable_list::{SelectableEntry, SelectableList};
-use crate::connection::nanonis::NanonisConnection;
-use crate::connection::ScanArea;
-use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
-use crate::scan_view::{FileImage, GDSImage, ScaleBar};
-use crate::undo_queue::{StateModify, UndoQueue};
-use crate::utils::response_group::ResponseGroupExt as _;
-use egui::Color32;
+use crate::{
+    components::{
+        file_dialog::ViewportFileDialog,
+        file_tree_extern::ImageTree as FileTree,
+        selectable_list::{SelectableEntry, SelectableList},
+    },
+    connection::{nanonis::NanonisConnection, ScanArea},
+    scan_view::{
+        static_image::StaticImage, BorderRectangle, FileImage, GDSImage, ImageEncoder, ScaleBar,
+        ScanView,
+    },
+    undo_queue::{StateModify, UndoQueue},
+    utils::response_group::ResponseGroupExt as _,
+};
 use egui::{
-    widgets, Align2, Atoms, Button, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers, Shadow,
-    ThemePreference, Ui,
+    widgets, Align2, Atoms, Button, Color32, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers,
+    Shadow, ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
 use glam::{DAffine2, DMat3};
