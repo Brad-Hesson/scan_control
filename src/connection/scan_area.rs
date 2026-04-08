@@ -15,12 +15,14 @@ pub struct ScanArea {
     pub channel_opts: Vec<String>,
     pub channel_selected: Option<String>,
     pub scan_status: ScanStatus,
+    pub tip_pos: DVec2,
 }
 impl ScanArea {
     pub fn new(
         encoder: &ImageEncoder,
         area_transform: DAffine2,
         image_transform: DAffine2,
+        tip_pos: DVec2,
     ) -> Self {
         let live_image = LiveImage::new(encoder, image_transform);
         Self {
@@ -31,6 +33,7 @@ impl ScanArea {
             channel_opts: vec![],
             channel_selected: None,
             scan_status: ScanStatus::default(),
+            tip_pos,
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
@@ -39,6 +42,7 @@ impl ScanArea {
         if self.scan_status.scanning {
             self.show_scan_line(ui);
         }
+        self.show_tip(ui);
         BorderRectangle {
             transform: self.world_transform * self.area_transform,
             color: Color32::YELLOW,
@@ -64,6 +68,14 @@ impl ScanArea {
             3. * 5.,
             1. * 5.,
         ));
+    }
+    fn show_tip(&self, ui: &mut Ui) {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let tf = ctx.world2egui() * self.world_transform;
+        let center = tf.project_pos2(self.tip_pos).to_egui_pos2();
+        ui.painter().circle_filled(center, 3., Color32::BLUE);
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         self.show_channel_control(ui);

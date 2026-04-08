@@ -5,7 +5,7 @@ mod status_worker;
 
 use std::thread::JoinHandle;
 
-use glam::DAffine2;
+use glam::{DAffine2, DVec2};
 use itertools::izip;
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
@@ -34,6 +34,7 @@ pub struct NanonisConnection {
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
     frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
+    tip_pos: SharedState<DVec2>,
 }
 
 impl NanonisConnection {
@@ -44,6 +45,7 @@ impl NanonisConnection {
         let forward_data = SharedState::new_default();
         let backward_data = SharedState::new_default();
         let scan_status = SharedState::new_default();
+        let tip_pos = SharedState::new_default();
         let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::channel();
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &channel_state, &scan_status).run(address, 6501);
@@ -61,6 +63,7 @@ impl NanonisConnection {
             &area_transform,
             &channel_state,
             &scan_status,
+            &tip_pos,
         )
         .run(address, 6503);
         Self {
@@ -71,14 +74,16 @@ impl NanonisConnection {
             forward_data,
             frame_queue_tx,
             scan_status,
+            tip_pos,
         }
     }
     pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
-        if self.image_transform.is_new() && self.area_transform.is_new() {
+        if self.image_transform.is_new() && self.area_transform.is_new() && self.tip_pos.is_new() {
             Some(ScanArea::new(
                 encoder,
                 *self.area_transform.read(),
                 *self.image_transform.read(),
+                *self.tip_pos.read(),
             ))
         } else {
             None
@@ -90,16 +95,22 @@ impl NanonisConnection {
         self.update_image_transform(scan_area);
         self.update_image_data(&mut scan_area.live_image, encoder);
         self.update_scan_status(scan_area);
+        self.update_tip_pos(scan_area);
         if let Some(line_number) = self.scan_status.read_new().as_deref().copied() {
             println!("line number: {line_number:?}");
         }
     }
-    pub fn update_scan_status(&mut self, scan_area: &mut ScanArea) {
+    fn update_tip_pos(&mut self, scan_area: &mut ScanArea){
+        if let Some(tip_pos) = self.tip_pos.read_new().as_deref().copied(){
+            scan_area.tip_pos = tip_pos;
+        }
+    }
+    fn update_scan_status(&mut self, scan_area: &mut ScanArea) {
         if let Some(scan_status) = self.scan_status.read_new().as_deref().copied() {
             scan_area.scan_status = scan_status;
         }
     }
-    pub fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
+    fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
         if let Some(forward_data) = self.forward_data.read_new() {
             live_image.forward_data = forward_data.clone();
             parking_lot::RwLockReadGuard::unlock_fair(forward_data);
@@ -115,7 +126,7 @@ impl NanonisConnection {
             }
         }
     }
-    pub fn update_image_transform(&mut self, scan_area: &mut ScanArea) {
+    fn update_image_transform(&mut self, scan_area: &mut ScanArea) {
         if let Some(new_transform) = self.image_transform.read_new().as_deref().copied() {
             scan_area.image_transform = new_transform;
             return;
@@ -125,12 +136,12 @@ impl NanonisConnection {
             |old| *old = scan_area.image_transform,
         );
     }
-    pub fn update_area_transform(&mut self, scan_area: &mut ScanArea) {
+    fn update_area_transform(&mut self, scan_area: &mut ScanArea) {
         if let Some(new_transform) = self.area_transform.read_new().as_deref().copied() {
             scan_area.area_transform = new_transform;
         }
     }
-    pub fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
+    fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
         if let Some(state) = self.channel_state.read_new() {
             scan_area.channel_opts = state.channel_opts_names().collect();
             scan_area.channel_selected = state.selected_as_string();
@@ -185,7 +196,7 @@ impl Default for ScanStatus {
 impl ScanStatus {
     pub fn position_float(&self, rows: u32) -> f64 {
         let mut pos = ((self.line_number as f64 - 0.5) / rows as f64) - 0.5;
-        if self.scan_dir == ScanDir::Up{
+        if self.scan_dir == ScanDir::Up {
             pos *= -1.;
         }
         pos

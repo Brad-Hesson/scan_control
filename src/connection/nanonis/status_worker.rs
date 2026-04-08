@@ -23,6 +23,7 @@ pub struct StatusWorker {
     area_transform: SharedState<DAffine2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
+    tip_pos: SharedState<DVec2>,
 }
 impl StatusWorker {
     pub fn new(
@@ -31,6 +32,7 @@ impl StatusWorker {
         area_transform: &SharedState<DAffine2>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
+        tip_pos: &SharedState<DVec2>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
@@ -38,6 +40,7 @@ impl StatusWorker {
             area_transform: area_transform.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
+            tip_pos: tip_pos.clone(),
         }
     }
     fn update_channel_state(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -94,6 +97,17 @@ impl StatusWorker {
         };
         Ok(())
     }
+    fn update_tip_pos(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let resp = conn.scan_xy_pos_get(false)?;
+        let new_pos = DVec2::new(resp.x_pos as f64 * 1e9, resp.y_pos as f64 * 1e9);
+        if self
+            .tip_pos
+            .modify_conditional(|prev| *prev != new_pos, |prev| *prev = new_pos)
+        {
+            self.ctx.request_repaint();
+        }
+        Ok(())
+    }
 }
 impl Worker for StatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -101,6 +115,7 @@ impl Worker for StatusWorker {
         self.update_channel_state(conn)?;
         self.update_area_transform(conn)?;
         self.update_scan_status(conn)?;
+        self.update_tip_pos(conn)?;
         Ok(())
     }
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
