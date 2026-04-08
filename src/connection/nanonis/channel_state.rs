@@ -38,4 +38,8 @@ impl ChannelState {
         let idx = self.names.iter().position(|n| n == name).unwrap();
         self.selection = Some(idx)
     }
+    pub fn unit(&self) -> Option<String> {
+        self.selected_as_string()
+            .and_then(|sel| sel.split(['(', ')']).nth(1).map(str::to_string))
+    }
 }

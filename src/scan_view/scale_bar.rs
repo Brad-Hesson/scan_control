@@ -1,6 +1,6 @@
 use egui::{epaint::RectShape, CornerRadius, Id, Shape, Ui, Vec2};
 
-use crate::scan_view::{static_image::MetersFmt, view::ScanViewCtx};
+use crate::{components::EngFmt, scan_view::view::ScanViewCtx};
 
 pub struct ScaleBar {}
 impl ScaleBar {
@@ -35,7 +35,7 @@ impl ScaleBar {
             CornerRadius::ZERO,
             color,
         )));
-        let text = format!("{:.0}", MetersFmt(10f32.powi(mul - 9)));
+        let text = format!("{:.0}m", EngFmt(10f32.powi(mul - 9)));
         ui.painter().text(
             pos - Vec2::new(0., 5.),
             egui::Align2::RIGHT_BOTTOM,

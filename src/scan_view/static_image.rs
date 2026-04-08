@@ -9,7 +9,7 @@ use nanonis_tcp::LineDir;
 use tracing::warn;
 
 use crate::{
-    components::combo_box::{ComboBoxType, combo_box}, connection::backing::BufferState, scan_view::{ImageEncoder, ScanViewImage}
+    components::{EngFmt, combo_box::{ComboBoxType, combo_box}}, connection::backing::BufferState, scan_view::{ImageEncoder, ScanViewImage}
 };
 
 pub struct StaticImage {
@@ -104,27 +104,27 @@ impl StaticImage {
         let fit = self.image_view.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
             let mean = fit.mean();
-            ui.label(format!("Max:     {:.2}", MetersFmt(norm.max)));
-            ui.label(format!("Gap:    {:.2}", MetersFmt(norm.max - norm.min)));
-            ui.label(format!("Min:     {:.2}", MetersFmt(norm.min)));
-            ui.label(format!("Mean:    {:.2}", MetersFmt(mean)));
-            ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
+            ui.label(format!("Max:     {:.2}", EngFmt(norm.max)));
+            ui.label(format!("Gap:    {:.2}", EngFmt(norm.max - norm.min)));
+            ui.label(format!("Min:     {:.2}", EngFmt(norm.min)));
+            ui.label(format!("Mean:    {:.2}", EngFmt(mean)));
+            ui.label(format!("Std Dev: {:.2}", EngFmt(norm.stddev)));
             match fit {
                 FitData::PlaneFitSubtract {
                     x_slope, y_slope, ..
                 } => {
-                    ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
-                    ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
+                    ui.label(format!("X Slope: {:.2}", EngFmt(*x_slope)));
+                    ui.label(format!("Y Slope: {:.2}", EngFmt(*y_slope)));
                 }
                 FitData::MeanSubtract { .. } => {}
                 FitData::LineMeanSubtract { means } => {
                     for m in means {
-                        ui.label(format!("{:.2}", MetersFmt(*m)));
+                        ui.label(format!("{:.2}", EngFmt(*m)));
                     }
                 }
                 FitData::LineFitSubtract { means, slopes } => {
                     for (m, s) in izip!(means, slopes) {
-                        ui.label(format!("{:.2}  {:.2}", MetersFmt(*m), MetersFmt(*s)));
+                        ui.label(format!("{:.2}  {:.2}", EngFmt(*m), EngFmt(*s)));
                     }
                 }
             }
@@ -206,37 +206,3 @@ impl ComboBoxType for NormType {
 //         .inner
 //         .is_some_and(|clicked| clicked)
 // }
-
-#[repr(transparent)]
-pub struct MetersFmt(pub f32);
-impl Display for MetersFmt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mag = (self.0.abs().log10() / 3.).floor();
-        let scaled = self.0 / (10f32).powf(mag * 3.);
-        let suf = match mag as i32 {
-            4 => Some("Tm"),
-            3 => Some("Gm"),
-            2 => Some("Mm"),
-            1 => Some("km"),
-            0 => Some("m"),
-            -1 => Some("mm"),
-            -2 => Some("μm"),
-            -3 => Some("nm"),
-            -4 => Some("pm"),
-            -5 => Some("fm"),
-            _ => None,
-        };
-        if let Some(suf) = suf {
-            f32::fmt(&scaled, f)?;
-            write!(f, " {}", suf)?;
-        } else if self.0 == 0. {
-            f32::fmt(&self.0, f)?;
-            write!(f, " m")?;
-        } else {
-            warn!("unimplemented `MetersFmt` base for value: `{}`", self.0);
-            f32::fmt(&self.0, f)?;
-            write!(f, " m")?;
-        }
-        Ok(())
-    }
-}

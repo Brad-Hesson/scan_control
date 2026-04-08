@@ -8,10 +8,12 @@ use nanonis_tcp::LineDir;
 use uuid::Uuid;
 
 use crate::{
-    components::combo_box::{combo_box, ComboBoxType},
+    components::{
+        combo_box::{combo_box, ComboBoxType},
+        EngFmt,
+    },
     scan_view::{
-        static_image::{MetersFmt, NormType},
-        BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage,
+        static_image::NormType, BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage,
     },
     utils::vec_interop::IntoEgui,
 };
@@ -25,6 +27,7 @@ pub struct LiveImage {
     pub line_dir: LineDir,
     pub forward_data: FrameData,
     pub backward_data: FrameData,
+    pub unit: String,
 }
 
 impl LiveImage {
@@ -46,6 +49,7 @@ impl LiveImage {
             forward_data: empty_data.clone(),
             backward_data: empty_data,
             transform,
+            unit: "".into(),
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
@@ -78,14 +82,18 @@ impl LiveImage {
         let norm = self.image_view.norm_data.read();
         let fit = self.image_view.fit_data.read();
         if let (Some(norm), Some(fit)) = (norm.as_ref(), fit.as_ref()) {
-            ui.label(format!("Range:    {:.2}", MetersFmt(norm.max - norm.min)));
-            ui.label(format!("Std Dev: {:.2}", MetersFmt(norm.stddev)));
+            ui.label(format!(
+                "Range:    {:.2}{}",
+                EngFmt(norm.max - norm.min),
+                self.unit
+            ));
+            ui.label(format!("Std Dev: {:.2}{}", EngFmt(norm.stddev), self.unit));
             if let FitData::PlaneFitSubtract {
                 x_slope, y_slope, ..
             } = fit
             {
-                ui.label(format!("X Slope: {:.2}", MetersFmt(*x_slope)));
-                ui.label(format!("Y Slope: {:.2}", MetersFmt(*y_slope)));
+                ui.label(format!("X Slope: {:.2}{}", EngFmt(*x_slope), self.unit));
+                ui.label(format!("Y Slope: {:.2}{}", EngFmt(*y_slope), self.unit));
             }
         }
     }

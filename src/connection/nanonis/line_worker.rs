@@ -1,19 +1,23 @@
+use std::sync::Arc;
+
+use crossbeam::queue::ArrayQueue;
 use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
 use tracing::warn;
 
 use crate::connection::{
-    nanonis::{channel_state::ChannelState, ScanStatus, Worker},
+    nanonis::{channel_state::ChannelState, OverwriteQueueSender, ScanStatus, Worker},
     shared_state::SharedState,
 };
 
 pub struct LineWorker {
-    queue: std::sync::mpsc::SyncSender<(LineDir, u32)>,
+    queue: OverwriteQueueSender<(LineDir, u32)>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
+    overloaded: bool,
 }
 impl LineWorker {
     pub fn new(
-        queue: &std::sync::mpsc::SyncSender<(LineDir, u32)>,
+        queue: &OverwriteQueueSender<(LineDir, u32)>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
     ) -> Self {
@@ -21,6 +25,7 @@ impl LineWorker {
             queue: queue.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
+            overloaded: false,
         }
     }
 }
@@ -45,9 +50,7 @@ impl Worker for LineWorker {
         let Some(ch) = self.channel_state.read().selection else {
             return Ok(());
         };
-        if self.queue.try_send((dir, ch as u32)).is_err() {
-            warn!("Frame downloader is overloaded");
-        }
+        self.queue.send((dir, ch as u32));
         Ok(())
     }
     fn name(&self) -> String {

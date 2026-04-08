@@ -3,15 +3,19 @@ mod frame_worker;
 mod line_worker;
 mod status_worker;
 
-use std::{thread::JoinHandle, time::Duration};
+use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
+use crossbeam::{
+    queue::ArrayQueue,
+    sync::{Parker, Unparker},
+};
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
     error::{NanonisTcpError, NanonisTcpResult},
     LineDir, ScanDir,
 };
-use tracing::{error, warn};
+use tracing::{error, info, instrument, warn, Level};
 
 use crate::{
     connection::{
@@ -33,7 +37,7 @@ pub struct NanonisConnection {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
-    frame_queue_tx: std::sync::mpsc::SyncSender<(LineDir, u32)>,
+    frame_queue_tx: OverwriteQueueSender<(LineDir, u32)>,
     tip_pos: SharedState<DVec2>,
 }
 
@@ -46,7 +50,7 @@ impl NanonisConnection {
         let backward_data = SharedState::new_default();
         let scan_status = SharedState::new_default();
         let tip_pos = SharedState::new_default();
-        let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::sync_channel(8);
+        let (frame_queue_tx, frame_queue_rx) = overwrite_queue(2);
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &channel_state, &scan_status).run(address, 6501);
         FrameWorker::new(
@@ -138,12 +142,9 @@ impl NanonisConnection {
             scan_area.area_size = new_size;
         }
     }
-    fn request_full_frame(tx: &std::sync::mpsc::SyncSender<(LineDir, u32)>, channel: usize) {
-        if tx.try_send((LineDir::Forward, channel as u32)).is_err()
-            || tx.try_send((LineDir::Backward, channel as u32)).is_err()
-        {
-            warn!("Frame downloader is overloaded");
-        }
+    fn request_full_frame(tx: &OverwriteQueueSender<(LineDir, u32)>, channel: usize) {
+        tx.send((LineDir::Forward, channel as u32));
+        tx.send((LineDir::Backward, channel as u32));
     }
     fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
         if let Some(state) = self.channel_state.read_new() {
@@ -154,6 +155,9 @@ impl NanonisConnection {
             } else {
                 scan_area.live_image.clear_texture(encoder);
             }
+            if let Some(unit) = state.unit() {
+                scan_area.live_image.unit = unit;
+            }
             return;
         }
         if self.channel_state.modify_conditional(
@@ -163,10 +167,14 @@ impl NanonisConnection {
                 None => old.selection = None,
             },
         ) {
-            if let Some(ch) = self.channel_state.peek().selection {
+            let state = self.channel_state.peek();
+            if let Some(ch) = state.selection {
                 Self::request_full_frame(&self.frame_queue_tx, ch);
             } else {
                 scan_area.live_image.clear_texture(encoder);
+            }
+            if let Some(unit) = state.unit() {
+                scan_area.live_image.unit = unit;
             }
         }
     }
@@ -221,17 +229,20 @@ trait Worker: Sized + Send + 'static {
             .spawn(move || self.run_inner(addr, port))
             .unwrap()
     }
+    #[instrument(name = "worker", skip(self), fields(name = self.name()))]
     fn run_inner(&mut self, addr: String, port: u16) {
         'reconnect: loop {
+            info!("connecting");
             let mut conn = loop {
                 if let Ok(conn) = blocking::NanonisTcp::new((addr.as_str(), port)) {
                     break conn;
                 }
             };
+            info!("connected");
             'retry: loop {
                 match self
                     .init(&mut conn)
-                    .inspect_err(|e| error!("while `{}` initializing: {}", self.name(), e))
+                    .inspect_err(|e| error!("failed initializing: {}", e))
                 {
                     Ok(_) => break,
                     Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
@@ -244,27 +255,73 @@ trait Worker: Sized + Send + 'static {
                     }
                 }
             }
+            info!("initialized");
             let mut num_retries = 0;
             'retry: loop {
                 match self
                     .work(&mut conn)
-                    .inspect_err(|e| error!("while `{}` working: {}", self.name(), e))
+                    .inspect_err(|e| error!("failed working: {}", e))
                 {
                     Ok(_) => {
                         num_retries = 0;
                     }
                     Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
                         let dur = 10f32.powi(num_retries) / 1000.;
-                        std::thread::sleep(Duration::from_secs_f32(dur));
+                        let dur = Duration::from_secs_f32(dur);
+                        info!("reconnecting after {dur:?}");
+                        std::thread::sleep(dur);
                         num_retries += 1;
                         continue 'retry;
                     }
                     Err(NanonisTcpError::Io(_)) => {
-                        std::thread::sleep(Duration::from_secs(1));
+                        let dur = Duration::from_secs(1);
+                        info!("reconnecting after {dur:?}");
+                        std::thread::sleep(dur);
                         continue 'reconnect;
                     }
                 }
             }
+        }
+    }
+}
+
+pub fn overwrite_queue<T>(cap: usize) -> (OverwriteQueueSender<T>, OverwriteQueueReceiver<T>) {
+    let queue = Arc::new(ArrayQueue::new(cap));
+    let parker = Parker::new();
+    let unparker = parker.unparker().clone();
+    (
+        OverwriteQueueSender {
+            queue: Arc::clone(&queue),
+            unparker,
+        },
+        OverwriteQueueReceiver { queue, parker },
+    )
+}
+
+#[derive(Clone)]
+struct OverwriteQueueSender<T> {
+    queue: Arc<ArrayQueue<T>>,
+    unparker: Unparker,
+}
+impl<T> OverwriteQueueSender<T> {
+    pub fn send(&self, value: T) -> Option<T> {
+        let overwrote = self.queue.force_push(value);
+        self.unparker.unpark();
+        overwrote
+    }
+}
+
+struct OverwriteQueueReceiver<T> {
+    queue: Arc<ArrayQueue<T>>,
+    parker: Parker,
+}
+impl<T> OverwriteQueueReceiver<T> {
+    pub fn recv(&self) -> T {
+        loop {
+            if let Some(val) = self.queue.pop() {
+                return val;
+            }
+            self.parker.park();
         }
     }
 }
