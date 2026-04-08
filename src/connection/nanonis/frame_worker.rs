@@ -42,8 +42,10 @@ impl Worker for FrameWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         if let Ok((dir, ch)) = self.queue.recv() {
             let resp = conn.scan_frame_data_grab(ch, dir)?;
-            self.scan_status
-                .modify_silent(|prev| prev.scan_dir = resp.scan_dir);
+            self.scan_status.modify_conditional(
+                |prev| prev.scan_dir != resp.scan_dir,
+                |prev| prev.scan_dir = resp.scan_dir,
+            );
             let mut frame = FrameData::from(resp);
             if (frame.size[0] * frame.size[1]) == 0 {
                 frame = FrameData::default();

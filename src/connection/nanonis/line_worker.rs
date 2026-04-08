@@ -36,10 +36,11 @@ impl Worker for LineWorker {
             _ => return Ok(()),
         };
         self.scan_status.modify_conditional(
-            |prev| prev.line_number != resp.line_number as u32,
+            |prev| prev.line_number != resp.line_number as u32 || prev.line_dir != dir,
             |prev| {
                 prev.line_number = resp.line_number as u32;
                 prev.scanning = true;
+                prev.line_dir = dir;
             },
         );
         let Some(ch) = self.channel_state.read().selection else {

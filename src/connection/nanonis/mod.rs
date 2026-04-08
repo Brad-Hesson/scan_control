@@ -96,12 +96,9 @@ impl NanonisConnection {
         self.update_image_data(&mut scan_area.live_image, encoder);
         self.update_scan_status(scan_area);
         self.update_tip_pos(scan_area);
-        if let Some(line_number) = self.scan_status.read_new().as_deref().copied() {
-            println!("line number: {line_number:?}");
-        }
     }
-    fn update_tip_pos(&mut self, scan_area: &mut ScanArea){
-        if let Some(tip_pos) = self.tip_pos.read_new().as_deref().copied(){
+    fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {
+        if let Some(tip_pos) = self.tip_pos.read_new().as_deref().copied() {
             scan_area.tip_pos = tip_pos;
         }
     }
@@ -181,6 +178,7 @@ impl NanonisConnection {
 #[derive(Debug, Clone, Copy)]
 pub struct ScanStatus {
     pub scan_dir: ScanDir,
+    pub line_dir: LineDir,
     pub line_number: u32,
     pub scanning: bool,
 }
@@ -189,13 +187,18 @@ impl Default for ScanStatus {
         Self {
             scan_dir: ScanDir::Down,
             line_number: Default::default(),
+            line_dir: LineDir::Forward,
             scanning: false,
         }
     }
 }
 impl ScanStatus {
-    pub fn position_float(&self, rows: u32) -> f64 {
-        let mut pos = ((self.line_number as f64 - 0.5) / rows as f64) - 0.5;
+    pub fn position_float(&self, scan_size: [u32; 2], line_dir: LineDir) -> f64 {
+        let mut line_number = self.line_number;
+        if line_dir == LineDir::Backward && self.line_dir == LineDir::Forward {
+            line_number = line_number.saturating_sub(1)
+        }
+        let mut pos = ((line_number as f64 - 0.5) / scan_size[1] as f64) - 0.5;
         if self.scan_dir == ScanDir::Up {
             pos *= -1.;
         }

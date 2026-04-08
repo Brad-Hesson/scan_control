@@ -59,7 +59,9 @@ impl ScanArea {
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
         let tf = ctx.world2egui() * self.world_transform * self.image_transform;
-        let y = self.scan_status.position_float(self.live_image.size()[1]);
+        let y = self
+            .scan_status
+            .position_float(self.live_image.size(), self.live_image.line_dir);
         let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
         let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
         ui.painter().extend(Shape::dashed_line(
