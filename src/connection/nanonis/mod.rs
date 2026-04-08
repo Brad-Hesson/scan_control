@@ -10,7 +10,7 @@ use itertools::izip;
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
     error::{NanonisTcpError, NanonisTcpResult},
-    LineDir,
+    LineDir, ScanDir,
 };
 
 use crate::{
@@ -32,6 +32,7 @@ pub struct NanonisConnection {
     image_transform: SharedState<DAffine2>,
     area_transform: SharedState<DAffine2>,
     channel_state: SharedState<ChannelState>,
+    scan_status: SharedState<ScanStatus>,
     frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
 }
 
@@ -42,12 +43,26 @@ impl NanonisConnection {
         let channel_state = SharedState::new_default();
         let forward_data = SharedState::new_default();
         let backward_data = SharedState::new_default();
+        let scan_status = SharedState::new_default();
         let (frame_queue_tx, frame_queue_rx) = std::sync::mpsc::channel();
         let address = address.as_ref();
-        LineWorker::new(&frame_queue_tx, &channel_state).run(address, 6501);
-        FrameWorker::new(&ctx, &forward_data, &backward_data, frame_queue_rx).run(address, 6502);
-        StatusWorker::new(&ctx, &image_transform, &area_transform, &channel_state)
-            .run(address, 6503);
+        LineWorker::new(&frame_queue_tx, &channel_state, &scan_status).run(address, 6501);
+        FrameWorker::new(
+            &ctx,
+            &forward_data,
+            &backward_data,
+            frame_queue_rx,
+            &scan_status,
+        )
+        .run(address, 6502);
+        StatusWorker::new(
+            &ctx,
+            &image_transform,
+            &area_transform,
+            &channel_state,
+            &scan_status,
+        )
+        .run(address, 6503);
         Self {
             image_transform,
             area_transform,
@@ -55,6 +70,7 @@ impl NanonisConnection {
             backward_data,
             forward_data,
             frame_queue_tx,
+            scan_status,
         }
     }
     pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
@@ -73,6 +89,15 @@ impl NanonisConnection {
         self.update_area_transform(scan_area);
         self.update_image_transform(scan_area);
         self.update_image_data(&mut scan_area.live_image, encoder);
+        self.update_scan_status(scan_area);
+        if let Some(line_number) = self.scan_status.read_new().as_deref().copied() {
+            println!("line number: {line_number:?}");
+        }
+    }
+    pub fn update_scan_status(&mut self, scan_area: &mut ScanArea) {
+        if let Some(scan_status) = self.scan_status.read_new().as_deref().copied() {
+            scan_area.scan_status = scan_status;
+        }
     }
     pub fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
         if let Some(forward_data) = self.forward_data.read_new() {
@@ -142,44 +167,30 @@ impl NanonisConnection {
     }
 }
 
-// fn scan_worker(
-//     addr: impl ToSocketAddrs,
-//     ctx: egui::Context,
-//     mut stamp: SharedState<BufferState>,
-//     mut scanning: SharedState<bool>,
-//     channel: SharedState<Channel>,
-//     buffer_state: SharedState<BufferState>,
-// ) {
-//     let mut conn = blocking::NanonisTcp::new(addr).unwrap();
-//     loop {
-//         conn.scan_wait_end_of_scan(None).unwrap();
-//         if !*scanning.peek() {
-//             continue;
-//         }
-//         scanning.write(false);
-//         if !channel.peek().is_some() {
-//             continue;
-//         }
-//         let frame = buffer_state.peek().clone();
-//         if frame_early_exited(&frame) {
-//             continue;
-//         }
-//         stamp.write(frame);
-//         ctx.request_repaint();
-//     }
-// }
-
-// fn frame_early_exited(buffers: &BufferState) -> bool {
-//     let [height, width] = buffers.size;
-//     let lines = buffers.buf_f.iter().step_by(width);
-//     let trailing_nans = match buffers.scan_dir {
-//         ScanDir::Down => lines.rev().take_while(|v| v.is_nan()).count(),
-//         ScanDir::Up => lines.take_while(|v| v.is_nan()).count(),
-//     };
-//     let num_lines = height - trailing_nans;
-//     let min_lines = height / 4;
-//     num_lines < min_lines
-// }
+#[derive(Debug, Clone, Copy)]
+pub struct ScanStatus {
+    pub scan_dir: ScanDir,
+    pub line_number: u32,
+    pub scanning: bool,
+}
+impl Default for ScanStatus {
+    fn default() -> Self {
+        Self {
+            scan_dir: ScanDir::Down,
+            line_number: Default::default(),
+            scanning: false,
+        }
+    }
+}
+impl ScanStatus {
+    pub fn position_float(&self, rows: u32) -> f64 {
+        let mut pos = ((self.line_number as f64 - 0.5) / rows as f64) - 0.5;
+        if self.scan_dir == ScanDir::Up{
+            pos *= -1.;
+        }
+        pos
+    }
+}
 
 trait Worker: Sized + Send + 'static {
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()>;

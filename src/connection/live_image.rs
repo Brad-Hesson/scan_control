@@ -143,6 +143,9 @@ impl LiveImage {
     pub fn uuid(&self) -> Uuid {
         self.image_view.uuid()
     }
+    pub fn size(&self) -> [u32; 2] {
+        self.image_view.size()
+    }
 }
 
 impl ComboBoxType for LineDir {

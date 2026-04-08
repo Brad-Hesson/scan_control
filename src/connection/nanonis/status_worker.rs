@@ -13,7 +13,7 @@ use nanonis_tcp::{
 };
 
 use crate::connection::{
-    nanonis::{channel_state::ChannelState, Worker},
+    nanonis::{channel_state::ChannelState, ScanStatus, Worker},
     shared_state::SharedState,
 };
 
@@ -22,6 +22,7 @@ pub struct StatusWorker {
     image_transform: SharedState<DAffine2>,
     area_transform: SharedState<DAffine2>,
     channel_state: SharedState<ChannelState>,
+    scan_status: SharedState<ScanStatus>,
 }
 impl StatusWorker {
     pub fn new(
@@ -29,12 +30,14 @@ impl StatusWorker {
         image_transform: &SharedState<DAffine2>,
         area_transform: &SharedState<DAffine2>,
         channel_state: &SharedState<ChannelState>,
+        scan_status: &SharedState<ScanStatus>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
             image_transform: image_transform.clone(),
             area_transform: area_transform.clone(),
             channel_state: channel_state.clone(),
+            scan_status: scan_status.clone(),
         }
     }
     fn update_channel_state(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -81,19 +84,23 @@ impl StatusWorker {
         }
         Ok(())
     }
+    fn update_scan_status(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let status = conn.scan_status_get()?;
+        if self.scan_status.modify_conditional(
+            |prev| prev.scanning != status.running,
+            |prev| prev.scanning = status.running,
+        ) {
+            self.ctx.request_repaint();
+        };
+        Ok(())
+    }
 }
 impl Worker for StatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         self.update_image_transform(conn)?;
         self.update_channel_state(conn)?;
         self.update_area_transform(conn)?;
-        // let props = conn.scan_props_get()?;
-        // if self.name.modify_conditional(
-        //     |prev| *prev != props.series_name,
-        //     |val| *val = props.series_name.clone(),
-        // ) {
-        //     self.ctx.request_repaint();
-        // };
+        self.update_scan_status(conn)?;
         Ok(())
     }
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {

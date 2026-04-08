@@ -1,22 +1,27 @@
-use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
+use nanonis_tcp::{
+    blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanDir, ScanMovementType,
+};
 
 use crate::connection::{
-    nanonis::{channel_state::ChannelState, Worker},
+    nanonis::{channel_state::ChannelState, ScanStatus, Worker},
     shared_state::SharedState,
 };
 
 pub struct LineWorker {
     queue: std::sync::mpsc::Sender<(LineDir, u32)>,
     channel_state: SharedState<ChannelState>,
+    scan_status: SharedState<ScanStatus>,
 }
 impl LineWorker {
     pub fn new(
         queue: &std::sync::mpsc::Sender<(LineDir, u32)>,
         channel_state: &SharedState<ChannelState>,
+        scan_status: &SharedState<ScanStatus>,
     ) -> Self {
         Self {
             queue: queue.clone(),
             channel_state: channel_state.clone(),
+            scan_status: scan_status.clone(),
         }
     }
 }
@@ -30,6 +35,13 @@ impl Worker for LineWorker {
             ScanMovementType::Scan(dir) => dir,
             _ => return Ok(()),
         };
+        self.scan_status.modify_conditional(
+            |prev| prev.line_number != resp.line_number as u32,
+            |prev| {
+                prev.line_number = resp.line_number as u32;
+                prev.scanning = true;
+            },
+        );
         let Some(ch) = self.channel_state.read().selection else {
             return Ok(());
         };

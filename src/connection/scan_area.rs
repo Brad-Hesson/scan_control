@@ -1,9 +1,10 @@
-use egui::{Color32, DragValue, Ui};
+use egui::{Color32, DragValue, Id, Shape, Stroke, Ui};
 use glam::{DAffine2, DVec2};
 
 use crate::{
-    connection::LiveImage,
-    scan_view::{BorderRectangle, ImageEncoder, world_delta_transform},
+    connection::{nanonis::ScanStatus, LiveImage},
+    scan_view::{world_delta_transform, BorderRectangle, ImageEncoder, ScanViewCtx},
+    utils::vec_interop::{IntoEgui, Projection},
 };
 
 pub struct ScanArea {
@@ -13,6 +14,7 @@ pub struct ScanArea {
     pub live_image: LiveImage,
     pub channel_opts: Vec<String>,
     pub channel_selected: Option<String>,
+    pub scan_status: ScanStatus,
 }
 impl ScanArea {
     pub fn new(
@@ -28,11 +30,15 @@ impl ScanArea {
             live_image,
             channel_opts: vec![],
             channel_selected: None,
+            scan_status: ScanStatus::default(),
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
         self.live_image.transform = self.world_transform * self.image_transform;
         self.live_image.show_image(ui);
+        if self.scan_status.scanning {
+            self.show_scan_line(ui);
+        }
         BorderRectangle {
             transform: self.world_transform * self.area_transform,
             color: Color32::YELLOW,
@@ -43,6 +49,21 @@ impl ScanArea {
             let tf = world_delta_transform(ui, self.live_image.transform.translation);
             self.image_transform = tf * self.image_transform;
         }
+    }
+    fn show_scan_line(&self, ui: &mut Ui) {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let tf = ctx.world2egui() * self.world_transform * self.image_transform;
+        let y = self.scan_status.position_float(self.live_image.size()[1]);
+        let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
+        let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
+        ui.painter().extend(Shape::dashed_line(
+            &[p0, p1],
+            Stroke::new(1.0, Color32::BLUE),
+            3. * 5.,
+            1. * 5.,
+        ));
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         self.show_channel_control(ui);
