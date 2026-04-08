@@ -4,13 +4,14 @@ use crate::{
         file_tree_extern::ImageTree as FileTree,
         selectable_list::{SelectableEntry, SelectableList},
     },
-    connection::{nanonis::NanonisConnection, Connection, ScanArea},
+    connection::{nanonis::NanonisConnection, Connection, LiveImage, ScanArea},
     scan_view::{
         static_image::StaticImage, BorderRectangle, FileImage, GDSImage, ImageEncoder, ScaleBar,
         ScanView,
     },
     undo_queue::{StateModify, UndoQueue},
     utils::response_group::ResponseGroupExt as _,
+    view_object::Object,
 };
 use egui::{
     widgets, Align2, Atoms, Button, Color32, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers,
@@ -34,13 +35,9 @@ pub struct MyApp {
 
 pub struct AppState {
     scan_view: ScanView,
-    image_list: SelectableList<StaticImage>,
+    object_list: SelectableList<Object>,
     connection: Box<dyn Connection>,
-    file_tree: FileTree,
-    file_image_list: SelectableList<FileImage>,
-    test_gds: GDSImage,
     scale_bar: ScaleBar,
-    scan_area: Option<ScanArea>,
 }
 
 // trait UnwrapTraceExt{
@@ -65,27 +62,32 @@ impl MyApp {
 
         let image_encoder = ImageEncoder::new(wgpu);
         let current_scan = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
-        let file_tree = FileTree::new(image_encoder.clone());
-        let mut file_image_list = SelectableList::new();
+        let mut object_list = SelectableList::new();
+
+        // test image
         let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", DMat3::IDENTITY);
-        file_image_list.push(SelectableEntry::new((), test_image, |img| {
-            "img".into_atoms()
-        }));
+        let entry = SelectableEntry::new("IMG_2163.JPEG", Object::File(test_image), |img| {
+            img.name().into_atoms()
+        });
+        object_list.push(entry);
+
+        // test gds
         let test_gds = GDSImage::new(
             &image_encoder,
             "As_Implanted_MLA150.GDS",
             DAffine2::IDENTITY,
         );
+        let entry = SelectableEntry::new("As_Implanted_MLA150.GDS", Object::Gds(test_gds), |img| {
+            img.name().into_atoms()
+        });
+        object_list.push(entry);
+
         Self {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
-                image_list: SelectableList::new(),
+                object_list,
                 connection: current_scan,
-                file_tree,
-                file_image_list,
-                test_gds,
                 scale_bar: ScaleBar::new(),
-                scan_area: None,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -101,12 +103,24 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        match &mut self.app_state.scan_area {
+        match self
+            .app_state
+            .object_list
+            .iter_mut()
+            .find_map(|entry| entry.as_area_mut())
+        {
             None => {
-                self.app_state.scan_area = self
+                if let Some(scan_area) = self
                     .app_state
                     .connection
-                    .poll_connected(&self.image_encoder);
+                    .poll_connected(&self.image_encoder)
+                {
+                    self.app_state.object_list.push(SelectableEntry::new(
+                        "area",
+                        Object::Area(scan_area),
+                        |img| img.name().into_atoms(),
+                    ));
+                }
             }
             Some(live_image) => {
                 self.app_state
@@ -137,9 +151,9 @@ impl eframe::App for MyApp {
             //     .context("file load failed")
             //     .ok_trace();
         }
-        if let Some(path) = self.folder_dialog.take_picked() {
-            self.app_state.file_tree.load_dir(&path).ok_trace();
-        }
+        // if let Some(path) = self.folder_dialog.take_picked() {
+        //     self.app_state.file_tree.load_dir(&path).ok_trace();
+        // }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
@@ -147,7 +161,7 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
             let indexes = self
                 .app_state
-                .image_list
+                .object_list
                 .iter_selected_indexes()
                 .collect_vec();
             self.mod_state(MoveForwardModifier(indexes));
@@ -155,7 +169,7 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
             let indexes = self
                 .app_state
-                .image_list
+                .object_list
                 .iter_selected_indexes()
                 .collect_vec();
             self.mod_state(MoveBackwardModifier(indexes));
@@ -169,10 +183,10 @@ impl eframe::App for MyApp {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::Delete)) {
             let idxs = self
                 .app_state
-                .image_list
+                .object_list
                 .iter_selected_indexes()
                 .collect_vec();
-            self.mod_state(DeleteImagesModifier::new(idxs));
+            self.mod_state(DeleteObjectsModifier::new(idxs));
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::T)) {
             let new_theme = match self.current_theme {
@@ -202,61 +216,61 @@ impl eframe::App for MyApp {
                 // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
                 // self.update_gradient();
                 let image_resp = self.app_state.scan_view.show(ui, |ui| {
-                    for img in self.app_state.file_image_list.iter_mut() {
+                    for img in self.app_state.object_list.iter_mut() {
                         img.show(ui);
                     }
-                    let files = &mut self.app_state.image_list;
-                    for i in 0..files.len() {
-                        let resp = files[i].show(ui).synchronize(&mut files[i].resp_group);
-                        if resp.orig.clicked() {
-                            if ui.input(|i| i.modifiers.ctrl) {
-                                files[i].selected = !files[i].selected;
-                            } else {
-                                files.clear_selected();
-                                files[i].selected = true;
-                            }
-                        }
-                        if resp.sync.hovered() {
-                            BorderRectangle {
-                                transform: files[i].transform,
-                                color: Color32::LIGHT_BLUE,
-                                dashed: false,
-                            }
-                            .show(ui);
-                        }
-                        if files[i].selected {
-                            BorderRectangle {
-                                transform: files[i].transform,
-                                color: Color32::GREEN,
-                                dashed: false,
-                            }
-                            .show(ui);
-                        }
-                    }
-                    if let Some(scan_area) = &mut self.app_state.scan_area {
-                        scan_area.show(ui);
-                    }
-                    if let Some(image) = files.get_hovered(ui.ctx()) {
-                        BorderRectangle {
-                            transform: image.transform,
-                            color: Color32::LIGHT_BLUE,
-                            dashed: true,
-                        }
-                        .show(ui);
-                    }
-                    for image in files.iter_selected() {
-                        BorderRectangle {
-                            transform: image.transform,
-                            color: Color32::GREEN,
-                            dashed: true,
-                        }
-                        .show(ui);
-                    }
-                    self.app_state.test_gds.show(ui);
+                    // let files = &mut self.app_state.object_list;
+                    // for i in 0..files.len() {
+                    //     let resp = files[i].show(ui).synchronize(&mut files[i].resp_group);
+                    //     if resp.orig.clicked() {
+                    //         if ui.input(|i| i.modifiers.ctrl) {
+                    //             files[i].selected = !files[i].selected;
+                    //         } else {
+                    //             files.clear_selected();
+                    //             files[i].selected = true;
+                    //         }
+                    //     }
+                    //     if resp.sync.hovered() {
+                    //         BorderRectangle {
+                    //             transform: files[i].transform,
+                    //             color: Color32::LIGHT_BLUE,
+                    //             dashed: false,
+                    //         }
+                    //         .show(ui);
+                    //     }
+                    //     if files[i].selected {
+                    //         BorderRectangle {
+                    //             transform: files[i].transform,
+                    //             color: Color32::GREEN,
+                    //             dashed: false,
+                    //         }
+                    //         .show(ui);
+                    //     }
+                    // }
+                    // if let Some(scan_area) = &mut self.app_state.scan_area {
+                    //     scan_area.show(ui);
+                    // }
+                    // if let Some(image) = files.get_hovered(ui.ctx()) {
+                    //     BorderRectangle {
+                    //         transform: image.transform,
+                    //         color: Color32::LIGHT_BLUE,
+                    //         dashed: true,
+                    //     }
+                    //     .show(ui);
+                    // }
+                    // for image in files.iter_selected() {
+                    //     BorderRectangle {
+                    //         transform: image.transform,
+                    //         color: Color32::GREEN,
+                    //         dashed: true,
+                    //     }
+                    //     .show(ui);
+                    // }
+                    // self.app_state.test_gds.show(ui);
                     self.app_state.scale_bar.show(ui);
                 });
                 if image_resp.clicked() {
-                    self.app_state.image_list.clear_selected();
+                    self.app_state.object_list.clear_selected();
                 };
                 egui::Window::new("Images")
                     .frame(
@@ -273,10 +287,10 @@ impl eframe::App for MyApp {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
                         // self.app_state.file_tree.show(ui);
-                        self.app_state.image_list.show(ui);
+                        self.app_state.object_list.show(ui);
                     });
                 let mut new_top = ui.clip_rect().top();
-                if let Some(scan_area) = &mut self.app_state.scan_area {
+                if let Some(scan_area) = self.app_state.object_list.iter_mut().find_map(|ent| ent.as_area_mut()) {
                     new_top = egui::Window::new("Current Scan")
                         .frame(
                             Frame::window(&ctx.style())
@@ -298,11 +312,11 @@ impl eframe::App for MyApp {
                 }
                 let selected = self
                     .app_state
-                    .image_list
+                    .object_list
                     .iter_selected_indexes()
                     .collect_vec();
                 for i in selected {
-                    let name = &self.app_state.image_list[i].name;
+                    let name = self.app_state.object_list[i].name();
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
                     new_top = egui::Window::new(name)
@@ -311,31 +325,30 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            self.app_state.image_list[i]
-                                .show_image_menu(ui, &mut self.image_encoder);
+                            self.app_state.object_list[i].show_menu(ui, &mut self.image_encoder);
                         })
                         .unwrap()
                         .response
                         .rect
                         .bottom();
                 }
-                for i in 0..self.app_state.file_image_list.len() {
-                    let name = &self.app_state.file_image_list[i].name;
-                    let mut rect = ui.min_rect();
-                    rect.set_top(new_top);
-                    new_top = egui::Window::new(name)
-                        .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
-                        .constrain_to(rect)
-                        .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
-                        .resizable(false)
-                        .show(ctx, |ui| {
-                            self.app_state.file_image_list[i].show_menu(ui);
-                        })
-                        .unwrap()
-                        .response
-                        .rect
-                        .bottom();
-                }
+                // for i in 0..self.app_state.file_image_list.len() {
+                //     let name = &self.app_state.file_image_list[i].name;
+                //     let mut rect = ui.min_rect();
+                //     rect.set_top(new_top);
+                //     new_top = egui::Window::new(name)
+                //         .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
+                //         .constrain_to(rect)
+                //         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
+                //         .resizable(false)
+                //         .show(ctx, |ui| {
+                //             self.app_state.file_image_list[i].show_menu(ui);
+                //         })
+                //         .unwrap()
+                //         .response
+                //         .rect
+                //         .bottom();
+                // }
             });
     }
 }
@@ -362,11 +375,11 @@ fn image_list_item(image: &StaticImage) -> Atoms<'_> {
         .into_atoms()
 }
 
-struct DeleteImagesModifier {
-    imgs: Vec<SelectableEntry<StaticImage>>,
+struct DeleteObjectsModifier {
+    imgs: Vec<SelectableEntry<Object>>,
     idxs: Vec<usize>,
 }
-impl DeleteImagesModifier {
+impl DeleteObjectsModifier {
     pub fn new(idxs: Vec<usize>) -> Self {
         Self {
             imgs: Vec::with_capacity(idxs.len()),
@@ -374,40 +387,40 @@ impl DeleteImagesModifier {
         }
     }
 }
-impl StateModify<AppState> for DeleteImagesModifier {
+impl StateModify<AppState> for DeleteObjectsModifier {
     fn redo(&mut self, state: &mut AppState) -> bool {
         for idx in self.idxs.iter().rev() {
-            self.imgs.push(state.image_list.remove(*idx));
+            self.imgs.push(state.object_list.remove(*idx));
         }
         true
     }
     fn undo(&mut self, state: &mut AppState) {
         for (idx, img) in izip!(&self.idxs, self.imgs.drain(..).rev()) {
-            state.image_list.insert(*idx, img);
+            state.object_list.insert(*idx, img);
         }
     }
 }
 
-struct LoadImagesModifier {
-    imgs: Vec<SelectableEntry<StaticImage>>,
+struct LoadObjectsModifier {
+    imgs: Vec<SelectableEntry<Object>>,
     num: usize,
 }
-impl LoadImagesModifier {
-    pub fn new(imgs: Vec<SelectableEntry<StaticImage>>) -> Self {
+impl LoadObjectsModifier {
+    pub fn new(imgs: Vec<SelectableEntry<Object>>) -> Self {
         Self {
             num: imgs.len(),
             imgs,
         }
     }
 }
-impl StateModify<AppState> for LoadImagesModifier {
+impl StateModify<AppState> for LoadObjectsModifier {
     fn redo(&mut self, state: &mut AppState) -> bool {
-        state.image_list.extend(self.imgs.drain(..));
+        state.object_list.extend(self.imgs.drain(..));
         true
     }
     fn undo(&mut self, state: &mut AppState) {
-        let start = state.image_list.len() - self.num;
-        self.imgs.extend(state.image_list.drain(start..));
+        let start = state.object_list.len() - self.num;
+        self.imgs.extend(state.object_list.drain(start..));
         for img in &mut self.imgs {
             img.selected = false;
         }
@@ -417,23 +430,23 @@ impl StateModify<AppState> for LoadImagesModifier {
 struct MoveForwardModifier(Vec<usize>);
 impl StateModify<AppState> for MoveForwardModifier {
     fn redo(&mut self, state: &mut AppState) -> bool {
-        self.0 = state.image_list.move_indexes_down(&self.0);
+        self.0 = state.object_list.move_indexes_down(&self.0);
         !self.0.is_empty()
     }
 
     fn undo(&mut self, state: &mut AppState) {
-        self.0 = state.image_list.move_indexes_up(&self.0)
+        self.0 = state.object_list.move_indexes_up(&self.0)
     }
 }
 struct MoveBackwardModifier(Vec<usize>);
 impl StateModify<AppState> for MoveBackwardModifier {
     fn redo(&mut self, state: &mut AppState) -> bool {
-        self.0 = state.image_list.move_indexes_up(&self.0);
+        self.0 = state.object_list.move_indexes_up(&self.0);
         !self.0.is_empty()
     }
 
     fn undo(&mut self, state: &mut AppState) {
-        self.0 = state.image_list.move_indexes_down(&self.0)
+        self.0 = state.object_list.move_indexes_down(&self.0)
     }
 }
 

@@ -17,6 +17,7 @@ mod connection;
 mod scan_view;
 mod undo_queue;
 mod utils;
+mod view_object;
 
 fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
