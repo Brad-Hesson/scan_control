@@ -191,16 +191,23 @@ impl Default for ScanStatus {
     }
 }
 impl ScanStatus {
-    pub fn position_float(&self, scan_size: [u32; 2], line_dir: LineDir) -> f64 {
+    pub fn scan_line_position(&self, scan_size: [u32; 2], line_dir: LineDir) -> Option<f64> {
+        if !self.scanning {
+            return None;
+        }
         let mut line_number = self.line_number;
         if line_dir == LineDir::Backward && self.line_dir == LineDir::Forward {
             line_number = line_number.saturating_sub(1)
         }
-        let mut pos = ((line_number as f64 - 0.5) / scan_size[1] as f64) - 0.5;
+        let num_rows = scan_size[1];
+        if line_number == num_rows {
+            return None;
+        }
+        let mut pos = ((line_number as f64 - 0.5) / num_rows as f64) - 0.5;
         if self.scan_dir == ScanDir::Up {
             pos *= -1.;
         }
-        pos
+        Some(pos)
     }
 }
 
@@ -228,7 +235,7 @@ trait Worker: Sized + Send + 'static {
                     .inspect_err(|e| error!("while `{}` initializing: {}", self.name(), e))
                 {
                     Ok(_) => break,
-                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
                         std::thread::sleep(Duration::from_secs(1));
                         continue 'retry;
                     }
@@ -247,7 +254,7 @@ trait Worker: Sized + Send + 'static {
                     Ok(_) => {
                         num_retries = 0;
                     }
-                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Parse(_)) => {
+                    Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
                         let dur = 10f32.powi(num_retries) / 1000.;
                         std::thread::sleep(Duration::from_secs_f32(dur));
                         num_retries += 1;

@@ -59,24 +59,23 @@ impl ScanArea {
         .show(ui);
     }
     fn show_scan_line(&self, ui: &mut Ui) {
-        if !self.scan_status.scanning {
-            return;
-        }
-        let ctx = ui
-            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-            .unwrap();
-        let tf = ctx.world2egui() * self.world_transform * self.image_transform;
-        let y = self
+        if let Some(y) = self
             .scan_status
-            .position_float(self.live_image.size(), self.live_image.line_dir);
-        let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
-        let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
-        ui.painter().extend(Shape::dashed_line(
-            &[p0, p1],
-            Stroke::new(1.0, Color32::BLUE),
-            3. * 5.,
-            1. * 5.,
-        ));
+            .scan_line_position(self.live_image.size(), self.live_image.line_dir)
+        {
+            let ctx = ui
+                .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+                .unwrap();
+            let tf = ctx.world2egui() * self.world_transform * self.image_transform;
+            let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
+            let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
+            ui.painter().extend(Shape::dashed_line(
+                &[p0, p1],
+                Stroke::new(1.0, Color32::BLUE),
+                3. * 5.,
+                1. * 5.,
+            ));
+        };
     }
     fn show_tip(&self, ui: &mut Ui) {
         let ctx = ui
