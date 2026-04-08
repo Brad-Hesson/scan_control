@@ -1,9 +1,15 @@
+use core::f64;
 use std::sync::Arc;
 
-use glam::DAffine2;
+use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools as _};
 use nanonis_tcp::{
-    blocking::NanonisTcp, commands::scan::FrameGetResponse, error::NanonisTcpResult,
+    blocking::NanonisTcp,
+    commands::{
+        self,
+        scan::{FrameGetResponse, FrameSetArgs},
+    },
+    error::NanonisTcpResult,
 };
 
 use crate::connection::{
@@ -13,24 +19,26 @@ use crate::connection::{
 
 pub struct StatusWorker {
     ctx: egui::Context,
-    transform: SharedState<DAffine2>,
+    image_transform: SharedState<DAffine2>,
+    area_transform: SharedState<DAffine2>,
     channel_state: SharedState<ChannelState>,
 }
 impl StatusWorker {
     pub fn new(
         ctx: &egui::Context,
-        transform: &SharedState<DAffine2>,
+        image_transform: &SharedState<DAffine2>,
+        area_transform: &SharedState<DAffine2>,
         channel_state: &SharedState<ChannelState>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
-            transform: transform.clone(),
+            image_transform: image_transform.clone(),
+            area_transform: area_transform.clone(),
             channel_state: channel_state.clone(),
         }
     }
     fn update_channel_state(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let buffer = conn.scan_buffer_get()?;
-
         let channels = buffer
             .channel_indexes
             .into_iter()
@@ -43,18 +51,45 @@ impl StatusWorker {
         }
         Ok(())
     }
-}
-impl Worker for StatusWorker {
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn update_image_transform(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        if let Some(new_transform) = self.image_transform.read_new().as_deref().copied() {
+            let frame_args = frame_from_transform(new_transform);
+            conn.call::<commands::scan::FrameSet>(&frame_args)?;
+            return Ok(());
+        }
         let frame = conn.scan_frame_get()?;
         let new_transform = transform_from_frame(&frame);
-        if self.transform.modify_conditional(
-            |prev| izip!(prev.to_cols_array(), new_transform.to_cols_array()).any(|(a, b)| a != b),
+        if self.image_transform.modify_conditional(
+            |prev| {
+                izip!(prev.to_cols_array(), new_transform.to_cols_array())
+                    .any(|(a, b)| (a - b).abs() > f32::EPSILON as f64 * 100.)
+            },
             |val| *val = new_transform,
         ) {
             self.ctx.request_repaint();
         };
+        Ok(())
+    }
+    fn update_area_transform(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let piezo_range = conn.piezo_range_get()?;
+        let area_transform = DAffine2::from_scale(DVec2::new(
+            piezo_range.range_x as f64 * 1e9,
+            piezo_range.range_y as f64 * 1e9,
+        ));
+        if self.area_transform.modify_conditional(
+            |prev| *prev != area_transform,
+            |prev| *prev = area_transform,
+        ) {
+            self.ctx.request_repaint();
+        }
+        Ok(())
+    }
+}
+impl Worker for StatusWorker {
+    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        self.update_image_transform(conn)?;
         self.update_channel_state(conn)?;
+        self.update_area_transform(conn)?;
         // let props = conn.scan_props_get()?;
         // if self.name.modify_conditional(
         //     |prev| *prev != props.series_name,
@@ -74,8 +109,38 @@ impl Worker for StatusWorker {
 
 fn transform_from_frame(frame: &FrameGetResponse) -> DAffine2 {
     DAffine2::from_scale_angle_translation(
-        [frame.width as f64 * 1e9, frame.height as f64 * -1e9].into(),
-        frame.angle as f64 / 180. * -3.14,
-        [frame.center_x as f64 * 1e9, frame.center_y as f64 * 1e9].into(),
+        DVec2 {
+            x: frame.width as f64 * 1e9,
+            y: frame.height as f64 * -1e9,
+        },
+        frame.angle as f64 / 180. * -f64::consts::PI,
+        DVec2 {
+            x: frame.center_x as f64 * 1e9,
+            y: frame.center_y as f64 * 1e9,
+        },
     )
+}
+
+fn frame_from_transform(transform: DAffine2) -> FrameSetArgs {
+    let (
+        DVec2 {
+            x: scale_x,
+            y: scale_y,
+        },
+        mut angle,
+        DVec2 {
+            x: trans_x,
+            y: trans_y,
+        },
+    ) = transform.to_scale_angle_translation();
+    if scale_x < 0. {
+        angle += f64::consts::PI;
+    }
+    FrameSetArgs {
+        width: (scale_x * 1e-9).abs() as f32,
+        height: (scale_y * 1e-9).abs() as f32,
+        angle: (angle * 180. / -f64::consts::PI) as f32,
+        center_x: (trans_x * 1e-9) as f32,
+        center_y: (trans_y * 1e-9) as f32,
+    }
 }

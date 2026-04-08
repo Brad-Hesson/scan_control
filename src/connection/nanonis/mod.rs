@@ -6,6 +6,7 @@ mod status_worker;
 use std::thread::JoinHandle;
 
 use glam::DAffine2;
+use itertools::izip;
 use nanonis_tcp::{
     blocking::{self, NanonisTcp},
     error::{NanonisTcpError, NanonisTcpResult},
@@ -19,6 +20,7 @@ use crate::{
             channel_state::ChannelState, frame_worker::FrameWorker, line_worker::LineWorker,
             status_worker::StatusWorker,
         },
+        scan_area::ScanArea,
         shared_state::SharedState,
     },
     scan_view::ImageEncoder,
@@ -27,14 +29,16 @@ use crate::{
 pub struct NanonisConnection {
     forward_data: SharedState<FrameData>,
     backward_data: SharedState<FrameData>,
-    transform: SharedState<DAffine2>,
+    image_transform: SharedState<DAffine2>,
+    area_transform: SharedState<DAffine2>,
     channel_state: SharedState<ChannelState>,
     frame_queue_tx: std::sync::mpsc::Sender<(LineDir, u32)>,
 }
 
 impl NanonisConnection {
     pub fn new(ctx: egui::Context, address: impl AsRef<str>) -> Self {
-        let transform = SharedState::new_default();
+        let image_transform = SharedState::new_default();
+        let area_transform = SharedState::new_default();
         let channel_state = SharedState::new_default();
         let forward_data = SharedState::new_default();
         let backward_data = SharedState::new_default();
@@ -42,26 +46,33 @@ impl NanonisConnection {
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &channel_state).run(address, 6501);
         FrameWorker::new(&ctx, &forward_data, &backward_data, frame_queue_rx).run(address, 6502);
-        StatusWorker::new(&ctx, &transform, &channel_state).run(address, 6503);
+        StatusWorker::new(&ctx, &image_transform, &area_transform, &channel_state)
+            .run(address, 6503);
         Self {
-            transform,
+            image_transform,
+            area_transform,
             channel_state,
             backward_data,
             forward_data,
             frame_queue_tx,
         }
     }
-    pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<LiveImage> {
-        if let Some(transform) = self.transform.read_new().as_deref().copied() {
-            Some(LiveImage::new(encoder, transform))
+    pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
+        if self.image_transform.is_new() && self.area_transform.is_new() {
+            Some(ScanArea::new(
+                encoder,
+                *self.area_transform.read(),
+                *self.image_transform.read(),
+            ))
         } else {
             None
         }
     }
-    pub fn update_live_image(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
-        self.update_channel(live_image, encoder);
-        self.update_transform(live_image);
-        self.update_image_data(live_image, encoder);
+    pub fn update_live_image(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
+        self.update_channel(scan_area, encoder);
+        self.update_area_transform(scan_area);
+        self.update_image_transform(scan_area);
+        self.update_image_data(&mut scan_area.live_image, encoder);
     }
     pub fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
         if let Some(forward_data) = self.forward_data.read_new() {
@@ -79,20 +90,31 @@ impl NanonisConnection {
             }
         }
     }
-    pub fn update_transform(&mut self, live_image: &mut LiveImage) {
-        if let Some(new_transform) = self.transform.read_new().as_deref().copied() {
-            live_image.transform = new_transform;
+    pub fn update_image_transform(&mut self, scan_area: &mut ScanArea) {
+        if let Some(new_transform) = self.image_transform.read_new().as_deref().copied() {
+            scan_area.image_transform = new_transform;
             return;
         }
-        self.transform.modify_conditional(
-            |prev| *prev != live_image.transform,
-            |old| *old = live_image.transform,
+        self.image_transform.modify_conditional(
+            |prev| {
+                izip!(
+                    prev.to_cols_array(),
+                    scan_area.image_transform.to_cols_array()
+                )
+                .any(|(a, b)| (a - b).abs() > f32::EPSILON as f64 * 100.)
+            },
+            |old| *old = scan_area.image_transform,
         );
     }
-    pub fn update_channel(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
+    pub fn update_area_transform(&mut self, scan_area: &mut ScanArea) {
+        if let Some(new_transform) = self.area_transform.read_new().as_deref().copied() {
+            scan_area.area_transform = new_transform;
+        }
+    }
+    pub fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
         if let Some(state) = self.channel_state.read_new() {
-            live_image.channel_opts = state.channel_opts_names().collect();
-            live_image.channel_selected = state.selected_as_string();
+            scan_area.channel_opts = state.channel_opts_names().collect();
+            scan_area.channel_selected = state.selected_as_string();
             if let Some(ch) = state.selection {
                 self.frame_queue_tx
                     .send((LineDir::Forward, ch as u32))
@@ -101,13 +123,13 @@ impl NanonisConnection {
                     .send((LineDir::Backward, ch as u32))
                     .unwrap();
             } else {
-                live_image.clear_texture(encoder);
+                scan_area.live_image.clear_texture(encoder);
             }
             return;
         }
         if self.channel_state.modify_conditional(
-            |prev| prev.selected_as_string() != live_image.channel_selected,
-            |old| match &live_image.channel_selected {
+            |prev| prev.selected_as_string() != scan_area.channel_selected,
+            |old| match &scan_area.channel_selected {
                 Some(ch_name) => old.set_selection_by_name(&ch_name),
                 None => old.selection = None,
             },
@@ -120,7 +142,7 @@ impl NanonisConnection {
                     .send((LineDir::Backward, ch as u32))
                     .unwrap();
             } else {
-                live_image.clear_texture(encoder);
+                scan_area.live_image.clear_texture(encoder);
             }
         }
     }

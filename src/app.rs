@@ -2,7 +2,7 @@ use crate::components::file_dialog::ViewportFileDialog;
 use crate::components::file_tree_extern::ImageTree as FileTree;
 use crate::components::selectable_list::{SelectableEntry, SelectableList};
 use crate::connection::nanonis::NanonisConnection;
-use crate::connection::LiveImage;
+use crate::connection::{LiveImage, ScanArea};
 use crate::scan_view::{static_image::StaticImage, BorderRectangle, ImageEncoder, ScanView};
 use crate::scan_view::{FileImage, GDSImage, ScaleBar};
 use crate::undo_queue::{StateModify, UndoQueue};
@@ -37,7 +37,7 @@ pub struct AppState {
     file_image_list: SelectableList<FileImage>,
     test_gds: GDSImage,
     scale_bar: ScaleBar,
-    live_image: Option<LiveImage>,
+    scan_area: Option<ScanArea>,
 }
 
 // trait UnwrapTraceExt{
@@ -82,7 +82,7 @@ impl MyApp {
                 file_image_list,
                 test_gds,
                 scale_bar: ScaleBar::new(),
-                live_image: None,
+                scan_area: None,
             },
             image_encoder,
             file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
@@ -98,9 +98,9 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        match &mut self.app_state.live_image {
+        match &mut self.app_state.scan_area {
             None => {
-                self.app_state.live_image = self
+                self.app_state.scan_area = self
                     .app_state
                     .connection
                     .poll_connected(&self.image_encoder);
@@ -230,14 +230,8 @@ impl eframe::App for MyApp {
                             .show(ui);
                         }
                     }
-                    if let Some(live_image) = &mut self.app_state.live_image {
-                        live_image.show_image(ui);
-                        BorderRectangle {
-                            transform: live_image.transform,
-                            color: Color32::RED,
-                            dashed: false,
-                        }
-                        .show(ui);
+                    if let Some(scan_area) = &mut self.app_state.scan_area {
+                        scan_area.show(ui);
                     }
                     if let Some(image) = files.get_hovered(ui.ctx()) {
                         BorderRectangle {
@@ -279,7 +273,7 @@ impl eframe::App for MyApp {
                         self.app_state.image_list.show(ui);
                     });
                 let mut new_top = ui.clip_rect().top();
-                if let Some(live_image) = &mut self.app_state.live_image {
+                if let Some(scan_area) = &mut self.app_state.scan_area {
                     new_top = egui::Window::new("Current Scan")
                         .frame(
                             Frame::window(&ctx.style())
@@ -290,7 +284,9 @@ impl eframe::App for MyApp {
                         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
                         .resizable(false)
                         .show(ctx, |ui| {
-                            live_image.show_menu(ui, &mut self.image_encoder);
+                            let vis = &mut ui.style_mut().visuals.widgets.inactive;
+                            vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
+                            scan_area.show_menu(ui, &self.image_encoder);
                         })
                         .unwrap()
                         .response

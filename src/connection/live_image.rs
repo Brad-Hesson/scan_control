@@ -1,16 +1,17 @@
 use core::f32;
 use std::sync::Arc;
 
-use egui::{DragValue, Response, Ui, WidgetText};
+use egui::{Color32, DragValue, Response, Ui, WidgetText};
 use glam::DAffine2;
 use image_compute::image_compute::{FitData, FitType};
 use nanonis_tcp::LineDir;
+use uuid::Uuid;
 
 use crate::{
     components::combo_box::{combo_box, ComboBoxType},
     scan_view::{
         static_image::{MetersFmt, NormType},
-        ImageEncoder, ScanViewImage,
+        BorderRectangle, ImageEncoder, ScanViewImage,
     },
 };
 
@@ -23,8 +24,6 @@ pub struct LiveImage {
     pub line_dir: LineDir,
     pub forward_data: FrameData,
     pub backward_data: FrameData,
-    pub channel_opts: Vec<String>,
-    pub channel_selected: Option<String>,
 }
 
 impl LiveImage {
@@ -45,20 +44,22 @@ impl LiveImage {
             fit_type: FitType::MeanSubtract,
             forward_data: empty_data.clone(),
             backward_data: empty_data,
-            channel_opts: vec![],
-            channel_selected: None,
             transform,
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
         self.image_view.transform = self.transform;
         self.image_view.norm_type = self.norm_type.combined(self.std_dev);
-        self.image_view.show(ui)
+        let resp = self.image_view.show(ui);
+        BorderRectangle {
+            transform: self.transform,
+            color: Color32::RED,
+            dashed: false,
+        }
+        .show(ui);
+        resp
     }
-    pub fn show_menu(&mut self, ui: &mut Ui, encoder: &mut ImageEncoder) {
-        let vis = &mut ui.style_mut().visuals.widgets.inactive;
-        vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-        self.show_channel_control(ui);
+    pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         self.show_fit_control(ui, encoder);
         self.show_normalization_control(ui);
         self.show_line_dir_control(ui, encoder);
@@ -120,22 +121,6 @@ impl LiveImage {
             self.write_and_update_texture(encoder);
         }
     }
-    pub fn show_channel_control(&mut self, ui: &mut Ui) {
-        let mut selection = self.channel_selected.as_ref().map(|s| s.as_str());
-        if egui::ComboBox::new((self.image_view.uuid(), "combo_box"), "")
-            .selected_text(selection.unwrap_or_default())
-            .show_ui(ui, |ui| {
-                self.channel_opts
-                    .iter()
-                    .map(|opt| ui.selectable_value(&mut selection, Some(opt), opt))
-                    .any(|resp| resp.clicked())
-            })
-            .inner
-            .is_some_and(|clicked| clicked)
-        {
-            self.channel_selected = selection.map(|s| s.to_string());
-        }
-    }
     pub fn update_texture(&self, encoder: &ImageEncoder) {
         self.image_view.write_texture(encoder, self.fit_type);
     }
@@ -154,6 +139,9 @@ impl LiveImage {
     }
     pub fn clear_texture(&mut self, encoder: &ImageEncoder) {
         self.image_view.clear(encoder);
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.image_view.uuid()
     }
 }
 

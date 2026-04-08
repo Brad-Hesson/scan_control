@@ -7,7 +7,7 @@ use image_compute::file_image::FileImageBuffers;
 use itertools::Itertools;
 
 use crate::{
-    scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx},
+    scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx, world_delta_transform},
     utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection},
 };
 
@@ -204,43 +204,4 @@ fn drag_point(
     ui.painter().circle_filled(center, radius, color);
 
     resp
-}
-
-pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
-    let ctx = ui
-        .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-        .unwrap();
-    let screen_to_world = ctx.world2egui().inverse();
-    let response = ctx.screen_response;
-    // Calculate the dragging transform
-    let drag = if response.dragged_by(egui::PointerButton::Primary) {
-        let screen_drag = response.drag_delta().to_glam();
-        let world_drag = screen_to_world.project_vec2(screen_drag);
-        DAffine2::from_translation(world_drag)
-    } else {
-        DAffine2::IDENTITY
-    };
-    // Calculate the rotation transform
-    let rotate = if response.dragged_by(egui::PointerButton::Secondary) {
-        let cursor_pos =
-            screen_to_world.project_pos2(response.interact_pointer_pos().unwrap().to_glam());
-        let cursor_vec = cursor_pos - center;
-        let drag_vec = screen_to_world.project_vec2(response.drag_delta().to_glam());
-        let angle = cursor_vec.perp_dot(drag_vec) / cursor_vec.length_squared();
-
-        let trans = DAffine2::from_translation(center);
-        let rot = DAffine2::from_angle(angle as f64);
-        trans * rot * trans.inverse()
-    } else {
-        DAffine2::IDENTITY
-    };
-
-    // Calculate the Zooming transform
-    let zoom = {
-        let scalar = (ui.input(|is| is.raw_scroll_delta).y / 100.).exp() as f64;
-        let scale = DAffine2::from_scale(DVec2::splat(scalar).into());
-        let trans = DAffine2::from_translation(center);
-        trans * scale * trans.inverse()
-    };
-    rotate * zoom * drag
 }
