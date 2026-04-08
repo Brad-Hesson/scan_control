@@ -266,7 +266,7 @@ trait Worker: Sized + Send + 'static {
                         num_retries = 0;
                     }
                     Err(NanonisTcpError::Api(_)) | Err(NanonisTcpError::Codec(_)) => {
-                        let dur = (2f32.powi(num_retries) * 1e-3).max(1.0);
+                        let dur = (2f32.powi(num_retries) * 1e-3).min(1.0);
                         let dur = Duration::from_secs_f32(dur);
                         info!("reconnecting after {dur:?}");
                         std::thread::sleep(dur);
