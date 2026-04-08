@@ -17,6 +17,7 @@ use crate::{
         queue::{overwrite_queue, OverwriteQueueSender},
         scan_area::ScanArea,
         shared_state::SharedState,
+        Connection,
     },
     scan_view::ImageEncoder,
 };
@@ -30,6 +31,31 @@ pub struct NanonisConnection {
     scan_status: SharedState<ScanStatus>,
     frame_queue_tx: OverwriteQueueSender<LineDir>,
     tip_pos: SharedState<DVec2>,
+}
+
+impl Connection for NanonisConnection {
+    fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
+        if self.image_transform.is_new() && self.area_size.is_new() && self.tip_pos.is_new() {
+            Some(ScanArea::new(
+                encoder,
+                *self.area_size.read(),
+                *self.image_transform.read(),
+                *self.tip_pos.read(),
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn update(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) -> Option<LiveImage> {
+        self.update_channel(scan_area, encoder);
+        self.update_area_size(scan_area);
+        self.update_image_transform(scan_area);
+        self.update_image_data(&mut scan_area.live_image, encoder);
+        self.update_scan_status(scan_area);
+        self.update_tip_pos(scan_area);
+        None
+    }
 }
 
 impl NanonisConnection {
@@ -66,26 +92,6 @@ impl NanonisConnection {
             tip_pos,
         }
     }
-    pub fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
-        if self.image_transform.is_new() && self.area_size.is_new() && self.tip_pos.is_new() {
-            Some(ScanArea::new(
-                encoder,
-                *self.area_size.read(),
-                *self.image_transform.read(),
-                *self.tip_pos.read(),
-            ))
-        } else {
-            None
-        }
-    }
-    pub fn update_live_image(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
-        self.update_channel(scan_area, encoder);
-        self.update_area_size(scan_area);
-        self.update_image_transform(scan_area);
-        self.update_image_data(&mut scan_area.live_image, encoder);
-        self.update_scan_status(scan_area);
-        self.update_tip_pos(scan_area);
-    }
     fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {
         if let Some(tip_pos) = self.tip_pos.read_new().as_deref().copied() {
             scan_area.tip_pos = tip_pos;
@@ -99,14 +105,12 @@ impl NanonisConnection {
     fn update_image_data(&mut self, live_image: &mut LiveImage, encoder: &ImageEncoder) {
         if let Some(forward_data) = self.forward_data.read_new() {
             live_image.forward_data = forward_data.clone();
-            parking_lot::RwLockReadGuard::unlock_fair(forward_data);
             if live_image.line_dir == LineDir::Forward {
                 live_image.write_and_update_texture(encoder);
             }
         }
         if let Some(backward_data) = self.backward_data.read_new() {
             live_image.backward_data = backward_data.clone();
-            parking_lot::RwLockReadGuard::unlock_fair(backward_data);
             if live_image.line_dir == LineDir::Backward {
                 live_image.write_and_update_texture(encoder);
             }

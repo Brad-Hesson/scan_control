@@ -4,7 +4,7 @@ use crate::{
         file_tree_extern::ImageTree as FileTree,
         selectable_list::{SelectableEntry, SelectableList},
     },
-    connection::{nanonis::NanonisConnection, ScanArea},
+    connection::{nanonis::NanonisConnection, Connection, ScanArea},
     scan_view::{
         static_image::StaticImage, BorderRectangle, FileImage, GDSImage, ImageEncoder, ScaleBar,
         ScanView,
@@ -35,7 +35,7 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     image_list: SelectableList<StaticImage>,
-    connection: NanonisConnection,
+    connection: Box<dyn Connection>,
     file_tree: FileTree,
     file_image_list: SelectableList<FileImage>,
     test_gds: GDSImage,
@@ -64,7 +64,7 @@ impl MyApp {
         // );
 
         let image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = NanonisConnection::new(cc.egui_ctx.clone(), "localhost");
+        let current_scan = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
         let file_tree = FileTree::new(image_encoder.clone());
         let mut file_image_list = SelectableList::new();
         let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", DMat3::IDENTITY);
@@ -111,7 +111,7 @@ impl eframe::App for MyApp {
             Some(live_image) => {
                 self.app_state
                     .connection
-                    .update_live_image(live_image, &self.image_encoder);
+                    .update(live_image, &self.image_encoder);
             }
         }
         // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {

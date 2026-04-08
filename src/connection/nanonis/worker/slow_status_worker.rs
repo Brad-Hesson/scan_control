@@ -1,5 +1,5 @@
 use core::f64;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use glam::DVec2;
 use itertools::Itertools as _;
