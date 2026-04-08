@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
-use crossbeam::{queue::ArrayQueue, sync::{Parker, Unparker}};
-
+use crossbeam::{
+    queue::ArrayQueue,
+    sync::{Parker, Unparker},
+};
 
 pub fn overwrite_queue<T>(cap: usize) -> (OverwriteQueueSender<T>, OverwriteQueueReceiver<T>) {
     let queue = Arc::new(ArrayQueue::new(cap));
@@ -41,5 +43,25 @@ impl<T> OverwriteQueueReceiver<T> {
             }
             self.parker.park();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_name() {
+        let (tx, rx) = overwrite_queue(1);
+        std::thread::spawn(move || loop {
+            dbg!(rx.recv());
+        });
+        tx.send(1);
+        std::thread::sleep(Duration::from_secs(1));
+        tx.send(2);
+        std::thread::sleep(Duration::from_secs(1));
+        tx.send(3);
     }
 }

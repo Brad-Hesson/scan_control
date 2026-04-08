@@ -6,6 +6,7 @@ pub use channel_state::ChannelState;
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::LineDir;
 pub use scan_status::ScanStatus;
+use tracing::trace;
 
 use crate::{
     connection::{
@@ -27,7 +28,7 @@ pub struct NanonisConnection {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
-    frame_queue_tx: OverwriteQueueSender<(LineDir, u32)>,
+    frame_queue_tx: OverwriteQueueSender<LineDir>,
     tip_pos: SharedState<DVec2>,
 }
 
@@ -40,14 +41,15 @@ impl NanonisConnection {
         let backward_data = SharedState::new_default();
         let scan_status = SharedState::new_default();
         let tip_pos = SharedState::new_default();
-        let (frame_queue_tx, frame_queue_rx) = overwrite_queue(2);
+        let (frame_queue_tx, frame_queue_rx) = overwrite_queue(4);
         let address = address.as_ref();
-        LineWorker::new(&frame_queue_tx, &channel_state, &scan_status).run(address, 6501);
+        LineWorker::new(&frame_queue_tx, &scan_status).run(address, 6501);
         FrameWorker::new(
             &ctx,
             &forward_data,
             &backward_data,
             frame_queue_rx,
+            &channel_state,
             &scan_status,
         )
         .run(address, 6502);
@@ -125,39 +127,45 @@ impl NanonisConnection {
             scan_area.area_size = new_size;
         }
     }
-    fn request_full_frame(tx: &OverwriteQueueSender<(LineDir, u32)>, channel: usize) {
-        tx.send((LineDir::Forward, channel as u32));
-        tx.send((LineDir::Backward, channel as u32));
+    fn request_full_frame(tx: &OverwriteQueueSender<LineDir>) {
+        trace!("requesting full frame");
+        tx.send(LineDir::Forward);
+        tx.send(LineDir::Backward);
     }
     fn update_channel(&mut self, scan_area: &mut ScanArea, encoder: &ImageEncoder) {
+        // if nanonis sent a change to the channel
         if let Some(state) = self.channel_state.read_new() {
             scan_area.channel_opts = state.channel_opts_names().collect();
-            scan_area.channel_selected = state.selected_as_string();
-            if let Some(ch) = state.selection {
-                Self::request_full_frame(&self.frame_queue_tx, ch);
-            } else {
-                scan_area.live_image.clear_texture(encoder);
-            }
             if let Some(unit) = state.unit() {
                 scan_area.live_image.unit = unit;
             }
-            return;
+            let new_selected_string = state.selected_as_string();
+            if scan_area.channel_selected != new_selected_string {
+                scan_area.channel_selected = new_selected_string;
+                if state.selection.is_some() {
+                    Self::request_full_frame(&self.frame_queue_tx);
+                } else {
+                    scan_area.live_image.clear_texture(encoder);
+                }
+            }
         }
+        // if we changed the selected channel
         if self.channel_state.modify_conditional(
             |prev| prev.selected_as_string() != scan_area.channel_selected,
-            |old| match &scan_area.channel_selected {
-                Some(ch_name) => old.set_selection_by_name(&ch_name),
-                None => old.selection = None,
+            |state| {
+                match &scan_area.channel_selected {
+                    Some(ch_name) => state.set_selection_by_name(&ch_name),
+                    None => state.selection = None,
+                };
+                if let Some(unit) = state.unit() {
+                    scan_area.live_image.unit = unit;
+                }
             },
         ) {
-            let state = self.channel_state.peek();
-            if let Some(ch) = state.selection {
-                Self::request_full_frame(&self.frame_queue_tx, ch);
+            if scan_area.channel_selected.is_some() {
+                Self::request_full_frame(&self.frame_queue_tx);
             } else {
                 scan_area.live_image.clear_texture(encoder);
-            }
-            if let Some(unit) = state.unit() {
-                scan_area.live_image.unit = unit;
             }
         }
     }

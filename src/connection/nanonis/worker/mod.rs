@@ -1,11 +1,11 @@
-mod frame_worker;
+mod frame_downloader;
 mod line_worker;
 mod slow_status_worker;
 mod fast_status_worker;
 
 use std::{thread::JoinHandle, time::Duration};
 
-pub use frame_worker::FrameWorker;
+pub use frame_downloader::FrameWorker;
 pub use line_worker::LineWorker;
 use nanonis_tcp::{blocking::NanonisTcp, error::{NanonisTcpError, NanonisTcpResult}};
 pub use slow_status_worker::SlowStatusWorker;

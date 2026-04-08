@@ -1,24 +1,22 @@
 use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
+use tracing::trace;
 
 use crate::connection::{
-    nanonis::{channel_state::ChannelState, worker::Worker, OverwriteQueueSender, ScanStatus},
+    nanonis::{worker::Worker, OverwriteQueueSender, ScanStatus},
     shared_state::SharedState,
 };
 
 pub struct LineWorker {
-    queue: OverwriteQueueSender<(LineDir, u32)>,
-    channel_state: SharedState<ChannelState>,
+    queue: OverwriteQueueSender<LineDir>,
     scan_status: SharedState<ScanStatus>,
 }
 impl LineWorker {
     pub fn new(
-        queue: &OverwriteQueueSender<(LineDir, u32)>,
-        channel_state: &SharedState<ChannelState>,
+        queue: &OverwriteQueueSender<LineDir>,
         scan_status: &SharedState<ScanStatus>,
     ) -> Self {
         Self {
             queue: queue.clone(),
-            channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
         }
     }
@@ -33,6 +31,7 @@ impl Worker for LineWorker {
             ScanMovementType::Scan(dir) => dir,
             _ => return Ok(()),
         };
+        trace!("line finished {} {:?}", resp.line_number, dir);
         self.scan_status.modify_conditional(
             |prev| prev.line_number != resp.line_number as u32 || prev.line_dir != dir,
             |prev| {
@@ -41,10 +40,7 @@ impl Worker for LineWorker {
                 prev.line_dir = dir;
             },
         );
-        let Some(ch) = self.channel_state.read().selection else {
-            return Ok(());
-        };
-        self.queue.send((dir, ch as u32));
+        self.queue.send(dir);
         Ok(())
     }
     fn name(&self) -> String {

@@ -35,6 +35,7 @@ impl ScanStatus {
         if self.scan_dir == ScanDir::Up {
             pos *= -1.;
         }
+        pos = pos.clamp(-0.5,0.5);
         Some(pos)
     }
 }

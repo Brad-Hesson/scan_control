@@ -3,10 +3,11 @@ use std::sync::Arc;
 use nanonis_tcp::{
     blocking::NanonisTcp, commands::scan::FrameDataGrabResponse, error::NanonisTcpResult, LineDir,
 };
+use tracing::trace;
 
 use crate::connection::{
     live_image::FrameData,
-    nanonis::{worker::Worker, ScanStatus},
+    nanonis::{ChannelState, ScanStatus, worker::Worker},
     queue::OverwriteQueueReceiver,
     shared_state::SharedState,
 };
@@ -15,7 +16,8 @@ pub struct FrameWorker {
     ctx: egui::Context,
     forward_data: SharedState<FrameData>,
     backward_data: SharedState<FrameData>,
-    queue: OverwriteQueueReceiver<(LineDir, u32)>,
+    queue: OverwriteQueueReceiver<LineDir>,
+    channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
 }
 impl FrameWorker {
@@ -23,13 +25,15 @@ impl FrameWorker {
         ctx: &egui::Context,
         forward_data: &SharedState<FrameData>,
         backward_data: &SharedState<FrameData>,
-        queue: OverwriteQueueReceiver<(LineDir, u32)>,
+        queue: OverwriteQueueReceiver<LineDir>,
+        channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
             forward_data: forward_data.clone(),
             backward_data: backward_data.clone(),
+            channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
             queue,
         }
@@ -41,8 +45,12 @@ impl Worker for FrameWorker {
     }
 
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        let (dir, ch) = self.queue.recv();
-        let resp = conn.scan_frame_data_grab(ch, dir)?;
+        let dir = self.queue.recv();
+        let Some(ch) = self.channel_state.read().selection else {
+            return Ok(());
+        };
+        trace!("downloading frame {} {:?}", ch, dir);
+        let resp = conn.scan_frame_data_grab(ch as u32, dir)?;
         self.scan_status.modify_conditional(
             |prev| prev.scan_dir != resp.scan_dir,
             |prev| prev.scan_dir = resp.scan_dir,
