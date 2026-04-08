@@ -96,13 +96,7 @@ impl NanonisConnection {
             return;
         }
         self.image_transform.modify_conditional(
-            |prev| {
-                izip!(
-                    prev.to_cols_array(),
-                    scan_area.image_transform.to_cols_array()
-                )
-                .any(|(a, b)| (a - b).abs() > f32::EPSILON as f64 * 100.)
-            },
+            |prev| *prev != scan_area.image_transform,
             |old| *old = scan_area.image_transform,
         );
     }

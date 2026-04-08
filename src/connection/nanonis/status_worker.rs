@@ -59,13 +59,10 @@ impl StatusWorker {
         }
         let frame = conn.scan_frame_get()?;
         let new_transform = transform_from_frame(&frame);
-        if self.image_transform.modify_conditional(
-            |prev| {
-                izip!(prev.to_cols_array(), new_transform.to_cols_array())
-                    .any(|(a, b)| (a - b).abs() > f32::EPSILON as f64 * 100.)
-            },
-            |val| *val = new_transform,
-        ) {
+        if self
+            .image_transform
+            .modify_conditional(|prev| *prev != new_transform, |val| *val = new_transform)
+        {
             self.ctx.request_repaint();
         };
         Ok(())
