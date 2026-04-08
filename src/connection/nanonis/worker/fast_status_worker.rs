@@ -1,4 +1,5 @@
 use core::f64;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::{
@@ -16,17 +17,20 @@ pub struct FastStatusWorker {
     ctx: egui::Context,
     image_transform: SharedState<DAffine2>,
     tip_pos: SharedState<DVec2>,
+    init: Arc<AtomicBool>,
 }
 impl FastStatusWorker {
     pub fn new(
         ctx: &egui::Context,
         image_transform: &SharedState<DAffine2>,
         tip_pos: &SharedState<DVec2>,
+        init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
             image_transform: image_transform.clone(),
             tip_pos: tip_pos.clone(),
+            init: init.clone(),
         }
     }
     fn update_image_transform(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<bool> {
@@ -59,6 +63,7 @@ impl Worker for FastStatusWorker {
         if update {
             self.ctx.request_repaint();
         }
+        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
     fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {

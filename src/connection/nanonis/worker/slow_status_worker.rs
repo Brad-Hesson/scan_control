@@ -1,5 +1,11 @@
 use core::f64;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 use glam::DVec2;
 use itertools::Itertools as _;
@@ -15,6 +21,7 @@ pub struct SlowStatusWorker {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
+    init: Arc<AtomicBool>,
 }
 impl SlowStatusWorker {
     pub fn new(
@@ -22,12 +29,14 @@ impl SlowStatusWorker {
         area_size: &SharedState<DVec2>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
+        init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
             ctx: ctx.clone(),
             area_size: area_size.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
+            init: init.clone(),
         }
     }
     fn update_channel_state(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -81,6 +90,7 @@ impl Worker for SlowStatusWorker {
         self.update_area_transform(conn)?;
         self.update_scan_status(conn)?;
         self.update_channel_opts(conn)?;
+        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
     fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {

@@ -2,6 +2,11 @@ mod channel_state;
 mod scan_status;
 mod worker;
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 pub use channel_state::ChannelState;
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::LineDir;
@@ -31,11 +36,15 @@ pub struct NanonisConnection {
     scan_status: SharedState<ScanStatus>,
     frame_queue_tx: OverwriteQueueSender<LineDir>,
     tip_pos: SharedState<DVec2>,
+    slow_status_init: Arc<AtomicBool>,
+    fast_status_init: Arc<AtomicBool>,
 }
 
 impl Connection for NanonisConnection {
     fn poll_connected(&mut self, encoder: &ImageEncoder) -> Option<ScanArea> {
-        if self.image_transform.is_new() && self.area_size.is_new() && self.tip_pos.is_new() {
+        if self.slow_status_init.load(Ordering::SeqCst)
+            && self.fast_status_init.load(Ordering::SeqCst)
+        {
             Some(ScanArea::new(
                 encoder,
                 *self.area_size.read(),
@@ -68,6 +77,9 @@ impl NanonisConnection {
         let scan_status = SharedState::new_default();
         let tip_pos = SharedState::new_default();
         let (frame_queue_tx, frame_queue_rx) = overwrite_queue(4);
+        let slow_status_init = Arc::new(AtomicBool::new(false));
+        let fast_status_init = Arc::new(AtomicBool::new(false));
+
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &scan_status).run(address, 6501);
         FrameWorker::new(
@@ -79,8 +91,16 @@ impl NanonisConnection {
             &scan_status,
         )
         .run(address, 6502);
-        FastStatusWorker::new(&ctx, &image_transform, &tip_pos).run(address, 6503);
-        SlowStatusWorker::new(&ctx, &area_size, &channel_state, &scan_status).run(address, 6504);
+        FastStatusWorker::new(&ctx, &image_transform, &tip_pos, &fast_status_init)
+            .run(address, 6503);
+        SlowStatusWorker::new(
+            &ctx,
+            &area_size,
+            &channel_state,
+            &scan_status,
+            &slow_status_init,
+        )
+        .run(address, 6504);
         Self {
             image_transform,
             area_size,
@@ -90,6 +110,8 @@ impl NanonisConnection {
             frame_queue_tx,
             scan_status,
             tip_pos,
+            slow_status_init,
+            fast_status_init,
         }
     }
     fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {

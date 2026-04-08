@@ -21,6 +21,7 @@ use egui_file_dialog::FileDialog;
 use glam::{DAffine2, DMat3};
 use itertools::{izip, Itertools};
 use tracing::error;
+use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -123,9 +124,17 @@ impl eframe::App for MyApp {
                 }
             }
             Some(live_image) => {
-                self.app_state
+                if let Some(stamp) = self
+                    .app_state
                     .connection
-                    .update(live_image, &self.image_encoder);
+                    .update(live_image, &self.image_encoder)
+                {
+                    self.app_state.object_list.push(SelectableEntry::new(
+                        Uuid::new_v4(),
+                        Object::Scan(stamp),
+                        |img| img.name().into_atoms(),
+                    ));
+                }
             }
         }
         // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
@@ -290,7 +299,12 @@ impl eframe::App for MyApp {
                         self.app_state.object_list.show(ui);
                     });
                 let mut new_top = ui.clip_rect().top();
-                if let Some(scan_area) = self.app_state.object_list.iter_mut().find_map(|ent| ent.as_area_mut()) {
+                if let Some(scan_area) = self
+                    .app_state
+                    .object_list
+                    .iter_mut()
+                    .find_map(|ent| ent.as_area_mut())
+                {
                     new_top = egui::Window::new("Current Scan")
                         .frame(
                             Frame::window(&ctx.style())
