@@ -135,11 +135,12 @@ impl eframe::App for MyApp {
             }
         }
         for stamp in stamps {
-            self.app_state.object_list.insert(index, SelectableEntry::new(
-                Uuid::new_v4(),
-                Object::ScanImage(stamp),
-                |img| img.name().into_atoms(),
-            ));
+            self.app_state.object_list.insert(
+                index,
+                SelectableEntry::new(Uuid::new_v4(), Object::ScanImage(stamp), |img| {
+                    img.name().into_atoms()
+                }),
+            );
         }
         // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
         //     let mut new_name_num = 0;
@@ -317,7 +318,7 @@ impl eframe::App for MyApp {
                     }) * tf.inverse();
                     self.app_state.scan_view.world_transform = tf;
                 }
-                if scan_view_resp.clicked() {
+                if scan_view_resp.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.app_state.object_list.clear_selected();
                 };
                 egui::Window::new("Images")
