@@ -41,10 +41,6 @@ impl ScanArea {
         self.show_scan_line(ui);
         self.show_area_border(ui);
         self.show_tip(ui);
-        if ui.input(|i| i.modifiers.ctrl) {
-            let tf = world_delta_transform(ui, self.live_image.transform.translation);
-            self.image_transform = tf * self.image_transform;
-        }
     }
     fn show_image(&mut self, ui: &mut Ui) {
         self.live_image.transform = self.world_transform * self.image_transform;
@@ -52,7 +48,7 @@ impl ScanArea {
     }
     fn show_area_border(&self, ui: &mut Ui) {
         BorderRectangle {
-            transform: DAffine2::from_scale(self.area_size),
+            transform: self.world_transform * DAffine2::from_scale(self.area_size),
             color: Color32::YELLOW,
             dashed: false,
         }

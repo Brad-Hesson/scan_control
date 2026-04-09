@@ -87,10 +87,6 @@ impl FileImage {
                     self.update_local_points();
                 }
             }
-            if ui.input(|i| i.modifiers.ctrl) {
-                let tf = world_delta_transform(ui, self.center());
-                self.transform_world_points(tf);
-            }
         }
     }
     fn update_local_points(&mut self) {
@@ -160,10 +156,10 @@ impl FileImage {
         ui.label(format!("{:?}", self.world_points));
         ui.label(format!("{:?}", self.local_points));
     }
-    fn center(&self) -> glam::DVec2 {
+    pub fn center(&self) -> glam::DVec2 {
         self.world_points.iter().sum::<glam::DVec2>() / 4.
     }
-    fn transform_world_points(&mut self, tf: DAffine2) {
+    pub fn transform_world_points(&mut self, tf: DAffine2) {
         for p in &mut self.world_points {
             *p = tf.project_pos2(*p);
         }

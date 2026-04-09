@@ -40,7 +40,7 @@ impl ImageEncoder {
     }
 }
 
-pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
+pub fn world_delta_transform(ui: &Ui, center: DVec2) -> [DAffine2; 3] {
     let ctx = ui
         .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
         .unwrap();
@@ -76,5 +76,5 @@ pub fn world_delta_transform(ui: &Ui, center: DVec2) -> DAffine2 {
         let trans = DAffine2::from_translation(center);
         trans * scale * trans.inverse()
     };
-    rotate * zoom * drag
+    [rotate, zoom, drag]
 }

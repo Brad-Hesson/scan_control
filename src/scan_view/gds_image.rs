@@ -1,16 +1,21 @@
+use core::f64;
 use std::{collections::BTreeMap, path::Path};
 
 use eframe::egui_wgpu;
 use egui::{Color32, Id, Ui};
 use gdsr::{Cell, Element, Library};
-use glam::DAffine2;
+use glam::{DAffine2, Vec2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
 
-use crate::{scan_view::{ImageEncoder, callbacks::GDSImageCallback, view::ScanViewCtx}, utils::vec_interop::Projection};
+use crate::{
+    scan_view::{callbacks::GDSImageCallback, view::ScanViewCtx, ImageEncoder},
+    utils::vec_interop::Projection,
+};
 
 pub struct GDSImage {
-    transform: DAffine2,
+    pub transform: DAffine2,
+    pub scale: f64,
     buffers: BTreeMap<u16, GDSImageBuffers>,
     colors: BTreeMap<u16, Color32>,
 }
@@ -22,6 +27,22 @@ impl GDSImage {
         for cell in gds.cells().values() {
             draw_cell(&mut polys, &gds, DAffine2::IDENTITY, cell);
         }
+        let (min, max) = polys.values().flatten().flatten().fold(
+            (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
+            |(min, max), v| {
+                (
+                    Vec2 {
+                        x: v.x.min(min.x),
+                        y: v.y.min(min.y),
+                    },
+                    Vec2 {
+                        x: v.x.max(max.x),
+                        y: v.y.max(max.y),
+                    },
+                )
+            },
+        );
+        let scale = min.distance(max) as f64 / 2f64.sqrt();
         let colors = polys
             .keys()
             .map(|layer| {
@@ -44,6 +65,7 @@ impl GDSImage {
             transform,
             buffers,
             colors,
+            scale,
         }
     }
     pub fn show(&self, ui: &mut Ui) {

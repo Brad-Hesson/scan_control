@@ -6,19 +6,19 @@ use crate::{
     },
     connection::{nanonis::NanonisConnection, Connection, LiveImage, ScanArea},
     scan_view::{
-        static_image::StaticImage, BorderRectangle, FileImage, GDSImage, ImageEncoder, ScaleBar,
-        ScanView,
+        static_image::StaticImage, world_delta_transform, BorderRectangle, FileImage, GDSImage,
+        ImageEncoder, ScaleBar, ScanView, ScanViewCtx,
     },
     undo_queue::{StateModify, UndoQueue},
-    utils::response_group::ResponseGroupExt as _,
+    utils::{response_group::ResponseGroupExt as _, vec_interop::IntoGlam},
     view_object::Object,
 };
 use egui::{
-    widgets, Align2, Atoms, Button, Color32, Frame, Image, IntoAtoms, Layout, MenuBar, Modifiers,
-    Shadow, ThemePreference, Ui,
+    widgets, Align2, Atoms, Button, Color32, Frame, Id, Image, IntoAtoms, Layout, MenuBar,
+    Modifiers, Shadow, ThemePreference, Ui,
 };
 use egui_file_dialog::FileDialog;
-use glam::{DAffine2, DMat3};
+use glam::{DAffine2, DMat3, DVec2};
 use itertools::{izip, Itertools};
 use tracing::error;
 use uuid::Uuid;
@@ -108,7 +108,7 @@ impl eframe::App for MyApp {
             .app_state
             .object_list
             .iter_mut()
-            .find_map(|entry| entry.as_area_mut())
+            .find_map(|entry| entry.as_scan_area_mut())
         {
             None => {
                 if let Some(scan_area) = self
@@ -118,7 +118,7 @@ impl eframe::App for MyApp {
                 {
                     self.app_state.object_list.push(SelectableEntry::new(
                         "area",
-                        Object::Area(scan_area),
+                        Object::ScanArea(scan_area),
                         |img| img.name().into_atoms(),
                     ));
                 }
@@ -131,7 +131,7 @@ impl eframe::App for MyApp {
                 {
                     self.app_state.object_list.push(SelectableEntry::new(
                         Uuid::new_v4(),
-                        Object::Scan(stamp),
+                        Object::ScanImage(stamp),
                         |img| img.name().into_atoms(),
                     ));
                 }
@@ -222,63 +222,95 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                // egui_colorgradient::gradient_editor(ui, &mut self.gradient);
-                // self.update_gradient();
-                let image_resp = self.app_state.scan_view.show(ui, |ui| {
-                    for img in self.app_state.object_list.iter_mut() {
-                        img.show(ui);
+                let mut new_world_transform = None;
+
+                let scan_view_resp = self.app_state.scan_view.show(ui, |ui| {
+                    let objects = &mut self.app_state.object_list;
+                    if ui.input(|i| i.modifiers.ctrl) {
+                        let indexes = objects.iter_selected_indexes().collect_vec();
+                        let center = if indexes.len() == 1 {
+                            objects[indexes[0]].transform_center()
+                        } else {
+                            let ctx = ui
+                                .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+                                .unwrap();
+                            ctx.world2egui()
+                                .inverse()
+                                .transform_point2(ctx.rect.center().to_glam())
+                        };
+                        let [rotate, scale, translate] = world_delta_transform(ui, center);
+                        let tf = if objects.iter_selected().all(|ent| ent.is_scalable()) {
+                            rotate * scale * translate
+                        } else {
+                            rotate * translate
+                        };
+                        for i in objects.iter_selected_indexes().collect_vec() {
+                            objects[i].apply_transform(tf);
+                        }
                     }
-                    // let files = &mut self.app_state.object_list;
-                    // for i in 0..files.len() {
-                    //     let resp = files[i].show(ui).synchronize(&mut files[i].resp_group);
-                    //     if resp.orig.clicked() {
-                    //         if ui.input(|i| i.modifiers.ctrl) {
-                    //             files[i].selected = !files[i].selected;
-                    //         } else {
-                    //             files.clear_selected();
-                    //             files[i].selected = true;
-                    //         }
-                    //     }
-                    //     if resp.sync.hovered() {
-                    //         BorderRectangle {
-                    //             transform: files[i].transform,
-                    //             color: Color32::LIGHT_BLUE,
-                    //             dashed: false,
-                    //         }
-                    //         .show(ui);
-                    //     }
-                    //     if files[i].selected {
-                    //         BorderRectangle {
-                    //             transform: files[i].transform,
-                    //             color: Color32::GREEN,
-                    //             dashed: false,
-                    //         }
-                    //         .show(ui);
-                    //     }
-                    // }
-                    // if let Some(scan_area) = &mut self.app_state.scan_area {
-                    //     scan_area.show(ui);
-                    // }
-                    // if let Some(image) = files.get_hovered(ui.ctx()) {
-                    //     BorderRectangle {
-                    //         transform: image.transform,
-                    //         color: Color32::LIGHT_BLUE,
-                    //         dashed: true,
-                    //     }
-                    //     .show(ui);
-                    // }
-                    // for image in files.iter_selected() {
-                    //     BorderRectangle {
-                    //         transform: image.transform,
-                    //         color: Color32::GREEN,
-                    //         dashed: true,
-                    //     }
-                    //     .show(ui);
-                    // }
-                    // self.app_state.test_gds.show(ui);
+                    for i in 0..objects.len() {
+                        objects[i].show(ui);
+                        let Some(resp) = objects[i].resp_group.response(ctx) else {
+                            continue;
+                        };
+                        if resp.double_clicked() {
+                            new_world_transform = Some(objects[i].goto_transform());
+                        }
+                        //     if resp.orig.clicked() {
+                        //         if ui.input(|i| i.modifiers.ctrl) {
+                        //             files[i].selected = !files[i].selected;
+                        //         } else {
+                        //             files.clear_selected();
+                        //             files[i].selected = true;
+                        //         }
+                        //     }
+                        if let Some(tran) = objects[i].border_transform() {
+                            if resp.hovered() {
+                                BorderRectangle {
+                                    transform: tran,
+                                    color: Color32::LIGHT_BLUE,
+                                    dashed: false,
+                                }
+                                .show(ui);
+                            }
+                            if objects[i].selected {
+                                BorderRectangle {
+                                    transform: tran,
+                                    color: Color32::GREEN,
+                                    dashed: false,
+                                }
+                                .show(ui);
+                            }
+                        }
+                    }
+                    if let Some(object) = objects.get_hovered(ui.ctx()) {
+                        if let Some(tran) = object.border_transform() {
+                            BorderRectangle {
+                                transform: tran,
+                                color: Color32::LIGHT_BLUE,
+                                dashed: true,
+                            }
+                            .show(ui);
+                        }
+                    }
+                    for image in objects.iter_selected() {
+                        if let Some(tran) = image.border_transform() {
+                            BorderRectangle {
+                                transform: tran,
+                                color: Color32::GREEN,
+                                dashed: true,
+                            }
+                            .show(ui);
+                        }
+                    }
+
                     self.app_state.scale_bar.show(ui);
                 });
-                if image_resp.clicked() {
+                if let Some(tf) = new_world_transform {
+                    let tf = DAffine2::from_scale(DVec2 { x: 0.5e3, y: -0.5e3 }) * tf.inverse();
+                    self.app_state.scan_view.world_transform = tf;
+                }
+                if scan_view_resp.clicked() {
                     self.app_state.object_list.clear_selected();
                 };
                 egui::Window::new("Images")
@@ -303,7 +335,7 @@ impl eframe::App for MyApp {
                     .app_state
                     .object_list
                     .iter_mut()
-                    .find_map(|ent| ent.as_area_mut())
+                    .find_map(|ent| ent.as_scan_area().is_some().then_some(ent))
                 {
                     new_top = egui::Window::new("Current Scan")
                         .frame(
@@ -317,7 +349,10 @@ impl eframe::App for MyApp {
                         .show(ctx, |ui| {
                             let vis = &mut ui.style_mut().visuals.widgets.inactive;
                             vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-                            scan_area.show_menu(ui, &self.image_encoder);
+                            scan_area
+                                .as_scan_area_mut()
+                                .unwrap()
+                                .show_menu(ui, &self.image_encoder);
                         })
                         .unwrap()
                         .response
@@ -330,6 +365,9 @@ impl eframe::App for MyApp {
                     .iter_selected_indexes()
                     .collect_vec();
                 for i in selected {
+                    if self.app_state.object_list[i].as_scan_area().is_some() {
+                        continue;
+                    }
                     let name = self.app_state.object_list[i].name();
                     let mut rect = ui.min_rect();
                     rect.set_top(new_top);
