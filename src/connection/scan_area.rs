@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use egui::{Color32, Id, Shape, Stroke, Ui};
 use glam::{DAffine2, DVec2};
 
@@ -16,6 +18,7 @@ pub struct ScanArea {
     pub channel_selected: Option<String>,
     pub scan_status: ScanStatus,
     pub tip_pos: DVec2,
+    pub stamp: VecDeque<LiveImage>,
 }
 impl ScanArea {
     pub fn new(
@@ -34,13 +37,31 @@ impl ScanArea {
             channel_selected: None,
             scan_status: ScanStatus::default(),
             tip_pos,
+            stamp: VecDeque::new(),
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
         self.show_image(ui);
         self.show_scan_line(ui);
+        self.show_image_border(ui);
         self.show_area_border(ui);
         self.show_tip(ui);
+    }
+    fn show_image_border(&self, ui: &mut Ui) {
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let transform = self.world_transform * self.image_transform;
+        BorderRectangle {
+            transform,
+            color: Color32::RED,
+            dashed: false,
+        }
+        .show(ui);
+        let bottom_left = ((ctx.world2egui() * transform).transform_point2(DVec2::new(-0.5, 0.5))
+            + DVec2::new(-1., 1.))
+        .to_egui_pos2();
+        ui.painter().circle_filled(bottom_left, 3., Color32::RED);
     }
     fn show_image(&mut self, ui: &mut Ui) {
         self.live_image.transform = self.world_transform * self.image_transform;
@@ -84,6 +105,9 @@ impl ScanArea {
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         self.show_channel_control(ui);
         self.live_image.show_menu(ui, encoder);
+        if ui.button("Stamp").clicked() {
+            self.stamp.push_front(self.live_image.stamp(encoder));
+        }
     }
     pub fn show_channel_control(&mut self, ui: &mut Ui) {
         let mut selection = self.channel_selected.as_ref().map(|s| s.as_str());

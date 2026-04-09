@@ -58,7 +58,7 @@ impl BorderRectangle {
             kind: StrokeKind::Outside,
         };
         if self.dashed {
-            points.push(p0.into());
+            points.push(points[0]);
             ui.painter().add(dashes_from_line(&points, stroke, 6., 3.));
         } else {
             ui.painter().add(PathShape {

@@ -96,7 +96,9 @@ impl Object {
                 0.,
                 gdsimage.transform.translation,
             ),
-            Object::ScanImage(live_image) => live_image.transform,
+            Object::ScanImage(live_image) => {
+                live_image.transform * DAffine2::from_scale(DVec2::new(1., -1.))
+            }
             Object::ScanArea(scan_area) => {
                 scan_area.world_transform
                     * DAffine2::from_scale(DVec2::splat(

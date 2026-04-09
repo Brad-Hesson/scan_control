@@ -59,17 +59,6 @@ impl LiveImage {
         self.image_view.transform = self.transform;
         self.image_view.norm_type = self.norm_type.combined(self.std_dev);
         let resp = self.image_view.show(ui);
-        let bottom_left = ((ctx.world2egui() * self.transform)
-            .transform_point2(DVec2::new(-0.5, 0.5))
-            + DVec2::new(-1., 1.))
-        .to_egui_pos2();
-        BorderRectangle {
-            transform: self.transform,
-            color: Color32::RED,
-            dashed: false,
-        }
-        .show(ui);
-        ui.painter().circle_filled(bottom_left, 3., Color32::RED);
         resp
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
@@ -162,6 +151,27 @@ impl LiveImage {
     }
     pub fn size(&self) -> [u32; 2] {
         self.image_view.size()
+    }
+    pub fn stamp(&mut self, encoder: &ImageEncoder) -> Self {
+        let mut image_view = ScanViewImage::new(
+            encoder,
+            self.image_view.size(),
+            self.transform,
+            self.image_view.norm_type,
+        );
+        std::mem::swap(&mut self.image_view, &mut image_view);
+        self.write_and_update_texture(encoder);
+        Self {
+            image_view,
+            transform: self.transform,
+            std_dev: self.std_dev,
+            fit_type: self.fit_type,
+            norm_type: self.norm_type,
+            line_dir: self.line_dir,
+            forward_data: self.forward_data.clone(),
+            backward_data: self.backward_data.clone(),
+            unit: self.unit.clone(),
+        }
     }
 }
 

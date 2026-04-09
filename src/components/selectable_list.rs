@@ -139,7 +139,7 @@ impl<T> DerefMut for SelectableEntry<T> {
 
 fn list_item<'a, T>(ui: &mut Ui, item: &'a SelectableEntry<T>) -> Response {
     let atoms = (item.construct_fn)(&item.inner);
-    let id = egui::Id::new(atoms.text());
+    let id = item.id;
     let mut layout = AtomLayout::new(atoms)
         .id(id)
         .sense(Sense::click())

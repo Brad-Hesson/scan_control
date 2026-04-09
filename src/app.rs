@@ -104,11 +104,14 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut stamps = Vec::new();
+        let mut index = 0;
         match self
             .app_state
             .object_list
             .iter_mut()
-            .find_map(|entry| entry.as_scan_area_mut())
+            .enumerate()
+            .find_map(|(i, entry)| entry.as_scan_area_mut().map(|area| (i, area)))
         {
             None => {
                 if let Some(scan_area) = self
@@ -123,19 +126,20 @@ impl eframe::App for MyApp {
                     ));
                 }
             }
-            Some(live_image) => {
-                if let Some(stamp) = self
-                    .app_state
+            Some((i, scan_area)) => {
+                index = i;
+                self.app_state
                     .connection
-                    .update(live_image, &self.image_encoder)
-                {
-                    self.app_state.object_list.push(SelectableEntry::new(
-                        Uuid::new_v4(),
-                        Object::ScanImage(stamp),
-                        |img| img.name().into_atoms(),
-                    ));
-                }
+                    .update(scan_area, &self.image_encoder);
+                stamps.extend(scan_area.stamp.drain(..));
             }
+        }
+        for stamp in stamps {
+            self.app_state.object_list.insert(index, SelectableEntry::new(
+                Uuid::new_v4(),
+                Object::ScanImage(stamp),
+                |img| img.name().into_atoms(),
+            ));
         }
         // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
         //     let mut new_name_num = 0;
@@ -307,7 +311,10 @@ impl eframe::App for MyApp {
                     self.app_state.scale_bar.show(ui);
                 });
                 if let Some(tf) = new_world_transform {
-                    let tf = DAffine2::from_scale(DVec2 { x: 0.5e3, y: -0.5e3 }) * tf.inverse();
+                    let tf = DAffine2::from_scale(DVec2 {
+                        x: 0.5e3,
+                        y: -0.5e3,
+                    }) * tf.inverse();
                     self.app_state.scan_view.world_transform = tf;
                 }
                 if scan_view_resp.clicked() {
