@@ -108,8 +108,9 @@ impl ScanArea {
         if ui.button("Stamp").clicked() {
             self.stamp.push_front(self.live_image.stamp(encoder));
         }
+
     }
-    pub fn show_channel_control(&mut self, ui: &mut Ui) {
+    fn show_channel_control(&mut self, ui: &mut Ui) {
         let mut selection = self.channel_selected.as_ref().map(|s| s.as_str());
         if egui::ComboBox::new((self.live_image.uuid(), "combo_box"), "")
             .selected_text(selection.unwrap_or_default())

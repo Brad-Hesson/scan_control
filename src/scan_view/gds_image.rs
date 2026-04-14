@@ -42,6 +42,10 @@ impl GDSImage {
                 )
             },
         );
+        let center = (max + min) / 2.;
+        for vert in polys.values_mut().flatten().flatten(){
+            *vert -= center;
+        }
         let scale = min.distance(max) as f64 / 2f64.sqrt();
         let colors = polys
             .keys()

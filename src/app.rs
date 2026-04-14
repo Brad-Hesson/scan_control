@@ -1,6 +1,6 @@
 use crate::{
     components::{
-        file_dialog::ViewportFileDialog,
+        file_dialog_native::ObjectImportDialog,
         file_tree_extern::ImageTree as FileTree,
         selectable_list::{SelectableEntry, SelectableList},
     },
@@ -17,21 +17,19 @@ use egui::{
     widgets, Align2, Atoms, Button, Color32, Frame, Id, Image, IntoAtoms, Layout, MenuBar,
     Modifiers, Shadow, ThemePreference, Ui,
 };
-use egui_file_dialog::FileDialog;
 use glam::{DAffine2, DMat3, DVec2};
 use itertools::{izip, Itertools};
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
 pub struct MyApp {
-    file_dialog: ViewportFileDialog,
     app_state: AppState,
     image_encoder: ImageEncoder,
     undo_queue: UndoQueue<AppState>,
     current_theme: ThemePreference,
-    folder_dialog: ViewportFileDialog,
+    import_file_dialog: ObjectImportDialog,
 }
 
 pub struct AppState {
@@ -53,35 +51,10 @@ pub struct AppState {
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
-        // let gradient = Gradient::default();
-        // scan_view.set_color_map(
-        //     gradient
-        //         .linear_eval(ScanView::COLOR_MAP_SIZE, true)
-        //         .try_into()
-        //         .expect("must be a ScanView::COLOR_MAP_SIZE bug"),
-        // );
-
         let image_encoder = ImageEncoder::new(wgpu);
         let current_scan = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
-        let mut object_list = SelectableList::new();
-
-        // test image
-        let test_image = FileImage::new((), &image_encoder, "IMG_2163.JPEG", DMat3::IDENTITY);
-        let entry = SelectableEntry::new("IMG_2163.JPEG", Object::File(test_image), |img| {
-            img.name().into_atoms()
-        });
-        object_list.push(entry);
-
-        // test gds
-        let test_gds = GDSImage::new(
-            &image_encoder,
-            "As_Implanted_MLA150.GDS",
-            DAffine2::IDENTITY,
-        );
-        let entry = SelectableEntry::new("As_Implanted_MLA150.GDS", Object::Gds(test_gds), |img| {
-            img.name().into_atoms()
-        });
-        object_list.push(entry);
+        let object_list = SelectableList::new();
+        let import_file_dialog = ObjectImportDialog::new();
 
         Self {
             app_state: AppState {
@@ -90,11 +63,10 @@ impl MyApp {
                 connection: current_scan,
                 scale_bar: ScaleBar::new(),
             },
+            import_file_dialog,
             image_encoder,
-            file_dialog: ViewportFileDialog::new(FileDialog::new().title("Import File")),
             undo_queue: UndoQueue::new(),
             current_theme: cc.egui_ctx.theme().into(),
-            folder_dialog: ViewportFileDialog::new(FileDialog::new().title("Open folder")),
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -122,7 +94,7 @@ impl eframe::App for MyApp {
                     self.app_state.object_list.push(SelectableEntry::new(
                         "area",
                         Object::ScanArea(scan_area),
-                        |img| img.name().into_atoms(),
+                        |img| img.list_atoms(),
                     ));
                 }
             }
@@ -138,32 +110,14 @@ impl eframe::App for MyApp {
             self.app_state.object_list.insert(
                 index,
                 SelectableEntry::new(Uuid::new_v4(), Object::ScanImage(stamp), |img| {
-                    img.name().into_atoms()
+                    img.list_atoms()
                 }),
             );
         }
-        // if let Some(mut new_image) = self.app_state.connection.update(&self.image_encoder) {
-        //     let mut new_name_num = 0;
-        //     let mut new_name = new_image.name.clone();
-        //     while self
-        //         .app_state
-        //         .image_list
-        //         .iter()
-        //         .any(|entry| entry.name == new_name)
-        //     {
-        //         new_name_num += 1;
-        //         new_name = format!("{}({})", new_image.name, new_name_num);
-        //     }
-        //     new_image.name = new_name;
-        //     let entry = SelectableEntry::new(Uuid::new_v4(), new_image, |image| {
-        //         (&image.name).into_atoms()
-        //     });
-        //     self.app_state.image_list.push(entry);
-        // }
-        if let Some(paths) = self.file_dialog.take_picked_multiple() {
-            // self.load_files(paths)
-            //     .context("file load failed")
-            //     .ok_trace();
+        while let Some(object) = self.import_file_dialog.try_recv_object() {
+            let entry =
+                SelectableEntry::new(uuid::Uuid::new_v4(), object, |img| img.list_atoms());
+            self.app_state.object_list.push(entry);
         }
         // if let Some(path) = self.folder_dialog.take_picked() {
         //     self.app_state.file_tree.load_dir(&path).ok_trace();
@@ -232,9 +186,9 @@ impl eframe::App for MyApp {
                 let scan_view_resp = self.app_state.scan_view.show(ui, |ui| {
                     let objects = &mut self.app_state.object_list;
                     if ui.input(|i| i.modifiers.ctrl) {
-                        let indexes = objects.iter_selected_indexes().collect_vec();
-                        let center = if indexes.len() == 1 {
-                            objects[indexes[0]].transform_center()
+                        let selected_inds = objects.iter_selected_indexes().collect_vec();
+                        let center = if selected_inds.len() == 1 {
+                            objects[selected_inds[0]].transform_center()
                         } else {
                             let ctx = ui
                                 .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
@@ -261,14 +215,6 @@ impl eframe::App for MyApp {
                         if resp.double_clicked() {
                             new_world_transform = Some(objects[i].goto_transform());
                         }
-                        //     if resp.orig.clicked() {
-                        //         if ui.input(|i| i.modifiers.ctrl) {
-                        //             files[i].selected = !files[i].selected;
-                        //         } else {
-                        //             files.clear_selected();
-                        //             files[i].selected = true;
-                        //         }
-                        //     }
                         if let Some(tran) = objects[i].border_transform() {
                             if resp.hovered() {
                                 BorderRectangle {
@@ -415,15 +361,10 @@ impl eframe::App for MyApp {
 
 fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
-        if ui.add(Button::new("Import File")).clicked() {
-            app.file_dialog.pick_multiple();
-        }
-        if ui.add(Button::new("Open Folder")).clicked() {
-            app.folder_dialog.pick_directory();
+        if ui.add(Button::new("Import Files")).clicked() {
+            app.import_file_dialog.pick_files(app.image_encoder.clone());
         }
     });
-    app.file_dialog.update(ctx);
-    app.folder_dialog.update(ctx);
 }
 
 fn image_list_item(image: &StaticImage) -> Atoms<'_> {

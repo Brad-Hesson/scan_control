@@ -39,6 +39,7 @@ nalgebra = "0.34.1"
 float-ord = "0.3.2"
 gdsr = "0.0.1-alpha.3"
 crossbeam = "0.8.4"
+rfd = "0.17.2"
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true

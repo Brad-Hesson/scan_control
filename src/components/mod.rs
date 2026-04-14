@@ -6,5 +6,6 @@ pub mod file_tree_new;
 mod fmt;
 pub mod selectable_list;
 pub mod tree;
+pub mod file_dialog_native;
 
 pub use fmt::EngFmt;

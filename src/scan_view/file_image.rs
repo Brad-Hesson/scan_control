@@ -14,7 +14,6 @@ use crate::{
 pub struct FileImage {
     pub transform: DMat3,
     buffers: FileImageBuffers,
-    pub name: String,
     pub local_points: [glam::DVec2; 4],
     pub world_points: [glam::DVec2; 4],
     id: egui::Id,
@@ -28,7 +27,6 @@ impl FileImage {
         transform: DMat3,
     ) -> Self {
         let img = image::open(&path).unwrap();
-        let name = path.as_ref().file_name().unwrap().to_string_lossy();
         let buffers = FileImageBuffers::new(
             &image_encoder.wgpu_state.device,
             &image_encoder.wgpu_state.queue,
@@ -49,7 +47,6 @@ impl FileImage {
             id: egui::Id::new(id_salt),
             transform,
             buffers,
-            name: name.to_string(),
             local_points,
             world_points,
             editing: false,
