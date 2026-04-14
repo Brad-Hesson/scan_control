@@ -17,9 +17,9 @@ impl<const SIZE: usize> ColorMapTexture<SIZE> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D1,
-            format: TextureFormat::Rgba8UnormSrgb,
+            format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[TextureFormat::Rgba8UnormSrgb],
+            view_formats: &[],
         });
         Self(texture)
     }
