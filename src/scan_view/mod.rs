@@ -5,7 +5,7 @@ use egui::{Id, Ui};
 use glam::{DAffine2, DVec2};
 use image_compute::image_compute::ImageComputePipeline;
 
-mod border;
+pub mod border;
 mod callbacks;
 mod file_image;
 mod gds_image;

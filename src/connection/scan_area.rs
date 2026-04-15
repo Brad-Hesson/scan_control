@@ -88,9 +88,15 @@ impl ScanArea {
             let tf = ctx.world2egui() * self.world_transform * self.image_transform;
             let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
             let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
-            ui.painter().extend(Shape::dashed_line(
+
+            ui.painter().extend(dashes_from_line(
+                ctx.rect,
                 &[p0, p1],
-                Stroke::new(1.0, Color32::BLUE),
+                PathStroke {
+                    width: 1.0,
+                    color: egui::epaint::ColorMode::Solid(Color32::BLUE),
+                    kind: egui::StrokeKind::Middle,
+                },
                 3. * 5.,
                 1. * 5.,
             ));

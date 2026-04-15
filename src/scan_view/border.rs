@@ -1,11 +1,14 @@
 use egui::{
     epaint::{ColorMode, PathShape, PathStroke},
-    Color32, Id, Pos2, Shape, StrokeKind, Ui,
+    Color32, Id, Pos2, Rect, Shape, StrokeKind, Ui,
 };
 use glam::{DAffine2, DVec2};
 use itertools::Itertools;
 
-use crate::{scan_view::view::ScanViewCtx, utils::vec_interop::{IntoGlam as _, Projection}};
+use crate::{
+    scan_view::view::ScanViewCtx,
+    utils::vec_interop::{IntoGlam as _, Projection},
+};
 
 pub struct BorderRectangle {
     pub transform: DAffine2,
@@ -49,7 +52,7 @@ impl BorderRectangle {
             .collect_array()
             .unwrap();
         let mut points = vec![p0.into(), p1.into(), p2.into(), p3.into()];
-        if self.transform.matrix2.determinant() < 0.{
+        if self.transform.matrix2.determinant() < 0. {
             points.reverse();
         }
         let stroke = PathStroke {
@@ -59,7 +62,8 @@ impl BorderRectangle {
         };
         if self.dashed {
             points.push(points[0]);
-            ui.painter().add(dashes_from_line(&points, stroke, 6., 3.));
+            ui.painter()
+                .add(dashes_from_line(ctx.rect, &points, stroke, 6., 3.));
         } else {
             ui.painter().add(PathShape {
                 points,
@@ -72,7 +76,8 @@ impl BorderRectangle {
 }
 
 /// Creates dashes from a line.
-fn dashes_from_line(
+pub fn dashes_from_line(
+    screen_rect: Rect,
     path: &[Pos2],
     stroke: PathStroke,
     dash_length: f32,
@@ -82,7 +87,9 @@ fn dashes_from_line(
     let mut position_on_segment = 0.;
     let mut drawing_dash = false;
     for window in path.windows(2) {
-        let (start, end) = (window[0], window[1]);
+        let Some((start, end)) = clip_line_to_rect(window[0], window[1], screen_rect) else {
+            continue;
+        };
         let vector = end - start;
         let segment_length = vector.length();
 
@@ -119,4 +126,65 @@ fn dashes_from_line(
         position_on_segment -= segment_length;
     }
     shapes
+}
+
+fn clip_line_to_rect(a: Pos2, b: Pos2, rect: Rect) -> Option<(Pos2, Pos2)> {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+
+    let mut t0 = 0.0f32;
+    let mut t1 = 1.0f32;
+
+    fn clip(p: f32, q: f32, t0: &mut f32, t1: &mut f32) -> bool {
+        if p == 0.0 {
+            // Line is parallel to this boundary.
+            return q >= 0.0;
+        }
+
+        let r = q / p;
+
+        if p < 0.0 {
+            // Entering boundary
+            if r > *t1 {
+                return false;
+            }
+            if r > *t0 {
+                *t0 = r;
+            }
+        } else {
+            // Leaving boundary
+            if r < *t0 {
+                return false;
+            }
+            if r < *t1 {
+                *t1 = r;
+            }
+        }
+
+        true
+    }
+
+    // Rect is:
+    // x >= rect.min.x
+    // x <= rect.max.x
+    // y >= rect.min.y
+    // y <= rect.max.y
+
+    if !clip(-dx, a.x - rect.min.x, &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip(dx, rect.max.x - a.x, &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip(-dy, a.y - rect.min.y, &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip(dy, rect.max.y - a.y, &mut t0, &mut t1) {
+        return None;
+    }
+
+    let clipped_a = egui::pos2(a.x + t0 * dx, a.y + t0 * dy);
+    let clipped_b = egui::pos2(a.x + t1 * dx, a.y + t1 * dy);
+
+    Some((clipped_a, clipped_b))
 }
