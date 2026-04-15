@@ -4,8 +4,7 @@ use std::{
 };
 
 use egui::{
-    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, Frame, Response, Sense,
-    TextStyle, Ui,
+    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, FontId, FontSelection, Frame, Response, Sense, TextStyle, Ui
 };
 
 use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};
@@ -140,18 +139,21 @@ impl<T> DerefMut for SelectableEntry<T> {
 fn list_item<'a, T>(ui: &mut Ui, item: &'a SelectableEntry<T>) -> Response {
     let atoms = (item.construct_fn)(&item.inner);
     let id = item.id;
+    let font_selection = FontSelection::Style(TextStyle::Button);
+    let font_id = font_selection.resolve(ui.style());
     let mut layout = AtomLayout::new(atoms)
         .id(id)
         .sense(Sense::click())
         .wrap_mode(egui::TextWrapMode::Extend)
-        .fallback_font(TextStyle::Button);
+        .fallback_font(FontSelection::FontId(font_id.clone()));
 
     let selected = item.selected;
     let min_size = egui::Vec2::new(0., ui.spacing().interact_size.y);
 
     layout.map_atoms(|atom| {
         if matches!(&atom.kind, AtomKind::Image(_)) {
-            atom.atom_max_height_font_size(ui)
+            let height = ui.fonts(|f| f.row_height(&font_id));
+            atom.atom_max_height(height)
         } else {
             atom
         }
@@ -178,9 +180,11 @@ fn list_item<'a, T>(ui: &mut Ui, item: &'a SelectableEntry<T>) -> Response {
                     - egui::Vec2::splat(visuals.bg_stroke.width),
             )
             .outer_margin(-egui::Vec2::splat(visuals.expansion))
-            .fill(visuals.weak_bg_fill)
             .stroke(visuals.bg_stroke)
             .corner_radius(visuals.corner_radius);
+        if selected{
+            prepared.frame = prepared.frame.fill(visuals.weak_bg_fill)
+        }
 
         prepared.paint(ui)
     } else {

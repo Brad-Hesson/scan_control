@@ -64,7 +64,7 @@ impl Object {
         match self {
             Object::Gds { path, .. } => path.file_stem().and_then(|os| os.to_str()).unwrap(),
             Object::File{ path, .. } => path.file_stem().and_then(|os| os.to_str()).unwrap(),
-            Object::ScanImage(live_image) => "live_image",
+            Object::ScanImage(_) => "Image Stamp",
             Object::ScanArea(_) => "Scan Region",
         }
     }
