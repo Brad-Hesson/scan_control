@@ -146,17 +146,13 @@ impl eframe::App for MyApp {
                 let scan_view_resp = self.app_state.scan_view.show(ui, |ui| {
                     let objects = &mut self.app_state.object_list;
                     if ui.input(|i| i.modifiers.ctrl) {
-                        let selected_inds = objects.iter_selected_indexes().collect_vec();
-                        let center = if selected_inds.len() == 1 {
-                            objects[selected_inds[0]].transform_center()
-                        } else {
-                            let ctx = ui
-                                .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-                                .unwrap();
-                            ctx.world2egui()
-                                .inverse()
-                                .transform_point2(ctx.rect.center().to_glam())
-                        };
+                        let ctx = ui
+                            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+                            .unwrap();
+                        let center = ctx
+                            .world2egui()
+                            .inverse()
+                            .transform_point2(ctx.rect.center().to_glam());
                         let [rotate, scale, translate] = world_delta_transform(ui, center);
                         let tf = if objects.iter_selected().all(|ent| ent.is_scalable()) {
                             rotate * scale * translate
