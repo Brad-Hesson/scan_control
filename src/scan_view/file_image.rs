@@ -7,7 +7,7 @@ use image_compute::file_image::FileImageBuffers;
 use itertools::Itertools;
 
 use crate::{
-    scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx, world_delta_transform},
+    scan_view::{callbacks::FileImageCallback, view::ScanViewCtx, ImageEncoder},
     utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection},
 };
 

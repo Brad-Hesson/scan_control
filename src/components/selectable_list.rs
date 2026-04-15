@@ -4,7 +4,8 @@ use std::{
 };
 
 use egui::{
-    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, FontId, FontSelection, Frame, Response, Sense, TextStyle, Ui
+    AtomExt as _, AtomKind, AtomLayout, AtomLayoutResponse, Atoms, Context, FontSelection, Frame,
+    Response, Sense, TextStyle, Ui,
 };
 
 use crate::utils::response_group::{ResponseGroup, ResponseGroupExt};
@@ -182,7 +183,7 @@ fn list_item<'a, T>(ui: &mut Ui, item: &'a SelectableEntry<T>) -> Response {
             .outer_margin(-egui::Vec2::splat(visuals.expansion))
             .stroke(visuals.bg_stroke)
             .corner_radius(visuals.corner_radius);
-        if selected{
+        if selected {
             prepared.frame = prepared.frame.fill(visuals.weak_bg_fill)
         }
 

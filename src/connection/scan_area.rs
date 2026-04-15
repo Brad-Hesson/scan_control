@@ -5,7 +5,7 @@ use glam::{DAffine2, DVec2};
 
 use crate::{
     connection::{nanonis::ScanStatus, LiveImage},
-    scan_view::{world_delta_transform, BorderRectangle, ImageEncoder, ScanViewCtx},
+    scan_view::{BorderRectangle, ImageEncoder, ScanViewCtx},
     utils::vec_interop::{IntoEgui, Projection},
 };
 
@@ -19,6 +19,7 @@ pub struct ScanArea {
     pub scan_status: ScanStatus,
     pub tip_pos: DVec2,
     pub stamp: VecDeque<LiveImage>,
+    pub stamp_name_base: String,
 }
 impl ScanArea {
     pub fn new(
@@ -38,6 +39,7 @@ impl ScanArea {
             scan_status: ScanStatus::default(),
             tip_pos,
             stamp: VecDeque::new(),
+            stamp_name_base: String::new(),
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {
@@ -108,7 +110,6 @@ impl ScanArea {
         if ui.button("Stamp").clicked() {
             self.stamp.push_front(self.live_image.stamp(encoder));
         }
-
     }
     fn show_channel_control(&mut self, ui: &mut Ui) {
         let mut selection = self.channel_selected.as_ref().map(|s| s.as_str());

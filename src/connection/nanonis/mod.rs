@@ -34,6 +34,7 @@ pub struct NanonisConnection {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
+    base_name: SharedState<String>,
     frame_queue_tx: OverwriteQueueSender<LineDir>,
     tip_pos: SharedState<DVec2>,
     slow_status_init: Arc<AtomicBool>,
@@ -63,6 +64,7 @@ impl Connection for NanonisConnection {
         self.update_image_data(&mut scan_area.live_image, encoder);
         self.update_scan_status(scan_area);
         self.update_tip_pos(scan_area);
+        self.update_base_name(scan_area);
         None
     }
 }
@@ -75,6 +77,7 @@ impl NanonisConnection {
         let forward_data = SharedState::new_default();
         let backward_data = SharedState::new_default();
         let scan_status = SharedState::new_default();
+        let base_name = SharedState::new_default();
         let tip_pos = SharedState::new_default();
         let (frame_queue_tx, frame_queue_rx) = overwrite_queue(4);
         let slow_status_init = Arc::new(AtomicBool::new(false));
@@ -98,6 +101,7 @@ impl NanonisConnection {
             &area_size,
             &channel_state,
             &scan_status,
+            &base_name,
             &slow_status_init,
         )
         .run(address, 6504);
@@ -112,6 +116,7 @@ impl NanonisConnection {
             tip_pos,
             slow_status_init,
             fast_status_init,
+            base_name
         }
     }
     fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {
@@ -151,6 +156,11 @@ impl NanonisConnection {
     fn update_area_size(&mut self, scan_area: &mut ScanArea) {
         if let Some(new_size) = self.area_size.read_new().as_deref().copied() {
             scan_area.area_size = new_size;
+        }
+    }
+    fn update_base_name(&mut self, scan_area: &mut ScanArea){
+        if let Some(new_name) = self.base_name.read_new().as_deref().cloned(){
+            scan_area.stamp_name_base = new_name;
         }
     }
     fn request_full_frame(tx: &OverwriteQueueSender<LineDir>) {

@@ -1,10 +1,7 @@
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 use egui::{Atoms, Image, IntoAtoms, Ui};
-use glam::{DAffine2, DMat3, DVec2};
+use glam::{DAffine2, DVec2};
 use tracing::error;
 
 use crate::{
@@ -15,7 +12,7 @@ use crate::{
 pub enum Object {
     Gds { image: GDSImage, path: PathBuf },
     File { image: FileImage, path: PathBuf },
-    ScanImage(LiveImage),
+    ScanImage { image: LiveImage, name: String },
     ScanArea(ScanArea),
 }
 
@@ -52,8 +49,10 @@ impl Object {
         let name = self.name();
         let image = match self {
             Object::Gds { .. } => Image::new(egui::include_image!("../assets/gds_file_icon.png")),
-            Object::File{ .. } => Image::new(egui::include_image!("../assets/file_image_icon.png")),
-            Object::ScanImage(_) => {
+            Object::File { .. } => {
+                Image::new(egui::include_image!("../assets/file_image_icon.png"))
+            }
+            Object::ScanImage { .. } => {
                 Image::new(egui::include_image!("../assets/scan_image_icon.png"))
             }
             Object::ScanArea(_) => Image::new(egui::include_image!("../assets/scan_area_icon.png")),
@@ -63,16 +62,16 @@ impl Object {
     pub fn name(&self) -> &str {
         match self {
             Object::Gds { path, .. } => path.file_stem().and_then(|os| os.to_str()).unwrap(),
-            Object::File{ path, .. } => path.file_stem().and_then(|os| os.to_str()).unwrap(),
-            Object::ScanImage(_) => "Image Stamp",
+            Object::File { path, .. } => path.file_stem().and_then(|os| os.to_str()).unwrap(),
+            Object::ScanImage { name, .. } => name,
             Object::ScanArea(_) => "Scan Region",
         }
     }
     pub fn is_scalable(&self) -> bool {
         match self {
             Object::Gds { .. } => false,
-            Object::File{ .. } => true,
-            Object::ScanImage(_) => false,
+            Object::File { .. } => true,
+            Object::ScanImage { .. } => false,
             Object::ScanArea(_) => false,
         }
     }
@@ -91,9 +90,9 @@ impl Object {
     pub fn show(&mut self, ui: &mut Ui) {
         match self {
             Object::Gds { image, .. } => image.show(ui),
-            Object::File{ image, .. } => image.show(ui),
-            Object::ScanImage(live_image) => {
-                live_image.show_image(ui);
+            Object::File { image, .. } => image.show(ui),
+            Object::ScanImage { image, .. } => {
+                image.show_image(ui);
             }
             Object::ScanArea(scan_area) => scan_area.show(ui),
         }
@@ -103,33 +102,33 @@ impl Object {
             Object::Gds { path, .. } => {
                 ui.label(format!("Path: {}", path.display()));
             }
-            Object::File{ image, .. } => image.show_menu(ui),
-            Object::ScanImage(live_image) => live_image.show_menu(ui, encoder),
-            Object::ScanArea(scan_area) => {}
+            Object::File { image, .. } => image.show_menu(ui),
+            Object::ScanImage { image, .. } => image.show_menu(ui, encoder),
+            Object::ScanArea(_) => {}
         }
     }
     pub fn border_transform(&self) -> Option<DAffine2> {
         match self {
-            Object::ScanImage(live_image) => Some(live_image.transform),
+            Object::ScanImage { image, .. } => Some(image.transform),
             Object::ScanArea(scan_area) => {
                 Some(scan_area.world_transform * DAffine2::from_scale(scan_area.area_size))
             }
-            _ => None,
+            _ => Some(self.goto_transform()),
         }
     }
     pub fn transform_center(&self) -> DVec2 {
         match self {
             Object::Gds { image, .. } => image.transform.translation,
-            Object::File{ image, .. } => image.center(),
-            Object::ScanImage(live_image) => live_image.transform.translation,
+            Object::File { image, .. } => image.center(),
+            Object::ScanImage { image, .. } => image.transform.translation,
             Object::ScanArea(scan_area) => scan_area.world_transform.translation,
         }
     }
     pub fn apply_transform(&mut self, tran: DAffine2) {
         match self {
             Object::Gds { image, .. } => image.transform = tran * image.transform,
-            Object::File{ image, .. } => image.transform_world_points(tran),
-            Object::ScanImage(live_image) => live_image.transform = tran * live_image.transform,
+            Object::File { image, .. } => image.transform_world_points(tran),
+            Object::ScanImage { image, .. } => image.transform = tran * image.transform,
             Object::ScanArea(scan_area) => {
                 scan_area.world_transform = tran * scan_area.world_transform
             }
@@ -142,8 +141,8 @@ impl Object {
                 0.,
                 image.transform.translation,
             ),
-            Object::ScanImage(live_image) => {
-                live_image.transform * DAffine2::from_scale(DVec2::new(1., -1.))
+            Object::ScanImage { image, .. } => {
+                image.transform * DAffine2::from_scale(DVec2::new(1., -1.))
             }
             Object::ScanArea(scan_area) => {
                 scan_area.world_transform
@@ -151,7 +150,7 @@ impl Object {
                         (scan_area.area_size.x + scan_area.area_size.y) / 2.,
                     ))
             }
-            Object::File{ image, .. } => {
+            Object::File { image, .. } => {
                 let center = image.center();
                 let scale = image
                     .world_points

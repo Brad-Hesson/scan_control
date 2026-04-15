@@ -21,6 +21,7 @@ pub struct SlowStatusWorker {
     area_size: SharedState<DVec2>,
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
+    base_name: SharedState<String>,
     init: Arc<AtomicBool>,
 }
 impl SlowStatusWorker {
@@ -29,6 +30,7 @@ impl SlowStatusWorker {
         area_size: &SharedState<DVec2>,
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
+        base_name: &SharedState<String>,
         init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -36,6 +38,7 @@ impl SlowStatusWorker {
             area_size: area_size.clone(),
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
+            base_name: base_name.clone(),
             init: init.clone(),
         }
     }
@@ -83,6 +86,14 @@ impl SlowStatusWorker {
         }
         Ok(())
     }
+    fn update_base_name(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let frame_meta = conn.scan_props_get()?;
+        self.base_name.modify_conditional(
+            |prev| *prev != frame_meta.series_name,
+            |prev| *prev = frame_meta.series_name.clone(),
+        );
+        Ok(())
+    }
 }
 impl Worker for SlowStatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -90,6 +101,7 @@ impl Worker for SlowStatusWorker {
         self.update_area_transform(conn)?;
         self.update_scan_status(conn)?;
         self.update_channel_opts(conn)?;
+        self.update_base_name(conn)?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }

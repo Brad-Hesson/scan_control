@@ -78,6 +78,7 @@ impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut stamps = Vec::new();
         let mut index = 0;
+        let mut base_name = String::new();
         match self
             .app_state
             .object_list
@@ -104,19 +105,44 @@ impl eframe::App for MyApp {
                     .connection
                     .update(scan_area, &self.image_encoder);
                 stamps.extend(scan_area.stamp.drain(..));
+                base_name = scan_area.stamp_name_base.clone();
             }
         }
+        let mut name_index = 0;
         for stamp in stamps {
+            'try_again: loop {
+                for obj in self.app_state.object_list.iter() {
+                    let name = obj.name();
+                    let Some(rest) = name.strip_prefix(&base_name) else {
+                        continue;
+                    };
+                    let Some(existing_name_index) = rest
+                        .strip_prefix("(")
+                        .and_then(|rest| rest.strip_suffix(")"))
+                        .and_then(|num_str| num_str.parse::<usize>().ok())
+                    else {
+                        continue;
+                    };
+                    if existing_name_index == name_index {
+                        name_index += 1;
+                        continue 'try_again;
+                    }
+                }
+                break;
+            }
+            let name = format!("{}({})", base_name, name_index);
+            name_index += 1;
             self.app_state.object_list.insert(
                 index,
-                SelectableEntry::new(Uuid::new_v4(), Object::ScanImage(stamp), |img| {
-                    img.list_atoms()
-                }),
+                SelectableEntry::new(
+                    Uuid::new_v4(),
+                    Object::ScanImage { image: stamp, name },
+                    |img| img.list_atoms(),
+                ),
             );
         }
         while let Some(object) = self.import_file_dialog.try_recv_object() {
-            let entry =
-                SelectableEntry::new(uuid::Uuid::new_v4(), object, |img| img.list_atoms());
+            let entry = SelectableEntry::new(uuid::Uuid::new_v4(), object, |img| img.list_atoms());
             self.app_state.object_list.push(entry);
         }
         // if let Some(path) = self.folder_dialog.take_picked() {
