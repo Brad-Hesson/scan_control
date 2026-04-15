@@ -42,10 +42,12 @@ impl SlowStatusWorker {
             init: init.clone(),
         }
     }
-    fn update_channel_state(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn update_signal_names(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let resp = conn.signals_names_get()?;
-        let names = Arc::new(resp.names.into_boxed_slice());
-        self.channel_state.modify(|prev| prev.write_names(names));
+        if self.channel_state.peek().signal_names() != resp.names{
+            let names = Arc::new(resp.names.into_boxed_slice());
+            self.channel_state.modify(|prev| prev.write_signal_names(names));
+        }
         Ok(())
     }
     fn update_area_transform(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -107,16 +109,17 @@ impl SlowStatusWorker {
 }
 impl Worker for SlowStatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        self.update_channel_state(conn)?;
         self.update_area_transform(conn)?;
         self.update_scan_status(conn)?;
         self.update_channel_opts(conn)?;
         self.update_base_name(conn)?;
         // self.update_course_amp(conn)?;
-        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
-    fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        self.update_signal_names(conn)?;
+        self.update_area_transform(conn)?;
+        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
 

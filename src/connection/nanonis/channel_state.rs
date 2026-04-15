@@ -25,8 +25,11 @@ impl ChannelState {
     pub fn options(&self) -> &[usize] {
         &self.opts
     }
-    pub fn write_names(&mut self, names: Arc<Box<[String]>>) {
+    pub fn write_signal_names(&mut self, names: Arc<Box<[String]>>) {
         self.names = names;
+    }
+    pub fn signal_names(&self) -> &[String] {
+        &self.names
     }
     pub fn channel_opts_names<'s>(&'s self) -> impl Iterator<Item = String> + 's {
         self.opts.iter().map(|opt| self.names[*opt].clone())
