@@ -86,10 +86,13 @@ pub fn dashes_from_line(
     let mut shapes = Vec::new();
     let mut position_on_segment = 0.;
     let mut drawing_dash = false;
+    let sect_length = dash_length + gap_length;
     for window in path.windows(2) {
         let Some((start, end)) = clip_line_to_rect(window[0], window[1], screen_rect) else {
+            position_on_segment -= window[0].distance(window[1]) % sect_length;
             continue;
         };
+        position_on_segment -= window[0].distance(start) % sect_length;
         let vector = end - start;
         let segment_length = vector.length();
 
@@ -122,7 +125,7 @@ pub fn dashes_from_line(
                 stroke: stroke.clone(),
             }));
         }
-
+        position_on_segment -= window[1].distance(end) % sect_length;
         position_on_segment -= segment_length;
     }
     shapes
