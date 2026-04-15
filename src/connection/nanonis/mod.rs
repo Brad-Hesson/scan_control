@@ -221,7 +221,7 @@ impl Connection for NanonisConnection {
             return;
         };
         if ui.input(|i| i.modifiers.ctrl) {
-            let [_, _, translate] = world_delta_transform(ui, DVec2::ZERO);
+            let [_, _, translate] = world_delta_transform(ui);
             let world_translate = translate.translation;
             let scan_world_translate = scan_area
                 .world_transform
