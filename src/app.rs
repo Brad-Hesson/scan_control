@@ -116,6 +116,10 @@ impl eframe::App for MyApp {
                     let Some(rest) = name.strip_prefix(&base_name) else {
                         continue;
                     };
+                    if rest.is_empty() && name_index == 0 {
+                        name_index += 1;
+                        continue 'try_again;
+                    }
                     let Some(existing_name_index) = rest
                         .strip_prefix("(")
                         .and_then(|rest| rest.strip_suffix(")"))
@@ -130,7 +134,11 @@ impl eframe::App for MyApp {
                 }
                 break;
             }
-            let name = format!("{}({})", base_name, name_index);
+            let name = if name_index == 0 {
+                base_name.clone()
+            } else {
+                format!("{}({})", base_name, name_index)
+            };
             name_index += 1;
             self.app_state.object_list.insert(
                 index,
