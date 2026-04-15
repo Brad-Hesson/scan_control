@@ -145,24 +145,7 @@ impl eframe::App for MyApp {
 
                 let scan_view_resp = self.app_state.scan_view.show(ui, |ui| {
                     let objects = &mut self.app_state.object_list;
-                    if ui.input(|i| i.modifiers.ctrl) {
-                        let ctx = ui
-                            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-                            .unwrap();
-                        let center = ctx
-                            .world2egui()
-                            .inverse()
-                            .transform_point2(ctx.rect.center().to_glam());
-                        let [rotate, scale, translate] = world_delta_transform(ui, center);
-                        let tf = if objects.iter_selected().all(|ent| ent.is_scalable()) {
-                            rotate * scale * translate
-                        } else {
-                            rotate * translate
-                        };
-                        for i in objects.iter_selected_indexes().collect_vec() {
-                            objects[i].apply_transform(tf);
-                        }
-                    }
+                    transform_objects(ui, objects);
                     for i in 0..objects.len() {
                         objects[i].show(ui);
                         let Some(resp) = objects[i].resp_group.response(ctx) else {
@@ -211,7 +194,7 @@ impl eframe::App for MyApp {
                         }
                     }
                     if let Some(conn) = &mut self.active_connection {
-                        conn.show_image_view_overlay(ui, &mut self.app_state.object_list);
+                        conn.show_image_view_overlay(ui, objects);
                     }
                     self.app_state.scale_bar.show(ui);
                 });
@@ -293,6 +276,20 @@ impl eframe::App for MyApp {
                         .bottom();
                 }
             });
+    }
+}
+
+fn transform_objects(ui: &mut Ui, object_list: &mut SelectableList<Object>) {
+    if ui.input(|i| i.modifiers.ctrl) {
+        let [rotate, scale, translate] = world_delta_transform(ui);
+        let tf = if object_list.iter_selected().all(|ent| ent.is_scalable()) {
+            rotate * scale * translate
+        } else {
+            rotate * translate
+        };
+        for i in object_list.iter_selected_indexes().collect_vec() {
+            object_list[i].apply_transform(tf);
+        }
     }
 }
 

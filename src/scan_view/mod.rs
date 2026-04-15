@@ -40,10 +40,14 @@ impl ImageEncoder {
     }
 }
 
-pub fn world_delta_transform(ui: &Ui, center: DVec2) -> [DAffine2; 3] {
+pub fn world_delta_transform(ui: &Ui) -> [DAffine2; 3] {
     let ctx = ui
         .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
         .unwrap();
+    let center = ctx
+        .world2egui()
+        .inverse()
+        .transform_point2(ctx.rect.center().to_glam());
     let screen_to_world = ctx.world2egui().inverse();
     let response = ctx.screen_response;
     // Calculate the dragging transform
