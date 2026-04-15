@@ -4,16 +4,13 @@ use crate::{
         selectable_list::{SelectableEntry, SelectableList},
     },
     connection::{nanonis::NanonisConnection, Connection},
-    scan_view::{
-        world_delta_transform, BorderRectangle, ImageEncoder, ScaleBar, ScanView, ScanViewCtx,
-    },
+    scan_view::{world_delta_transform, BorderRectangle, ImageEncoder, ScaleBar, ScanView},
     undo_queue::{StateModify, UndoQueue},
-    utils::vec_interop::IntoGlam,
     view_object::Object,
 };
 use egui::{
-    widgets, Align2, Button, Color32, Frame, Id, Layout, MenuBar, Modifiers, Shadow,
-    ThemePreference, Ui,
+    widgets, Align2, Button, Color32, Frame, Layout, MenuBar, Modifiers, Shadow, ThemePreference,
+    Ui,
 };
 use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools};

@@ -1,4 +1,5 @@
 mod channel_state;
+mod course_motion;
 mod scan_status;
 mod worker;
 
@@ -8,8 +9,8 @@ use std::sync::{
 };
 
 pub use channel_state::ChannelState;
-use egui::{Color32, DragValue, Frame, Id, Shadow, Stroke, Ui};
-use glam::{DAffine2, DMat2, DVec2, IVec2, Mat2};
+use egui::Ui;
+use glam::{DAffine2, DVec2};
 use itertools::Itertools;
 use nanonis_tcp::LineDir;
 pub use scan_status::ScanStatus;
@@ -20,16 +21,16 @@ use crate::{
     components::selectable_list::{SelectableEntry, SelectableList},
     connection::{
         live_image::{FrameData, LiveImage},
-        nanonis::worker::{
-            FastStatusWorker, FrameWorker, LineWorker, SlowStatusWorker, Worker as _,
+        nanonis::{
+            course_motion::CourseMotionState,
+            worker::{FastStatusWorker, FrameWorker, LineWorker, SlowStatusWorker, Worker as _},
         },
         queue::{overwrite_queue, OverwriteQueueSender},
         scan_area::ScanArea,
         shared_state::SharedState,
         Connection,
     },
-    scan_view::{world_delta_transform, BorderRectangle, ImageEncoder, ScanViewCtx},
-    utils::vec_interop::IntoEgui,
+    scan_view::ImageEncoder,
     view_object::{self, Object},
 };
 
@@ -43,12 +44,9 @@ pub struct NanonisConnection {
     base_name: SharedState<String>,
     frame_queue_tx: OverwriteQueueSender<LineDir>,
     tip_pos: SharedState<DVec2>,
-    course_amp: SharedState<[f32; 2]>,
     slow_status_init: Arc<AtomicBool>,
     fast_status_init: Arc<AtomicBool>,
-    course_menu_active: bool,
-    course_move_target: DVec2,
-    course_matrix: DMat2,
+    course_menu: CourseMotionState,
 }
 
 impl Connection for NanonisConnection {
@@ -150,9 +148,6 @@ impl Connection for NanonisConnection {
         object_list: &mut SelectableList<view_object::Object>,
         encoder: &ImageEncoder,
     ) {
-        if self.course_menu_active {
-            object_list.clear_selected();
-        }
         let Some(scan_area) = object_list
             .iter_mut()
             .find_map(|entry| entry.as_scan_area_mut())
@@ -160,130 +155,15 @@ impl Connection for NanonisConnection {
             return;
         };
         scan_area.show_menu(ui, encoder);
-        if ui
-            .add_enabled(
-                !self.course_menu_active,
-                egui::Button::new("Course Motion Menu"),
-            )
-            .clicked()
-        {
-            self.course_move_target = DVec2::ZERO;
-            self.course_menu_active = true;
-        }
-        egui::Window::new("Course Motion")
-            .frame(
-                Frame::window(&ui.ctx().style())
-                    .multiply_with_opacity(0.5)
-                    .shadow(Shadow::NONE),
-            )
-            .default_size([200., 400.])
-            .collapsible(false)
-            .resizable(true)
-            .scroll([false, true])
-            .open(&mut self.course_menu_active)
-            .show(&ui.ctx(), |ui| {
-                let course_vec = (self.course_matrix.inverse() * self.course_move_target).round();
-                let mut course_x = course_vec.x as i32;
-                let mut course_y = course_vec.y as i32;
-                ui.heading("Steps:");
-                ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut course_x));
-                    ui.add(DragValue::new(&mut course_y));
-                });
-                let change = DVec2::new(
-                    course_x as f64 - course_vec.x,
-                    course_y as f64 - course_vec.y,
-                );
-                self.course_move_target += self.course_matrix * change;
-                ui.heading("Course Motor Matrix:");
-                ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut self.course_matrix.x_axis.x));
-                    ui.add(DragValue::new(&mut self.course_matrix.y_axis.x));
-                });
-                ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut self.course_matrix.x_axis.y));
-                    ui.add(DragValue::new(&mut self.course_matrix.y_axis.y));
-                });
-            });
+        self.course_menu.show_menu(ui, object_list);
     }
     fn show_image_view_overlay(
         &mut self,
         ui: &mut Ui,
         object_list: &mut SelectableList<view_object::Object>,
     ) {
-        if !self.course_menu_active {
-            return;
-        }
-        let Some(scan_area) = object_list
-            .iter_mut()
-            .find_map(|entry| entry.as_scan_area_mut())
-        else {
-            return;
-        };
-        if ui.input(|i| i.modifiers.ctrl) {
-            let [_, _, translate] = world_delta_transform(ui);
-            let world_translate = translate.translation;
-            let scan_world_translate = scan_area
-                .world_transform
-                .inverse()
-                .transform_vector2(world_translate);
-            self.course_move_target += scan_world_translate;
-        }
-        let course_steps = (self.course_matrix.inverse() * self.course_move_target).round();
-        let ctx = ui
-            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-            .unwrap();
-        let world2screen = ctx.world2egui();
-        for (a, b) in std::iter::once(DVec2::ZERO)
-            .chain(course_path_iter(course_steps.as_ivec2()))
-            .tuple_windows()
-        {
-            let a = (world2screen * scan_area.world_transform)
-                .transform_point2(self.course_matrix * a)
-                .to_egui_pos2();
-            let b = (world2screen * scan_area.world_transform)
-                .transform_point2(self.course_matrix * b)
-                .to_egui_pos2();
-            ui.painter()
-                .line_segment([a, b], Stroke::new(1., Color32::ORANGE));
-        }
-        for point in course_path_iter(course_steps.as_ivec2()) {
-            let center = (world2screen * scan_area.world_transform)
-                .transform_point2(self.course_matrix * point)
-                .to_egui_pos2();
-            ui.painter().circle_filled(center, 4., Color32::ORANGE);
-        }
-
-        let real_course_move = self.course_matrix * course_steps;
-        let move_transform =
-            DAffine2::from_scale_angle_translation(*self.area_size.peek(), 0., real_course_move);
-        BorderRectangle {
-            transform: scan_area.world_transform * move_transform,
-            color: Color32::YELLOW,
-            dashed: false,
-        }
-        .show(ui);
+        self.course_menu.show_overlay(ui, object_list);
     }
-}
-
-fn course_path_iter(steps: IVec2) -> impl Iterator<Item = DVec2> {
-    integer_iter(steps.x)
-        .map(move |x| IVec2 { x, y: 0 })
-        .chain(integer_iter(steps.y).map(move |y| IVec2 { x: steps.x, y }))
-        .map(|v| v.as_dvec2())
-}
-fn integer_iter(end: i32) -> impl Iterator<Item = i32> {
-    let del = end.signum();
-    (0..end.abs()).map(move |v| (v + 1) * del)
-}
-
-#[test]
-fn feature() {
-    dbg!(course_path_iter(IVec2::new(0, 0)).collect_vec());
-    dbg!(course_path_iter(IVec2::new(-3, 4)).collect_vec());
-    dbg!(course_path_iter(IVec2::new(2, 5)).collect_vec());
-    dbg!(course_path_iter(IVec2::new(3, -2)).collect_vec());
-    dbg!(course_path_iter(IVec2::new(-1, -2)).collect_vec());
 }
 
 impl NanonisConnection {
@@ -296,10 +176,12 @@ impl NanonisConnection {
         let scan_status = SharedState::new_default();
         let base_name = SharedState::new_default();
         let tip_pos = SharedState::new_default();
-        let course_amp = SharedState::new_default();
+        let course_voltages = SharedState::new_default();
         let (frame_queue_tx, frame_queue_rx) = overwrite_queue(2);
         let slow_status_init = Arc::new(AtomicBool::new(false));
         let fast_status_init = Arc::new(AtomicBool::new(false));
+
+        let course_menu = CourseMotionState::new(&course_voltages);
 
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &scan_status).run(address, 6501);
@@ -320,7 +202,7 @@ impl NanonisConnection {
             &channel_state,
             &scan_status,
             &base_name,
-            &course_amp,
+            &course_voltages,
             &slow_status_init,
         )
         .run(address, 6504);
@@ -333,13 +215,10 @@ impl NanonisConnection {
             frame_queue_tx,
             scan_status,
             tip_pos,
-            course_amp,
             slow_status_init,
             fast_status_init,
             base_name,
-            course_menu_active: false,
-            course_move_target: DVec2::ZERO,
-            course_matrix: DMat2::IDENTITY * 1e3,
+            course_menu,
         }
     }
     fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {

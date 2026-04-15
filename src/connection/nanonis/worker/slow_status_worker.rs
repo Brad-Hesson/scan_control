@@ -1,12 +1,17 @@
-use core::f64;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    f64,
+    sync::{
+        Arc, atomic::{AtomicBool, Ordering}
+    },
 };
 
 use glam::DVec2;
 use itertools::Itertools as _;
-use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, MotorAxis};
+use nanonis_tcp::{
+    blocking::NanonisTcp,
+    error::{NanonisTcpError, NanonisTcpResult},
+    MotorAxis,
+};
 
 use crate::connection::{
     nanonis::{channel_state::ChannelState, worker::Worker, ScanStatus},
@@ -19,7 +24,7 @@ pub struct SlowStatusWorker {
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
     base_name: SharedState<String>,
-    course_amp: SharedState<[f32; 2]>,
+    course_voltages: SharedState<DVec2>,
     init: Arc<AtomicBool>,
 }
 impl SlowStatusWorker {
@@ -29,7 +34,7 @@ impl SlowStatusWorker {
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
         base_name: &SharedState<String>,
-        course_amp: &SharedState<[f32; 2]>,
+        course_voltages: &SharedState<DVec2>,
         init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -38,15 +43,16 @@ impl SlowStatusWorker {
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
             base_name: base_name.clone(),
-            course_amp: course_amp.clone(),
+            course_voltages: course_voltages.clone(),
             init: init.clone(),
         }
     }
     fn update_signal_names(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let resp = conn.signals_names_get()?;
-        if self.channel_state.peek().signal_names() != resp.names{
+        if self.channel_state.peek().signal_names() != resp.names {
             let names = Arc::new(resp.names.into_boxed_slice());
-            self.channel_state.modify(|prev| prev.write_signal_names(names));
+            self.channel_state
+                .modify(|prev| prev.write_signal_names(names));
         }
         Ok(())
     }
@@ -98,11 +104,18 @@ impl SlowStatusWorker {
         }
         Ok(())
     }
-    fn update_course_amp(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        let x_data = conn.motor_freq_amp_get(MotorAxis::X)?;
-        let y_data = conn.motor_freq_amp_get(MotorAxis::Y)?;
-        let new_data = [x_data.amplitude, y_data.amplitude];
-        self.course_amp
+    fn update_course_voltages(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let err_pred = |e: &NanonisTcpError| matches!(e, NanonisTcpError::Api(_));
+        let x_data = conn
+            .motor_freq_amp_get(MotorAxis::X)
+            .map(|resp| resp.amplitude as f64)
+            .or_else(|e| err_pred(&e).then_some(0.).ok_or(e))?;
+        let y_data = conn
+            .motor_freq_amp_get(MotorAxis::Y)
+            .map(|resp| resp.amplitude as f64)
+            .or_else(|e| err_pred(&e).then_some(0.).ok_or(e))?;
+        let new_data = DVec2::new(x_data, y_data);
+        self.course_voltages
             .modify_conditional(|prev| *prev != new_data, |prev| *prev = new_data);
         Ok(())
     }
@@ -113,7 +126,7 @@ impl Worker for SlowStatusWorker {
         self.update_scan_status(conn)?;
         self.update_channel_opts(conn)?;
         self.update_base_name(conn)?;
-        // self.update_course_amp(conn)?;
+        self.update_course_voltages(conn)?;
         Ok(())
     }
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
