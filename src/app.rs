@@ -1,26 +1,23 @@
 use crate::{
     components::{
         file_dialog_native::ObjectImportDialog,
-        file_tree_extern::ImageTree as FileTree,
         selectable_list::{SelectableEntry, SelectableList},
     },
-    connection::{nanonis::NanonisConnection, Connection, LiveImage, ScanArea},
+    connection::{nanonis::NanonisConnection, Connection},
     scan_view::{
-        static_image::StaticImage, world_delta_transform, BorderRectangle, FileImage, GDSImage,
-        ImageEncoder, ScaleBar, ScanView, ScanViewCtx,
+        world_delta_transform, BorderRectangle, ImageEncoder, ScaleBar, ScanView, ScanViewCtx,
     },
     undo_queue::{StateModify, UndoQueue},
-    utils::{response_group::ResponseGroupExt as _, vec_interop::IntoGlam},
+    utils::vec_interop::IntoGlam,
     view_object::Object,
 };
 use egui::{
-    widgets, Align2, Atoms, Button, Color32, Frame, Id, Image, IntoAtoms, Layout, MenuBar,
-    Modifiers, Shadow, ThemePreference, Ui,
+    widgets, Align2, Button, Color32, Frame, Id, Layout, MenuBar, Modifiers, Shadow,
+    ThemePreference, Ui,
 };
-use glam::{DAffine2, DMat3, DVec2};
+use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools};
-use tracing::{error, info};
-use uuid::Uuid;
+use tracing::error;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -30,29 +27,21 @@ pub struct MyApp {
     undo_queue: UndoQueue<AppState>,
     current_theme: ThemePreference,
     import_file_dialog: ObjectImportDialog,
+    pending_connections: Vec<Box<dyn Connection>>,
+    active_connection: Option<Box<dyn Connection>>,
 }
 
 pub struct AppState {
     scan_view: ScanView,
     object_list: SelectableList<Object>,
-    connection: Box<dyn Connection>,
     scale_bar: ScaleBar,
 }
-
-// trait UnwrapTraceExt{
-//     fn unwrap_trace<T>(self) -> Option<T>;
-// }
-// impl<T> UnwrapTraceExt for Result<T>{
-//     fn unwrap_trace<T>(self) -> Option<T> {
-//         todo!()
-//     }
-// }
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let image_encoder = ImageEncoder::new(wgpu);
-        let current_scan = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
+        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
         let object_list = SelectableList::new();
         let import_file_dialog = ObjectImportDialog::new();
 
@@ -60,13 +49,14 @@ impl MyApp {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 object_list,
-                connection: current_scan,
                 scale_bar: ScaleBar::new(),
             },
             import_file_dialog,
             image_encoder,
             undo_queue: UndoQueue::new(),
             current_theme: cc.egui_ctx.theme().into(),
+            pending_connections: vec![nanonis_connection],
+            active_connection: None,
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -76,86 +66,22 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut stamps = Vec::new();
-        let mut index = 0;
-        let mut base_name = String::new();
-        match self
-            .app_state
-            .object_list
-            .iter_mut()
-            .enumerate()
-            .find_map(|(i, entry)| entry.as_scan_area_mut().map(|area| (i, area)))
-        {
+        match &mut self.active_connection {
+            Some(conn) => conn.update(&mut self.app_state.object_list, &self.image_encoder),
             None => {
-                if let Some(scan_area) = self
-                    .app_state
-                    .connection
-                    .poll_connected(&self.image_encoder)
-                {
-                    self.app_state.object_list.push(SelectableEntry::new(
-                        "area",
-                        Object::ScanArea(scan_area),
-                        |img| img.list_atoms(),
-                    ));
-                }
-            }
-            Some((i, scan_area)) => {
-                index = i;
-                self.app_state
-                    .connection
-                    .update(scan_area, &self.image_encoder);
-                stamps.extend(scan_area.stamp.drain(..));
-                base_name = scan_area.stamp_name_base.clone();
-            }
-        }
-        let mut name_index = 0;
-        for stamp in stamps {
-            'try_again: loop {
-                for obj in self.app_state.object_list.iter() {
-                    let name = obj.name();
-                    let Some(rest) = name.strip_prefix(&base_name) else {
-                        continue;
-                    };
-                    if rest.is_empty() && name_index == 0 {
-                        name_index += 1;
-                        continue 'try_again;
-                    }
-                    let Some(existing_name_index) = rest
-                        .strip_prefix("(")
-                        .and_then(|rest| rest.strip_suffix(")"))
-                        .and_then(|num_str| num_str.parse::<usize>().ok())
-                    else {
-                        continue;
-                    };
-                    if existing_name_index == name_index {
-                        name_index += 1;
-                        continue 'try_again;
+                for i in 0..self.pending_connections.len() {
+                    if self.pending_connections[i]
+                        .poll_connected(&mut self.app_state.object_list, &self.image_encoder)
+                    {
+                        self.active_connection = Some(self.pending_connections.remove(i));
                     }
                 }
-                break;
             }
-            let name = if name_index == 0 {
-                base_name.clone()
-            } else {
-                format!("{}({})", base_name, name_index)
-            };
-            name_index += 1;
-            self.app_state.object_list.insert(
-                index,
-                SelectableEntry::new(
-                    Uuid::new_v4(),
-                    Object::ScanImage { image: stamp, name },
-                    |img| img.list_atoms(),
-                ),
-            );
         }
         while let Some(object) = self.import_file_dialog.try_recv_object() {
             let entry = SelectableEntry::new(uuid::Uuid::new_v4(), object, |img| img.list_atoms());
             self.app_state.object_list.push(entry);
         }
-        // if let Some(path) = self.folder_dialog.take_picked() {
-        //     self.app_state.file_tree.load_dir(&path).ok_trace();
-        // }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!is_fs));
@@ -201,7 +127,7 @@ impl eframe::App for MyApp {
         }
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
-                file_menu_button(ui, ctx, self);
+                file_menu_button(ui, self);
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     widgets::global_theme_preference_switch(ui);
                 });
@@ -288,7 +214,9 @@ impl eframe::App for MyApp {
                             .show(ui);
                         }
                     }
-
+                    if let Some(conn) = &mut self.active_connection {
+                        conn.show_image_view_overlay(ui, &mut self.app_state.object_list);
+                    }
                     self.app_state.scale_bar.show(ui);
                 });
                 if let Some(tf) = new_world_transform {
@@ -319,12 +247,7 @@ impl eframe::App for MyApp {
                         self.app_state.object_list.show(ui);
                     });
                 let mut new_top = ui.clip_rect().top();
-                if let Some(scan_area) = self
-                    .app_state
-                    .object_list
-                    .iter_mut()
-                    .find_map(|ent| ent.as_scan_area().is_some().then_some(ent))
-                {
+                if let Some(conn) = &mut self.active_connection {
                     new_top = egui::Window::new("Current Scan")
                         .frame(
                             Frame::window(&ctx.style())
@@ -337,10 +260,11 @@ impl eframe::App for MyApp {
                         .show(ctx, |ui| {
                             let vis = &mut ui.style_mut().visuals.widgets.inactive;
                             vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-                            scan_area
-                                .as_scan_area_mut()
-                                .unwrap()
-                                .show_menu(ui, &self.image_encoder);
+                            conn.show_menu(
+                                ui,
+                                &mut self.app_state.object_list,
+                                &self.image_encoder,
+                            );
                         })
                         .unwrap()
                         .response
@@ -372,42 +296,16 @@ impl eframe::App for MyApp {
                         .rect
                         .bottom();
                 }
-                // for i in 0..self.app_state.file_image_list.len() {
-                //     let name = &self.app_state.file_image_list[i].name;
-                //     let mut rect = ui.min_rect();
-                //     rect.set_top(new_top);
-                //     new_top = egui::Window::new(name)
-                //         .frame(Frame::window(&ctx.style()).multiply_with_opacity(0.5))
-                //         .constrain_to(rect)
-                //         .anchor(Align2::RIGHT_TOP, egui::Vec2::new(5., 5.))
-                //         .resizable(false)
-                //         .show(ctx, |ui| {
-                //             self.app_state.file_image_list[i].show_menu(ui);
-                //         })
-                //         .unwrap()
-                //         .response
-                //         .rect
-                //         .bottom();
-                // }
             });
     }
 }
 
-fn file_menu_button(ui: &mut Ui, ctx: &egui::Context, app: &mut MyApp) {
+fn file_menu_button(ui: &mut Ui, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
         if ui.add(Button::new("Import Files")).clicked() {
             app.import_file_dialog.pick_files(app.image_encoder.clone());
         }
     });
-}
-
-fn image_list_item(image: &StaticImage) -> Atoms<'_> {
-    let name = &image.name;
-    (
-        Image::new(egui::include_image!("../assets/scan_image_icon.png")),
-        name,
-    )
-        .into_atoms()
 }
 
 struct DeleteObjectsModifier {
@@ -432,32 +330,6 @@ impl StateModify<AppState> for DeleteObjectsModifier {
     fn undo(&mut self, state: &mut AppState) {
         for (idx, img) in izip!(&self.idxs, self.imgs.drain(..).rev()) {
             state.object_list.insert(*idx, img);
-        }
-    }
-}
-
-struct LoadObjectsModifier {
-    imgs: Vec<SelectableEntry<Object>>,
-    num: usize,
-}
-impl LoadObjectsModifier {
-    pub fn new(imgs: Vec<SelectableEntry<Object>>) -> Self {
-        Self {
-            num: imgs.len(),
-            imgs,
-        }
-    }
-}
-impl StateModify<AppState> for LoadObjectsModifier {
-    fn redo(&mut self, state: &mut AppState) -> bool {
-        state.object_list.extend(self.imgs.drain(..));
-        true
-    }
-    fn undo(&mut self, state: &mut AppState) {
-        let start = state.object_list.len() - self.num;
-        self.imgs.extend(state.object_list.drain(start..));
-        for img in &mut self.imgs {
-            img.selected = false;
         }
     }
 }

@@ -1,15 +1,12 @@
 use core::f64;
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Instant,
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 use glam::DVec2;
 use itertools::Itertools as _;
-use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult};
+use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, MotorAxis};
 
 use crate::connection::{
     nanonis::{channel_state::ChannelState, worker::Worker, ScanStatus},
@@ -22,6 +19,7 @@ pub struct SlowStatusWorker {
     channel_state: SharedState<ChannelState>,
     scan_status: SharedState<ScanStatus>,
     base_name: SharedState<String>,
+    course_amp: SharedState<[f32; 2]>,
     init: Arc<AtomicBool>,
 }
 impl SlowStatusWorker {
@@ -31,6 +29,7 @@ impl SlowStatusWorker {
         channel_state: &SharedState<ChannelState>,
         scan_status: &SharedState<ScanStatus>,
         base_name: &SharedState<String>,
+        course_amp: &SharedState<[f32; 2]>,
         init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -39,6 +38,7 @@ impl SlowStatusWorker {
             channel_state: channel_state.clone(),
             scan_status: scan_status.clone(),
             base_name: base_name.clone(),
+            course_amp: course_amp.clone(),
             init: init.clone(),
         }
     }
@@ -96,6 +96,14 @@ impl SlowStatusWorker {
         }
         Ok(())
     }
+    fn update_course_amp(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        let x_data = conn.motor_freq_amp_get(MotorAxis::X)?;
+        let y_data = conn.motor_freq_amp_get(MotorAxis::Y)?;
+        let new_data = [x_data.amplitude, y_data.amplitude];
+        self.course_amp
+            .modify_conditional(|prev| *prev != new_data, |prev| *prev = new_data);
+        Ok(())
+    }
 }
 impl Worker for SlowStatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
@@ -104,6 +112,7 @@ impl Worker for SlowStatusWorker {
         self.update_scan_status(conn)?;
         self.update_channel_opts(conn)?;
         self.update_base_name(conn)?;
+        // self.update_course_amp(conn)?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
