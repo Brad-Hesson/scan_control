@@ -88,10 +88,12 @@ impl SlowStatusWorker {
     }
     fn update_base_name(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let frame_meta = conn.scan_props_get()?;
-        self.base_name.modify_conditional(
+        if self.base_name.modify_conditional(
             |prev| *prev != frame_meta.series_name,
             |prev| *prev = frame_meta.series_name.clone(),
-        );
+        ) {
+            self.ctx.request_repaint();
+        }
         Ok(())
     }
 }

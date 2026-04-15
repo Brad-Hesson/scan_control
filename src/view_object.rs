@@ -113,7 +113,7 @@ impl Object {
             Object::ScanArea(scan_area) => {
                 Some(scan_area.world_transform * DAffine2::from_scale(scan_area.area_size))
             }
-            _ => Some(self.goto_transform()),
+            _ => None,
         }
     }
     pub fn transform_center(&self) -> DVec2 {

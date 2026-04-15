@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
 
-use egui::{Color32, Id, Shape, Stroke, Ui};
+use egui::{epaint::PathStroke, Color32, Id, Ui};
 use glam::{DAffine2, DVec2};
 
 use crate::{
     connection::{nanonis::ScanStatus, LiveImage},
-    scan_view::{BorderRectangle, ImageEncoder, ScanViewCtx},
+    scan_view::{border::dashes_from_line, BorderRectangle, ImageEncoder, ScanViewCtx},
     utils::vec_interop::{IntoEgui, Projection},
 };
 
@@ -113,9 +113,27 @@ impl ScanArea {
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         self.show_channel_control(ui);
         self.live_image.show_menu(ui, encoder);
-        if ui.button("Stamp").clicked() {
-            self.stamp.push_front(self.live_image.stamp(encoder));
-        }
+        self.show_stamp_button(ui, encoder);
+    }
+    fn show_stamp_button(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
+        let font_id = egui::TextStyle::Body.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(
+            self.stamp_name_base.clone(),
+            font_id.clone(),
+            ui.visuals().text_color(),
+        );
+        let padding = ui.spacing().button_padding.x * 2.0;
+        let width = galley.size().x + padding;
+
+        ui.horizontal(|ui| {
+            if ui.button("Stamp").clicked() {
+                self.stamp.push_front(self.live_image.stamp(encoder));
+            }
+            ui.add_enabled(
+                false,
+                egui::TextEdit::singleline(&mut self.stamp_name_base).desired_width(width),
+            );
+        });
     }
     fn show_channel_control(&mut self, ui: &mut Ui) {
         let mut selection = self.channel_selected.as_ref().map(|s| s.as_str());
