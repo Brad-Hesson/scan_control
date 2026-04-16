@@ -1,6 +1,6 @@
 use core::f64;
 
-use egui::{CollapsingHeader, Color32, DragValue, Frame, Id, Shadow, Stroke, Ui};
+use egui::{Button, CollapsingHeader, Color32, DragValue, Frame, Id, Shadow, Stroke, Ui};
 use glam::{DAffine2, DMat2, DVec2, IVec2};
 use itertools::Itertools as _;
 
@@ -59,6 +59,15 @@ impl CourseMotionState {
                     ui.add_enabled(voltages.y > 0., DragValue::new(&mut steps.y));
                 });
                 self.write_steps(steps);
+                if ui
+                    .add_enabled(
+                        voltages.x > 0. || voltages.y > 0.,
+                        Button::new("Execute Course Move"),
+                    )
+                    .clicked()
+                {
+                    println!("execute");
+                }
                 ui.separator();
                 CollapsingHeader::new("Config")
                     .default_open(false)
@@ -111,7 +120,7 @@ impl CourseMotionState {
         let world2screen = ctx.world2egui();
         let course_world2screen = |p: DVec2| {
             (world2screen * scan_area.world_transform)
-                .transform_point2(self.calib_matrix * p)
+                .transform_point2(self.calib_matrix * p * 1e9)
                 .to_egui_pos2()
         };
         let steps = self.get_steps();
@@ -130,7 +139,7 @@ impl CourseMotionState {
                 ui.painter().circle_filled(point, 4., Color32::ORANGE);
             });
 
-        let real_course_move = self.calib_matrix * steps.as_dvec2();
+        let real_course_move = self.calib_matrix * steps.as_dvec2() * 1e9;
         let move_transform =
             DAffine2::from_scale_angle_translation(scan_area.area_size, 0., real_course_move);
         BorderRectangle {
@@ -142,7 +151,7 @@ impl CourseMotionState {
     }
     fn steps2real_world(&self) -> DMat2 {
         let voltages = *self.voltages.peek();
-        self.calib_matrix * DMat2::from_diagonal(voltages)
+        self.calib_matrix * DMat2::from_diagonal(voltages) * 1e9
         // match (voltages.x.is_nan(), voltages.y.is_nan()) {
         //     (false, false) => self.calib_matrix * DMat2::from_diagonal(voltages),
         //     (true, false) => todo!(),

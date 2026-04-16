@@ -109,11 +109,11 @@ impl SlowStatusWorker {
         let x_data = conn
             .motor_freq_amp_get(MotorAxis::X)
             .map(|resp| resp.amplitude as f64)
-            .or_else(|e| err_pred(&e).then_some(0.).ok_or(e))?;
+            .or_else(|e| err_pred(&e).then_some(1.).ok_or(e))?;
         let y_data = conn
             .motor_freq_amp_get(MotorAxis::Y)
             .map(|resp| resp.amplitude as f64)
-            .or_else(|e| err_pred(&e).then_some(0.).ok_or(e))?;
+            .or_else(|e| err_pred(&e).then_some(1.).ok_or(e))?;
         let new_data = DVec2::new(x_data, y_data);
         self.course_voltages
             .modify_conditional(|prev| *prev != new_data, |prev| *prev = new_data);
