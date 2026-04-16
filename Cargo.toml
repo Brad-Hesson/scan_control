@@ -35,7 +35,7 @@ borrow = "2.0.0"
 nanonis-tcp = { path = "../nanonis-tcp"}
 parking_lot = "0.12.5"
 image.workspace = true
-nalgebra = "0.34.1"
+nalgebra = { version = "0.34.2", features = ["convert-glam032"]}
 float-ord = "0.3.2"
 gdsr = "0.0.1-alpha.3"
 crossbeam = "0.8.4"

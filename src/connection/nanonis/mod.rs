@@ -1,4 +1,5 @@
 mod channel_state;
+mod command_channel;
 mod course_motion;
 mod scan_status;
 mod worker;
@@ -180,8 +181,9 @@ impl NanonisConnection {
         let (frame_queue_tx, frame_queue_rx) = overwrite_queue(2);
         let slow_status_init = Arc::new(AtomicBool::new(false));
         let fast_status_init = Arc::new(AtomicBool::new(false));
+        let (move_sender, move_receiver) = command_channel::command_channel();
 
-        let course_menu = CourseMotionState::new(&course_voltages);
+        let course_menu = CourseMotionState::new(&course_voltages, &move_sender);
 
         let address = address.as_ref();
         LineWorker::new(&frame_queue_tx, &scan_status).run(address, 6501);
@@ -203,6 +205,7 @@ impl NanonisConnection {
             &scan_status,
             &base_name,
             &course_voltages,
+            &move_receiver,
             &slow_status_init,
         )
         .run(address, 6504);
