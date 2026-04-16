@@ -145,14 +145,9 @@ impl eframe::App for MyApp {
                     transform_objects(ui, objects);
                     for i in 0..objects.len() {
                         objects[i].show(ui);
-                        let Some(resp) = objects[i].resp_group.response(ctx) else {
-                            continue;
-                        };
-                        if resp.double_clicked() {
-                            new_world_transform = Some(objects[i].goto_transform());
-                        }
+                        let maybe_resp = objects[i].resp_group.response(ctx);
                         if let Some(tran) = objects[i].border_transform() {
-                            if resp.hovered() {
+                            if maybe_resp.as_ref().is_some_and(|resp| resp.hovered()) {
                                 BorderRectangle {
                                     transform: tran,
                                     color: Color32::LIGHT_BLUE,
@@ -168,6 +163,9 @@ impl eframe::App for MyApp {
                                 }
                                 .show(ui);
                             }
+                        }
+                        if maybe_resp.is_some_and(|resp| resp.double_clicked()) {
+                            new_world_transform = Some(objects[i].goto_transform());
                         }
                     }
                     if let Some(object) = objects.get_hovered(ui.ctx()) {
