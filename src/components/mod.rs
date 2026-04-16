@@ -7,5 +7,6 @@ mod fmt;
 pub mod selectable_list;
 pub mod tree;
 pub mod file_dialog_native;
+pub mod si_drag;
 
 pub use fmt::EngFmt;

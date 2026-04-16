@@ -1,11 +1,11 @@
 use core::f64;
 
-use egui::{Color32, DragValue, Frame, Id, Shadow, Stroke, Ui};
+use egui::{CollapsingHeader, Color32, DragValue, Frame, Id, Shadow, Stroke, Ui};
 use glam::{DAffine2, DMat2, DVec2, IVec2};
 use itertools::Itertools as _;
 
 use crate::{
-    components::selectable_list::SelectableList,
+    components::{selectable_list::SelectableList, si_drag::si_drag_value},
     connection::{shared_state::SharedState, ScanArea},
     scan_view::{world_delta_transform, BorderRectangle, ScanViewCtx},
     utils::vec_interop::IntoEgui as _,
@@ -23,7 +23,7 @@ impl CourseMotionState {
         Self {
             menu_active: false,
             move_target: DVec2::ZERO,
-            calib_matrix: DMat2::IDENTITY * 1e3,
+            calib_matrix: DMat2::IDENTITY * 1e-6,
             voltages: voltages.clone(),
         }
     }
@@ -51,28 +51,34 @@ impl CourseMotionState {
             .scroll([false, true])
             .open(&mut menu_active)
             .show(&ui.ctx(), |ui| {
+                let mut voltages = *self.voltages.peek();
+                ui.label("Steps:");
                 let mut steps = self.get_steps();
-                ui.heading("Steps:");
                 ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut steps.x));
-                    ui.add(DragValue::new(&mut steps.y));
+                    ui.add_enabled(voltages.x > 0., DragValue::new(&mut steps.x));
+                    ui.add_enabled(voltages.y > 0., DragValue::new(&mut steps.y));
                 });
                 self.write_steps(steps);
-                ui.heading("Course Motor Matrix:");
-                ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut self.calib_matrix.x_axis.x));
-                    ui.add(DragValue::new(&mut self.calib_matrix.y_axis.x));
-                });
-                ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut self.calib_matrix.x_axis.y));
-                    ui.add(DragValue::new(&mut self.calib_matrix.y_axis.y));
-                });
-                ui.heading("Course Motor Amplitudes:");
-                ui.horizontal(|ui| {
-                    let mut voltages = *self.voltages.peek();
-                    ui.add_enabled(false, DragValue::new(&mut voltages.x));
-                    ui.add_enabled(false, DragValue::new(&mut voltages.y));
-                });
+                ui.separator();
+                CollapsingHeader::new("Config")
+                    .default_open(false)
+                    .show_unindented(ui, |ui| {
+                        ui.label("Course Motor Matrix:");
+                        ui.horizontal(|ui| {
+                            ui.add(si_drag_value(&mut self.calib_matrix.x_axis.x));
+                            ui.add(si_drag_value(&mut self.calib_matrix.y_axis.x));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.add(si_drag_value(&mut self.calib_matrix.x_axis.y));
+                            ui.add(si_drag_value(&mut self.calib_matrix.y_axis.y));
+                        });
+
+                        ui.label("Course Motor Amplitudes:");
+                        ui.horizontal(|ui| {
+                            ui.add_enabled(false, DragValue::new(&mut voltages.x));
+                            ui.add_enabled(false, DragValue::new(&mut voltages.y));
+                        });
+                    });
             });
         self.menu_active = menu_active;
     }
