@@ -203,7 +203,7 @@ impl eframe::App for MyApp {
                 if scan_view_resp.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.app_state.object_list.clear_selected();
                 };
-                egui::Window::new("Images")
+                egui::Window::new("Layers")
                     .frame(
                         Frame::window(&ctx.style())
                             .multiply_with_opacity(0.5)
@@ -222,7 +222,7 @@ impl eframe::App for MyApp {
                     });
                 let mut new_top = ui.clip_rect().top();
                 if let Some(conn) = &mut self.active_connection {
-                    new_top = egui::Window::new("Current Scan")
+                    new_top = egui::Window::new("Scan Region")
                         .frame(
                             Frame::window(&ctx.style())
                                 .multiply_with_opacity(0.5)
