@@ -88,6 +88,9 @@ impl GDSImage {
             ui.painter().add(callback);
         }
     }
+    pub fn show_menu(&mut self, ui: &mut Ui){
+        
+    }
 }
 
 fn draw_cell(

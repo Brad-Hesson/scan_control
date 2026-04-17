@@ -99,9 +99,7 @@ impl Object {
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         match self {
-            Object::Gds { path, .. } => {
-                ui.label(format!("Path: {}", path.display()));
-            }
+            Object::Gds { image, .. } => image.show_menu(ui),
             Object::File { image, .. } => image.show_menu(ui),
             Object::ScanImage { image, .. } => image.show_menu(ui, encoder),
             Object::ScanArea(_) => {}
