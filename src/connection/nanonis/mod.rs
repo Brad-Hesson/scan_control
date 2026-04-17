@@ -70,8 +70,12 @@ impl Connection for NanonisConnection {
             );
             object_list.push(SelectableEntry::new(
                 "area",
-                Object::ScanArea(scan_area),
+                Object::ScanArea {
+                    image: scan_area,
+                    hidden: false,
+                },
                 |img| img.list_atoms(),
+                |obj| obj.hidden_mut(),
             ));
             true
         } else {
@@ -137,8 +141,13 @@ impl Connection for NanonisConnection {
                 index,
                 SelectableEntry::new(
                     Uuid::new_v4(),
-                    Object::ScanImage { image: stamp, name },
+                    Object::ScanImage {
+                        image: stamp,
+                        name,
+                        hidden: false,
+                    },
                     |img| img.list_atoms(),
+                    |obj| obj.hidden_mut(),
                 ),
             );
         }

@@ -23,7 +23,16 @@ impl ScanView {
         ui: &mut egui::Ui,
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> Response {
+        let fill = if ui.style().visuals.dark_mode {
+            Color32::BLACK
+        } else {
+            Color32::LIGHT_GRAY
+        };
         egui::Frame::canvas(ui.style())
+            .fill(fill)
+            .inner_margin(0)
+            .corner_radius(0)
+            .outer_margin(0)
             .show(ui, |ui| {
                 let (rect, response) =
                     ui.allocate_at_least(ui.available_size_before_wrap(), egui::Sense::all());

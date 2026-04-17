@@ -36,9 +36,13 @@ pub struct AppState {
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut light_vis = egui::Visuals::light();
+        // light_vis.widgets.noninteractive.fg_stroke.color = Color32::RED;
+        cc.egui_ctx.set_visuals_of(egui::Theme::Light, light_vis);
+
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let image_encoder = ImageEncoder::new(wgpu);
-        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
+        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "icecube"));
         let object_list = SelectableList::new();
         let import_file_dialog = ObjectImportDialog::new();
 
@@ -76,7 +80,12 @@ impl eframe::App for MyApp {
             }
         }
         while let Some(object) = self.import_file_dialog.try_recv_object() {
-            let entry = SelectableEntry::new(uuid::Uuid::new_v4(), object, |img| img.list_atoms());
+            let entry = SelectableEntry::new(
+                uuid::Uuid::new_v4(),
+                object,
+                |img| img.list_atoms(),
+                |obj| obj.hidden_mut(),
+            );
             self.app_state.object_list.push(entry);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
@@ -144,6 +153,9 @@ impl eframe::App for MyApp {
                     let objects = &mut self.app_state.object_list;
                     transform_objects(ui, objects);
                     for i in 0..objects.len() {
+                        if *objects[i].hidden_mut() {
+                            continue;
+                        }
                         objects[i].show(ui);
                         let maybe_resp = objects[i].resp_group.response(ctx);
                         if let Some(tran) = objects[i].border_transform() {
@@ -217,8 +229,16 @@ impl eframe::App for MyApp {
                     .show(ctx, |ui| {
                         let vis = &mut ui.style_mut().visuals.widgets.inactive;
                         vis.weak_bg_fill = vis.weak_bg_fill.gamma_multiply(0.5);
-                        // self.app_state.file_tree.show(ui);
                         self.app_state.object_list.show(ui);
+                    })
+                    .map(|resp| {
+                        resp.response.context_menu(|ui| {
+                            if ui.button("Show all").clicked() {
+                                for obj in &mut self.app_state.object_list.iter_mut() {
+                                    *obj.hidden_mut() = false;
+                                }
+                            }
+                        })
                     });
                 let mut new_top = ui.clip_rect().top();
                 if let Some(conn) = &mut self.active_connection {
