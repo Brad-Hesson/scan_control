@@ -35,7 +35,7 @@ impl ScaleBar {
             CornerRadius::ZERO,
             color,
         )));
-        let text = format!("{:.0}m", EngFmt(10f32.powi(mul - 9)));
+        let text = format!("{:.0}m", EngFmt(10f64.powi(mul - 9)));
         ui.painter().text(
             pos - Vec2::new(0., 5.),
             egui::Align2::RIGHT_BOTTOM,
