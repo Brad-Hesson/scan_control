@@ -4023,6 +4023,7 @@ dependencies = [
  "borrow",
  "bytemuck",
  "crossbeam",
+ "directories",
  "eframe",
  "egui",
  "egui-file-dialog",

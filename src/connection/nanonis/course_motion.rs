@@ -1,4 +1,9 @@
 use core::f64;
+use std::{
+    fs::File,
+    io::{Read, Seek, Write},
+    path::Path,
+};
 
 use egui::{
     epaint::PathStroke, Button, CollapsingHeader, Color32, DragValue, Frame, Id, Shadow, Shape,
@@ -9,6 +14,7 @@ use itertools::Itertools as _;
 use tracing::info;
 
 use crate::{
+    app::CONFIG_DIR,
     components::{selectable_list::SelectableList, si_drag::si_drag_value},
     connection::{
         nanonis::command_channel::CommandChannelSender, shared_state::SharedState, ScanArea,
@@ -29,16 +35,37 @@ pub struct CourseMotionState {
     last_x_move: Option<(DVec2, IVec2)>,
     last_y_move: Option<(DVec2, IVec2)>,
     show_history: bool,
+    cfg_file: File,
 }
 impl CourseMotionState {
     pub fn new(
         voltages: &SharedState<DVec2>,
         move_sender: &CommandChannelSender<(IVec2, u32), ()>,
     ) -> Self {
+        let mut cfg_path = CONFIG_DIR.config_local_dir().to_path_buf();
+        cfg_path.push("course_matrix.bin");
+        let mut cfg_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(cfg_path)
+            .unwrap();
+        let mut buf = Vec::new();
+        cfg_file.read_to_end(&mut buf).unwrap();
+        let calib_matrix = if buf.is_empty() {
+            let calib_matrix = DMat2::IDENTITY * 1e-6;
+            cfg_file
+                .write_all(bytemuck::bytes_of(&calib_matrix))
+                .unwrap();
+            calib_matrix
+        } else {
+            *bytemuck::from_bytes(&buf)
+        };
+
         Self {
             menu_active: false,
             move_target: DVec2::ZERO,
-            calib_matrix: DMat2::IDENTITY * 1e-6,
+            calib_matrix,
             voltages: voltages.clone(),
             move_sender: move_sender.clone(),
             currently_moving: false,
@@ -46,6 +73,7 @@ impl CourseMotionState {
             last_x_move: None,
             last_y_move: None,
             show_history: false,
+            cfg_file,
         }
     }
     pub fn show_menu(&mut self, ui: &mut Ui, object_list: &mut SelectableList<Object>) {
@@ -198,6 +226,12 @@ impl CourseMotionState {
                         });
                     });
             });
+        if menu_active == false && self.menu_active == true {
+            self.cfg_file.seek(std::io::SeekFrom::Start(0)).unwrap();
+            self.cfg_file
+                .write_all(bytemuck::bytes_of(&self.calib_matrix))
+                .unwrap();
+        }
         self.menu_active = menu_active;
     }
     pub fn show_overlay(&mut self, ui: &mut Ui, object_list: &mut SelectableList<Object>) {

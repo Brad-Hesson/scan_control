@@ -1,3 +1,5 @@
+use std::{cell::LazyCell, sync::LazyLock};
+
 use crate::{
     components::{
         file_dialog_native::ObjectImportDialog,
@@ -17,6 +19,12 @@ use itertools::{izip, Itertools};
 use tracing::error;
 
 pub const COLOR_MAP_SIZE: usize = 256;
+
+pub static CONFIG_DIR: LazyLock<directories::ProjectDirs> = LazyLock::new(|| {
+    let base_dir = directories::ProjectDirs::from("", "qsi", "scan_control").unwrap();
+    std::fs::create_dir_all(base_dir.config_local_dir()).unwrap();
+    base_dir
+});
 
 pub struct MyApp {
     app_state: AppState,
