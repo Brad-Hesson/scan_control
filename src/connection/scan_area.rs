@@ -20,6 +20,7 @@ pub struct ScanArea {
     pub tip_pos: DVec2,
     pub stamp: VecDeque<LiveImage>,
     pub stamp_name_base: String,
+    pub course_move_history: Vec<DVec2>,
 }
 impl ScanArea {
     pub fn new(
@@ -40,6 +41,7 @@ impl ScanArea {
             tip_pos,
             stamp: VecDeque::new(),
             stamp_name_base: String::new(),
+            course_move_history: Vec::new(),
         }
     }
     pub fn show(&mut self, ui: &mut Ui) {

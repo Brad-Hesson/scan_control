@@ -38,7 +38,7 @@ impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let image_encoder = ImageEncoder::new(wgpu);
-        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "icecube"));
+        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
         let object_list = SelectableList::new();
         let import_file_dialog = ObjectImportDialog::new();
 
