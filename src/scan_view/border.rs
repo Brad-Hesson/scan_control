@@ -63,7 +63,7 @@ impl BorderRectangle {
         if self.dashed {
             points.push(points[0]);
             ui.painter()
-                .add(dashes_from_line(ctx.rect, &points, stroke, 6., 3.));
+                .add(dashes_from_line(ctx.rect, &points, stroke, 10., 6.));
         } else {
             ui.painter().add(PathShape {
                 points,
