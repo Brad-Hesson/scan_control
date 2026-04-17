@@ -145,13 +145,10 @@ impl FileImage {
                 self.transform_world_points(tf);
             }
         } else {
-            if ui.button("Edit").clicked() {
+            if ui.button("Anchor Transform").clicked() {
                 self.editing = true;
             }
         }
-        ui.label(format!("{:?}", self.transform));
-        ui.label(format!("{:?}", self.world_points));
-        ui.label(format!("{:?}", self.local_points));
     }
     pub fn center(&self) -> glam::DVec2 {
         self.world_points.iter().sum::<glam::DVec2>() / 4.
