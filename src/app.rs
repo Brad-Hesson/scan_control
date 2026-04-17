@@ -1,4 +1,4 @@
-use std::{cell::LazyCell, sync::LazyLock};
+use std::sync::LazyLock;
 
 use crate::{
     components::{
@@ -39,7 +39,6 @@ pub struct MyApp {
 pub struct AppState {
     scan_view: ScanView,
     object_list: SelectableList<Object>,
-    scale_bar: ScaleBar,
 }
 
 impl MyApp {
@@ -58,7 +57,6 @@ impl MyApp {
             app_state: AppState {
                 scan_view: ScanView::new(&image_encoder),
                 object_list,
-                scale_bar: ScaleBar::new(),
             },
             import_file_dialog,
             image_encoder,
@@ -211,7 +209,7 @@ impl eframe::App for MyApp {
                     if let Some(conn) = &mut self.active_connection {
                         conn.show_image_view_overlay(ui, objects);
                     }
-                    self.app_state.scale_bar.show(ui);
+                    ScaleBar.show(ui);
                 });
                 if let Some(tf) = new_world_transform {
                     let tf = DAffine2::from_scale(DVec2 {

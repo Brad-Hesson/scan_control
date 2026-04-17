@@ -2,11 +2,8 @@ use egui::{epaint::RectShape, CornerRadius, Id, Shape, Ui, Vec2};
 
 use crate::{components::EngFmt, scan_view::view::ScanViewCtx};
 
-pub struct ScaleBar {}
+pub struct ScaleBar;
 impl ScaleBar {
-    pub fn new() -> Self {
-        Self {}
-    }
     pub fn show(&self, ui: &mut Ui) {
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
