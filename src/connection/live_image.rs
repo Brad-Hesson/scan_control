@@ -53,9 +53,6 @@ impl LiveImage {
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
-        let ctx = ui
-            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-            .unwrap();
         self.image_view.transform = self.transform;
         self.image_view.norm_type = self.norm_type.combined(self.std_dev);
         let resp = self.image_view.show(ui);
