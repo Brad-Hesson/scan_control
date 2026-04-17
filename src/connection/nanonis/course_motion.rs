@@ -227,12 +227,21 @@ impl CourseMotionState {
                     });
             });
         if menu_active == false && self.menu_active == true {
-            self.cfg_file.seek(std::io::SeekFrom::Start(0)).unwrap();
-            self.cfg_file
-                .write_all(bytemuck::bytes_of(&self.calib_matrix))
-                .unwrap();
+            match self.update_config_file() {
+                Err(e) => {
+                    tracing::error!("error saving config: {}", e)
+                }
+                Ok(_) => {}
+            }
         }
         self.menu_active = menu_active;
+    }
+
+    fn update_config_file(&mut self) -> std::io::Result<()> {
+        self.cfg_file.seek(std::io::SeekFrom::Start(0))?;
+        self.cfg_file
+            .write_all(bytemuck::bytes_of(&self.calib_matrix))?;
+        Ok(())
     }
     pub fn show_overlay(&mut self, ui: &mut Ui, object_list: &mut SelectableList<Object>) {
         let Some(scan_area) = object_list
