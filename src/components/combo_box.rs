@@ -22,12 +22,19 @@ pub fn combo_box<'s, T: ComboBoxType>(
                 .unwrap(),
         )
         .show_ui(ui, |ui| {
-            T::options(ctx)
+            let n_items = T::options(ctx).count();
+            let val_height = ui.spacing().interact_size.y;
+            let gap_height = ui.spacing().item_spacing.y;
+            let height =
+                val_height * n_items as f32 + gap_height * n_items.saturating_sub(1) as f32;
+            ui.set_height(height);
+            let clicked = T::options(ctx)
                 .map(|opt| {
                     let text = opt.opt_atoms(ctx).into();
                     ui.selectable_value(data, opt, text)
                 })
-                .any(|resp| resp.clicked())
+                .any(|resp| resp.clicked());
+            clicked
         })
         .inner
         .is_some_and(|clicked| clicked)

@@ -149,6 +149,7 @@ impl Connection for NanonisConnection {
         object_list: &mut SelectableList<view_object::Object>,
         encoder: &ImageEncoder,
     ) {
+        ui.set_max_width(140.);
         let Some(scan_area) = object_list
             .iter_mut()
             .find_map(|entry| entry.as_scan_area_mut())
@@ -156,6 +157,7 @@ impl Connection for NanonisConnection {
             return;
         };
         scan_area.show_menu(ui, encoder);
+        ui.separator();
         self.course_menu.show_menu(ui, object_list);
     }
     fn show_image_view_overlay(
