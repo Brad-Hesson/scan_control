@@ -1,11 +1,14 @@
-use std::path::PathBuf;
+use std::{os::unix::ffi::OsStrExt, path::PathBuf};
 
 use egui::{Atoms, Image, IntoAtoms, Ui};
 use glam::{DAffine2, DVec2};
+use redb::{ReadableTable, TableDefinition};
 use tracing::error;
+use uuid::Uuid;
 
 use crate::{
     connection::{LiveImage, ScanArea},
+    project::Persistant,
     scan_view::{FileImage, GDSImage, ImageEncoder},
 };
 
@@ -66,6 +69,14 @@ impl Object {
                 );
                 None
             }
+        }
+    }
+    pub fn uuid(&self) -> Uuid {
+        match self {
+            Object::Gds { image, .. } => image.uuid(),
+            Object::File { image, .. } => image.uuid(),
+            Object::ScanImage { image, .. } => image.uuid(),
+            Object::ScanArea { image, .. } => image.uuid(),
         }
     }
     pub fn list_atoms<'a>(&'a self) -> Atoms<'a> {
@@ -192,5 +203,138 @@ impl Object {
                 DAffine2::from_scale_angle_translation(DVec2::splat(scale), 0., center)
             }
         }
+    }
+}
+
+const OBJECT_TYPE_TABLE: TableDefinition<Uuid, &'static str> =
+    TableDefinition::new("object_type_table_v1");
+const OBJECT_DATA_TABLE: TableDefinition<Uuid, (&[u8], bool)> =
+    TableDefinition::new("object_data_table_v1");
+impl Persistant for Object {
+    fn db_update<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let uuid = self.uuid();
+        let mut data_table = txn.open_table(OBJECT_DATA_TABLE)?;
+        let mut data = data_table
+            .get_mut(uuid)?
+            .ok_or("uuid in object_type_table_v1 did not exist")?;
+        match self {
+            Object::Gds {
+                image,
+                path,
+                hidden,
+            } => {
+                let (db_name, db_hidden) = data.value();
+                if db_name != path.as_os_str().as_bytes() || db_hidden != *hidden {
+                    data.insert((path.as_os_str().as_bytes(), *hidden))?;
+                }
+                image.db_update(txn)?;
+            }
+            Object::File {
+                image,
+                path,
+                hidden,
+            } => {
+                let (db_name, db_hidden) = data.value();
+                if db_name != path.as_os_str().as_bytes() || db_hidden != *hidden {
+                    data.insert((path.as_os_str().as_bytes(), *hidden))?;
+                }
+                image.db_update(txn)?;
+            }
+            Object::ScanImage {
+                image,
+                name,
+                hidden,
+            } => {
+                let (db_name, db_hidden) = data.value();
+                if db_name != name.as_bytes() || db_hidden != *hidden {
+                    data.insert((name.as_bytes(), *hidden))?;
+                }
+                image.db_update(txn)?;
+            }
+            Object::ScanArea { image, hidden } => {
+                let (_, db_hidden) = data.value();
+                if db_hidden != *hidden {
+                    data.insert((&[][..], *hidden))?;
+                }
+                image.db_update(txn)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn db_remove<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut type_table = txn.open_table(OBJECT_TYPE_TABLE)?;
+        let mut data_table = txn.open_table(OBJECT_DATA_TABLE)?;
+        {
+            let type_name = type_table.get(id)?.ok_or("id should exist")?;
+            match type_name.value() {
+                "gds" => {
+                    GDSImage::db_remove(id, txn)?;
+                }
+                "file" => {
+                    FileImage::db_remove(id, txn)?;
+                }
+                "scanimage" => {
+                    LiveImage::db_remove(id, txn)?;
+                }
+                "scanarea" => {
+                    ScanArea::db_remove(id, txn)?;
+                }
+                invalid => return Err(format!("invalid type name {invalid}").into()),
+            }
+        }
+        type_table.remove(id)?;
+        data_table.remove(id)?;
+        Ok(())
+    }
+
+    fn db_insert<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let uuid = self.uuid();
+        let mut data_table = txn.open_table(OBJECT_DATA_TABLE)?;
+        let mut type_table = txn.open_table(OBJECT_TYPE_TABLE)?;
+        match self {
+            Object::Gds {
+                image,
+                path,
+                hidden,
+            } => {
+                data_table.insert(uuid, (path.as_os_str().as_bytes(), *hidden))?;
+                image.db_insert(txn)?;
+                type_table.insert(uuid, "gds")?;
+            }
+            Object::File {
+                image,
+                path,
+                hidden,
+            } => {
+                data_table.insert(uuid, (path.as_os_str().as_bytes(), *hidden))?;
+                image.db_insert(txn)?;
+                type_table.insert(uuid, "file")?;
+            }
+            Object::ScanImage {
+                image,
+                name,
+                hidden,
+            } => {
+                data_table.insert(uuid, (name.as_bytes(), *hidden))?;
+                image.db_insert(txn)?;
+                type_table.insert(uuid, "scanimage")?;
+            }
+            Object::ScanArea { image, hidden } => {
+                data_table.insert(uuid, (&[][..], *hidden))?;
+                image.db_update(txn)?;
+                type_table.insert(uuid, "scanarea")?;
+            }
+        }
+        Ok(())
     }
 }

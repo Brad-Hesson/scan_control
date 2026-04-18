@@ -5,10 +5,10 @@ use egui::{Color32, Id, Response, Sense, Ui};
 use glam::{DAffine2, DMat3, DVec2};
 use image_compute::file_image::FileImageBuffers;
 use itertools::Itertools;
+use uuid::Uuid;
 
 use crate::{
-    scan_view::{callbacks::FileImageCallback, view::ScanViewCtx, ImageEncoder},
-    utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection},
+    project::Persistant, scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx}, utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection}
 };
 
 pub struct FileImage {
@@ -18,6 +18,7 @@ pub struct FileImage {
     pub world_points: [glam::DVec2; 4],
     id: egui::Id,
     editing: bool,
+    uuid: Uuid,
 }
 impl FileImage {
     pub fn new(
@@ -50,7 +51,11 @@ impl FileImage {
             local_points,
             world_points,
             editing: false,
+            uuid: Uuid::new_v4(),
         }
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
     }
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui
@@ -194,4 +199,19 @@ fn drag_point(
     ui.painter().circle_filled(center, radius, color);
 
     resp
+}
+
+
+impl Persistant for FileImage{
+    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 }

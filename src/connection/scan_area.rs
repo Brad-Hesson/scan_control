@@ -2,11 +2,10 @@ use std::collections::VecDeque;
 
 use egui::{epaint::PathStroke, Color32, Id, Ui};
 use glam::{DAffine2, DVec2};
+use uuid::Uuid;
 
 use crate::{
-    connection::{nanonis::ScanStatus, LiveImage},
-    scan_view::{border::dashes_from_line, BorderRectangle, ImageEncoder, ScanViewCtx},
-    utils::vec_interop::{IntoEgui, Projection},
+    connection::{LiveImage, nanonis::ScanStatus}, project::Persistant, scan_view::{BorderRectangle, ImageEncoder, ScanViewCtx, border::dashes_from_line}, utils::vec_interop::{IntoEgui, Projection}
 };
 
 pub struct ScanArea {
@@ -43,6 +42,9 @@ impl ScanArea {
             stamp_name_base: String::new(),
             course_move_history: Vec::new(),
         }
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.live_image.uuid()
     }
     pub fn show(&mut self, ui: &mut Ui) {
         self.show_image(ui);
@@ -152,5 +154,20 @@ impl ScanArea {
         {
             self.channel_selected = selection.map(|s| s.to_string());
         }
+    }
+}
+
+
+impl Persistant for ScanArea{
+    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
     }
 }

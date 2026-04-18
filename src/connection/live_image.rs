@@ -9,13 +9,10 @@ use uuid::Uuid;
 
 use crate::{
     components::{
-        combo_box::{combo_box, ComboBoxType},
-        EngFmt,
-    },
-    scan_view::{
-        static_image::NormType, BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage,
-    },
-    utils::vec_interop::IntoEgui,
+        EngFmt, combo_box::{ComboBoxType, combo_box}
+    }, project::Persistant, scan_view::{
+        BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage, static_image::NormType
+    }, utils::vec_interop::IntoEgui
 };
 
 pub struct LiveImage {
@@ -198,5 +195,19 @@ impl Default for FrameData {
             size: [2, 2],
             data: Arc::new(vec![f32::NAN; 4].into_boxed_slice()),
         }
+    }
+}
+
+impl Persistant for LiveImage{
+    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
     }
 }

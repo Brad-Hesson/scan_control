@@ -1,5 +1,5 @@
 use core::f64;
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, fmt::Debug, path::Path};
 
 use eframe::egui_wgpu;
 use egui::{Color32, Id, Ui};
@@ -7,13 +7,16 @@ use gdsr::{Cell, Element, Library};
 use glam::{DAffine2, Vec2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
+use uuid::Uuid;
 
 use crate::{
+    project::Persistant,
     scan_view::{callbacks::GDSImageCallback, view::ScanViewCtx, ImageEncoder},
     utils::vec_interop::Projection,
 };
 
 pub struct GDSImage {
+    uuid: Uuid,
     pub transform: DAffine2,
     pub scale: f64,
     buffers: BTreeMap<u16, GDSImageBuffers>,
@@ -43,7 +46,7 @@ impl GDSImage {
             },
         );
         let center = (max + min) / 2.;
-        for vert in polys.values_mut().flatten().flatten(){
+        for vert in polys.values_mut().flatten().flatten() {
             *vert -= center;
         }
         let scale = min.distance(max) as f64 / 2f64.sqrt();
@@ -70,7 +73,11 @@ impl GDSImage {
             buffers,
             colors,
             scale,
+            uuid: Uuid::new_v4(),
         }
+    }
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
     }
     pub fn show(&self, ui: &mut Ui) {
         let ctx = ui
@@ -88,9 +95,7 @@ impl GDSImage {
             ui.painter().add(callback);
         }
     }
-    pub fn show_menu(&mut self, ui: &mut Ui){
-        
-    }
+    pub fn show_menu(&mut self, ui: &mut Ui) {}
 }
 
 fn draw_cell(
@@ -182,3 +187,37 @@ const COLORS: &[Color32] = &[
     Color32::from_rgb(0x80, 0x86, 0xff),
     Color32::from_rgb(0x80, 0xa8, 0xff),
 ];
+
+impl Persistant for GDSImage {
+    fn db_update<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_remove<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn db_insert<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+}
+
+impl Debug for GDSImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GDSImage")
+            .field("uuid", &self.uuid)
+            .field("transform", &self.transform)
+            .field("scale", &self.scale)
+            .field("colors", &self.colors)
+            .finish()
+    }
+}

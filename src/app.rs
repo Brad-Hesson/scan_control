@@ -1,11 +1,16 @@
-use std::sync::LazyLock;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    sync::LazyLock,
+};
 
 use crate::{
     components::{
-        file_dialog_native::ObjectImportDialog,
+        file_dialog_native::{ObjectImportDialog, ProjectOpenDialog, ProjectSaveDialog},
         selectable_list::{SelectableEntry, SelectableList},
     },
     connection::{nanonis::NanonisConnection, Connection},
+    project::{Persistant, ProjectDb},
     scan_view::{world_delta_transform, BorderRectangle, ImageEncoder, ScaleBar, ScanView},
     undo_queue::{StateModify, UndoQueue},
     view_object::Object,
@@ -16,7 +21,9 @@ use egui::{
 };
 use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools};
+use redb::{ReadableTable, TableDefinition, WriteTransaction};
 use tracing::error;
+use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
 
@@ -32,8 +39,11 @@ pub struct MyApp {
     undo_queue: UndoQueue<AppState>,
     current_theme: ThemePreference,
     import_file_dialog: ObjectImportDialog,
+    project_save_dialog: ProjectSaveDialog,
+    project_open_dialog: ProjectOpenDialog,
     pending_connections: Vec<Box<dyn Connection>>,
     active_connection: Option<Box<dyn Connection>>,
+    project: ProjectDb,
 }
 
 pub struct AppState {
@@ -43,15 +53,14 @@ pub struct AppState {
 
 impl MyApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut light_vis = egui::Visuals::light();
-        // light_vis.widgets.noninteractive.fg_stroke.color = Color32::RED;
-        cc.egui_ctx.set_visuals_of(egui::Theme::Light, light_vis);
-
+        let project = ProjectDb::new_temp().unwrap();
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let image_encoder = ImageEncoder::new(wgpu);
         let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "icecube"));
         let object_list = SelectableList::new();
         let import_file_dialog = ObjectImportDialog::new();
+        let project_save_dialog = ProjectSaveDialog::new();
+        let project_open_dialog = ProjectOpenDialog::new();
 
         Self {
             app_state: AppState {
@@ -64,6 +73,9 @@ impl MyApp {
             current_theme: cc.egui_ctx.theme().into(),
             pending_connections: vec![nanonis_connection],
             active_connection: None,
+            project,
+            project_save_dialog,
+            project_open_dialog,
         }
     }
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
@@ -93,6 +105,20 @@ impl eframe::App for MyApp {
                 |obj| obj.hidden_mut(),
             );
             self.app_state.object_list.push(entry);
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, egui::Key::S)) {
+            if self.project.is_temp() {
+                self.project_save_dialog.select_path();
+            }
+        }
+        if let Some(path) = self.project_save_dialog.try_recv_path() {
+            self.project.save_as(path).unwrap();
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, egui::Key::O)) {
+            self.project_open_dialog.pick_file();
+        }
+        if let Some(project) = self.project_open_dialog.try_recv_project() {
+            self.project = project;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -316,6 +342,12 @@ fn transform_objects(ui: &mut Ui, object_list: &mut SelectableList<Object>) {
 
 fn file_menu_button(ui: &mut Ui, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
+        if ui.button("Open").clicked() {
+            app.project_open_dialog.pick_file();
+        }
+        if ui.button("Save As").clicked() {
+            app.project_save_dialog.select_path();
+        }
         if ui.add(Button::new("Import Files")).clicked() {
             app.import_file_dialog.pick_files(app.image_encoder.clone());
         }
@@ -377,5 +409,42 @@ pub trait OkTraceExt<T> {
 impl<T, E: std::fmt::Display> OkTraceExt<T> for std::result::Result<T, E> {
     fn ok_trace(self) -> Option<T> {
         self.inspect_err(|e| error!("{e:#}")).ok()
+    }
+}
+
+const OBJECT_LIST_TABLE: TableDefinition<Uuid, u64> = TableDefinition::new("object_list_table_v1");
+impl Persistant for SelectableList<Object> {
+    fn db_update<'t>(&self, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>> {
+        let desired: HashMap<Uuid, u64> = self
+            .iter()
+            .enumerate()
+            .map(|(i, item)| (item.uuid(), i as u64))
+            .collect();
+        let mut table = txn.open_table(OBJECT_LIST_TABLE)?;
+        for entry in table.extract_if(|id, _| !desired.contains_key(&id))? {
+            let (uuid, _) = entry?;
+            let uuid = uuid.value();
+            Object::db_remove(uuid, txn)?;
+        }
+        for (id, index) in desired {
+            if let Some(mut index_mut) = table.get_mut(id)? {
+                if index_mut.value() != index {
+                    index_mut.insert(index)?;
+                }
+                self[index as usize].db_update(txn)?;
+                continue;
+            }
+            table.insert(id, index)?;
+            self[index as usize].db_insert(txn)?;
+        }
+        Ok(())
+    }
+
+    fn db_remove<'t>(id: Uuid, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>> {
+        todo!()
+    }
+
+    fn db_insert<'t>(&self, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>> {
+        todo!()
     }
 }

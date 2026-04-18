@@ -41,6 +41,8 @@ gdsr = "0.0.1-alpha.3"
 crossbeam = "0.8.4"
 rfd = "0.17.2"
 directories = "6.0.0"
+redb = { version = "4.0.0", features = ["uuid"] }
+tempfile = "3.27.0"
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
