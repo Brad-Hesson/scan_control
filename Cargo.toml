@@ -43,6 +43,7 @@ rfd = "0.17.2"
 directories = "6.0.0"
 redb = { version = "4.0.0", features = ["uuid"] }
 tempfile = "3.27.0"
+num_enum.workspace = true
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
@@ -59,6 +60,7 @@ members = [
 ]
 
 [workspace.dependencies]
+num_enum = "0.7.6"
 image = "0.25.10"
 bytemuck = "1.20"
 itertools = "0.14"

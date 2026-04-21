@@ -17,7 +17,7 @@ pub struct FastStatusWorker {
     ctx: egui::Context,
     image_transform: SharedState<DAffine2>,
     tip_pos: SharedState<DVec2>,
-    init: Arc<AtomicBool>,
+    init: Arc<AtomicBool>
 }
 impl FastStatusWorker {
     pub fn new(
@@ -63,10 +63,12 @@ impl Worker for FastStatusWorker {
         if update {
             self.ctx.request_repaint();
         }
-        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
-    fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+        self.update_image_transform(conn)?;
+        self.update_tip_pos(conn)?;
+        self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
 

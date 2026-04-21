@@ -27,6 +27,7 @@ pub struct ScanViewImage {
 }
 impl ScanViewImage {
     pub fn new(
+        uuid: Uuid,
         image_encoder: &ImageEncoder,
         size: [u32; 2],
         transform: DAffine2,
@@ -39,7 +40,7 @@ impl ScanViewImage {
             size,
         );
         Self {
-            uuid: Uuid::new_v4(),
+            uuid,
             transform,
             image_buffers,
             norm_type,
@@ -48,7 +49,7 @@ impl ScanViewImage {
         }
     }
     pub fn resized(&self, image_encoder: &ImageEncoder, size: [u32; 2]) -> Self {
-        Self::new(image_encoder, size, self.transform, self.norm_type)
+        Self::new(self.uuid, image_encoder, size, self.transform, self.norm_type)
     }
     pub fn uuid(&self) -> Uuid {
         self.uuid

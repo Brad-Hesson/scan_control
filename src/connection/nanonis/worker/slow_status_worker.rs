@@ -168,6 +168,10 @@ impl Worker for SlowStatusWorker {
     fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         self.update_signal_names(conn)?;
         self.update_area_transform(conn)?;
+        self.update_scan_status(conn)?;
+        self.update_channel_opts(conn)?;
+        self.update_base_name(conn)?;
+        self.update_course_voltages(conn)?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }

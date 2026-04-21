@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     sync::LazyLock,
 };
@@ -22,7 +22,7 @@ use egui::{
 use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools};
 use redb::{ReadableTable, TableDefinition, WriteTransaction};
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 
 pub const COLOR_MAP_SIZE: usize = 256;
@@ -107,18 +107,35 @@ impl eframe::App for MyApp {
             self.app_state.object_list.push(entry);
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, egui::Key::S)) {
+            let txn = self.project.db().begin_write().unwrap();
+            self.app_state.object_list.db_update(&txn).unwrap();
+            txn.commit().unwrap();
+
             if self.project.is_temp() {
                 self.project_save_dialog.select_path();
             }
         }
         if let Some(path) = self.project_save_dialog.try_recv_path() {
             self.project.save_as(path).unwrap();
+            let file_name = self.project.current_path().file_name().unwrap().display();
+            let new_title = format!("Scan Control - {file_name}");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(new_title));
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, egui::Key::O)) {
             self.project_open_dialog.pick_file();
         }
         if let Some(project) = self.project_open_dialog.try_recv_project() {
             self.project = project;
+            let txn = self.project.db().begin_write().unwrap();
+            self.app_state.object_list =
+                SelectableList::<Object>::db_read(Uuid::new_v4(), &txn, &self.image_encoder)
+                    .unwrap();
+            if let Some(conn) = self.active_connection.take() {
+                self.pending_connections.push(conn);
+            }
+            let file_name = self.project.current_path().file_name().unwrap().display();
+            let new_title = format!("Scan Control - {file_name}");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(new_title));
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F11)) {
             let is_fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -303,7 +320,9 @@ impl eframe::App for MyApp {
                     .iter_selected_indexes()
                     .collect_vec();
                 for i in selected {
-                    if self.app_state.object_list[i].as_scan_area().is_some() {
+                    if self.app_state.object_list[i].as_scan_area().is_some()
+                        && self.active_connection.is_some()
+                    {
                         continue;
                     }
                     let name = self.app_state.object_list[i].name();
@@ -428,12 +447,14 @@ impl Persistant for SelectableList<Object> {
         }
         for (id, index) in desired {
             if let Some(mut index_mut) = table.get_mut(id)? {
+                info!("{id} exists");
                 if index_mut.value() != index {
                     index_mut.insert(index)?;
                 }
                 self[index as usize].db_update(txn)?;
                 continue;
             }
+            info!("{id} doesnt exist, inserting");
             table.insert(id, index)?;
             self[index as usize].db_insert(txn)?;
         }
@@ -446,5 +467,31 @@ impl Persistant for SelectableList<Object> {
 
     fn db_insert<'t>(&self, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>> {
         todo!()
+    }
+
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn Error>> {
+        let table = txn.open_table(OBJECT_LIST_TABLE)?;
+        let mut ids = BTreeMap::new();
+        for entry in table.iter()? {
+            let (id, ind) = entry?;
+            ids.insert(ind.value(), id.value());
+        }
+        dbg!(&ids);
+        let mut object_list = SelectableList::new();
+        for id in ids.values().copied() {
+            let object = Object::db_read(id, txn, encoder)?;
+            let entry = SelectableEntry::new(
+                uuid::Uuid::new_v4(),
+                object,
+                |img| img.list_atoms(),
+                |obj| obj.hidden_mut(),
+            );
+            object_list.push(entry);
+        }
+        Ok(object_list)
     }
 }

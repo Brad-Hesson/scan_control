@@ -217,12 +217,15 @@ impl ImageComputeBuffers {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, num_enum::TryFromPrimitive, num_enum::IntoPrimitive,
+)]
+#[repr(u8)]
 pub enum FitType {
-    MeanSubtract,
-    PlaneFitSubtract,
-    LineMeanSubtract,
-    LineFitSubtract,
+    MeanSubtract = 0,
+    PlaneFitSubtract = 1,
+    LineMeanSubtract = 2,
+    LineFitSubtract = 3,
 }
 impl FitType {
     fn download_size(&self, size: [u32; 2]) -> usize {

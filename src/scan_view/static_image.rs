@@ -7,9 +7,15 @@ use image_compute::image_compute::{FitData, FitType, NormalizationType};
 use itertools::izip;
 use nanonis_tcp::LineDir;
 use tracing::warn;
+use uuid::Uuid;
 
 use crate::{
-    components::{EngFmt, combo_box::{ComboBoxType, combo_box}}, connection::backing::BufferState, scan_view::{ImageEncoder, ScanViewImage}
+    components::{
+        combo_box::{combo_box, ComboBoxType},
+        EngFmt,
+    },
+    connection::backing::BufferState,
+    scan_view::{ImageEncoder, ScanViewImage},
 };
 
 pub struct StaticImage {
@@ -31,6 +37,7 @@ impl StaticImage {
         buffers: BufferState,
     ) -> Self {
         let image_data = ScanViewImage::new(
+            Uuid::new_v4(),
             encoder,
             [buffers.size[1] as u32, buffers.size[0] as u32],
             transform,
@@ -155,10 +162,13 @@ impl ComboBoxType for FitType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(
+    Debug, PartialEq, Eq, Clone, Copy, num_enum::TryFromPrimitive, num_enum::IntoPrimitive,
+)]
+#[repr(u8)]
 pub enum NormType {
-    FullScale,
-    StdDev,
+    FullScale = 0,
+    StdDev = 1,
 }
 impl NormType {
     pub fn combined(&self, std_dev: f32) -> NormalizationType {

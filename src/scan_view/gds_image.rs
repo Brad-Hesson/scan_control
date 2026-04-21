@@ -4,9 +4,10 @@ use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use eframe::egui_wgpu;
 use egui::{Color32, Id, Ui};
 use gdsr::{Cell, Element, Library};
-use glam::{DAffine2, Vec2};
+use glam::{DAffine2, DVec2, Vec2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
+use redb::{ReadableTable, TableDefinition};
 use uuid::Uuid;
 
 use crate::{
@@ -21,10 +22,15 @@ pub struct GDSImage {
     pub scale: f64,
     buffers: BTreeMap<u16, GDSImageBuffers>,
     colors: BTreeMap<u16, Color32>,
+    polys: BTreeMap<u16, Vec<Vec<Vec2>>>,
 }
 
 impl GDSImage {
-    pub fn new(encoder: &ImageEncoder, path: impl AsRef<Path>, transform: DAffine2) -> Self {
+    pub fn new_from_file(
+        encoder: &ImageEncoder,
+        path: impl AsRef<Path>,
+        transform: DAffine2,
+    ) -> Self {
         let gds = gdsr::Library::read_file(path, None).unwrap();
         let mut polys = BTreeMap::new();
         for cell in gds.cells().values() {
@@ -49,6 +55,29 @@ impl GDSImage {
         for vert in polys.values_mut().flatten().flatten() {
             *vert -= center;
         }
+        Self::new_from_data(Uuid::new_v4(), encoder, polys, transform)
+    }
+    pub fn new_from_data(
+        uuid: Uuid,
+        encoder: &ImageEncoder,
+        polys: BTreeMap<u16, Vec<Vec<Vec2>>>,
+        transform: DAffine2,
+    ) -> Self {
+        let (min, max) = polys.values().flatten().flatten().fold(
+            (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
+            |(min, max), v| {
+                (
+                    Vec2 {
+                        x: v.x.min(min.x),
+                        y: v.y.min(min.y),
+                    },
+                    Vec2 {
+                        x: v.x.max(max.x),
+                        y: v.y.max(max.y),
+                    },
+                )
+            },
+        );
         let scale = min.distance(max) as f64 / 2f64.sqrt();
         let colors = polys
             .keys()
@@ -60,10 +89,10 @@ impl GDSImage {
             })
             .collect();
         let buffers = polys
-            .into_iter()
+            .iter()
             .map(|(layer, polys)| {
                 (
-                    layer,
+                    *layer,
                     GDSImageBuffers::new(&encoder.wgpu_state.device, polys),
                 )
             })
@@ -73,7 +102,8 @@ impl GDSImage {
             buffers,
             colors,
             scale,
-            uuid: Uuid::new_v4(),
+            uuid,
+            polys,
         }
     }
     pub fn uuid(&self) -> Uuid {
@@ -188,11 +218,25 @@ const COLORS: &[Color32] = &[
     Color32::from_rgb(0x80, 0xa8, 0xff),
 ];
 
+const TRANSFORM_TABLE: TableDefinition<Uuid, [f64; 6]> =
+    TableDefinition::new("gds_transform_table_v1");
+const LAYER_TABLE: TableDefinition<Uuid, Vec<u16>> = TableDefinition::new("gds_layer_table_v1");
+const DATA_TABLE: TableDefinition<(Uuid, u16), Vec<Vec<[f32; 2]>>> =
+    TableDefinition::new("gds_data_table_v1");
+
 impl Persistant for GDSImage {
     fn db_update<'t>(
         &self,
         txn: &'t redb::WriteTransaction,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let mut tran_data = tran_table.get_mut(id)?.expect("");
+        if tran_data.value() != self.transform.to_cols_array() {
+            tran_data.insert(self.transform.to_cols_array())?;
+        }
+
         Ok(())
     }
 
@@ -200,6 +244,15 @@ impl Persistant for GDSImage {
         id: Uuid,
         txn: &'t redb::WriteTransaction,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.remove(id)?;
+        let mut layer_table = txn.open_table(LAYER_TABLE)?;
+        let layers = layer_table.get(id)?.unwrap().value();
+        layer_table.remove(id)?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        for layer in layers {
+            data_table.remove((id, layer))?;
+        }
         Ok(())
     }
 
@@ -207,17 +260,51 @@ impl Persistant for GDSImage {
         &self,
         txn: &'t redb::WriteTransaction,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.insert(id, self.transform.to_cols_array())?;
+        let mut layer_table = txn.open_table(LAYER_TABLE)?;
+        layer_table.insert(id, &self.buffers.keys().copied().collect())?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        for (layer, data) in self.polys.iter() {
+            let data = data
+                .iter()
+                .map(|poly| poly.iter().map(|vert| vert.to_array()).collect())
+                .collect();
+            data_table.insert((id, *layer), &data)?;
+        }
+
         Ok(())
     }
-}
 
-impl Debug for GDSImage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GDSImage")
-            .field("uuid", &self.uuid)
-            .field("transform", &self.transform)
-            .field("scale", &self.scale)
-            .field("colors", &self.colors)
-            .finish()
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let tran_data = tran_table.get(id)?.unwrap().value();
+        let layer_table = txn.open_table(LAYER_TABLE)?;
+        let layer_data = layer_table.get(id)?.unwrap().value();
+        let data_table = txn.open_table(DATA_TABLE)?;
+        let mut polys = BTreeMap::new();
+        for layer in layer_data {
+            let data = data_table.get((id, layer))?.unwrap().value();
+            let data = data
+                .into_iter()
+                .map(|poly| {
+                    poly.into_iter()
+                        .map(|vert| Vec2::from_array(vert))
+                        .collect_vec()
+                })
+                .collect_vec();
+            polys.insert(layer, data);
+        }
+        Ok(Self::new_from_data(
+            id,
+            encoder,
+            polys,
+            DAffine2::from_cols_array(&tran_data),
+        ))
     }
 }

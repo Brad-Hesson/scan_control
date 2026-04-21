@@ -1,7 +1,14 @@
-use std::{env::temp_dir, error::Error, path::PathBuf};
+use std::{
+    env::temp_dir,
+    error::Error,
+    path::{Path, PathBuf},
+};
 
+use glam::DAffine2;
 use redb::{backends::InMemoryBackend, Database, WriteTransaction};
 use uuid::Uuid;
+
+use crate::scan_view::ImageEncoder;
 
 pub struct ProjectDb {
     path: PathBuf,
@@ -39,6 +46,9 @@ impl ProjectDb {
             is_temp: false,
         })
     }
+    pub fn current_path(&self) -> &Path {
+        &self.path
+    }
     pub fn db(&self) -> &Database {
         &self.db
     }
@@ -49,8 +59,13 @@ impl ProjectDb {
     }
 }
 
-pub trait Persistant {
+pub trait Persistant: Sized {
     fn db_update<'t>(&self, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>>;
     fn db_remove<'t>(id: Uuid, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>>;
     fn db_insert<'t>(&self, txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>>;
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn Error>>;
 }

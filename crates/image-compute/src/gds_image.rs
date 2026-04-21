@@ -24,10 +24,10 @@ pub struct GDSImageBuffers {
     num_indices: u32,
 }
 impl GDSImageBuffers {
-    pub fn new(device: &Device, polys: Vec<Vec<glam::Vec2>>) -> Self {
+    pub fn new(device: &Device, polys: &Vec<Vec<glam::Vec2>>) -> Self {
         let mut vert_buf_len = 0;
         let mut index_buf_len = 0;
-        for poly in &polys {
+        for poly in polys {
             vert_buf_len += poly.len();
             index_buf_len += poly.len() + 2; // one for closing vert, one for separator
         }

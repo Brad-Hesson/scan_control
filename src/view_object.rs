@@ -1,4 +1,4 @@
-use std::{os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use egui::{Atoms, Image, IntoAtoms, Ui};
 use glam::{DAffine2, DVec2};
@@ -38,7 +38,7 @@ impl Object {
     pub fn import(path: PathBuf, encoder: &ImageEncoder) -> Option<Self> {
         match path.extension().and_then(|os| os.to_str()) {
             Some("gds") | Some("GDS") => {
-                let image = GDSImage::new(encoder, &path, DAffine2::IDENTITY);
+                let image = GDSImage::new_from_file(encoder, &path, DAffine2::IDENTITY);
                 Some(Self::Gds {
                     image,
                     path,
@@ -46,12 +46,7 @@ impl Object {
                 })
             }
             Some("png") | Some("jpeg") | Some("PNG") | Some("JPEG") => {
-                let image = FileImage::new(
-                    uuid::Uuid::new_v4(),
-                    encoder,
-                    &path,
-                    DAffine2::IDENTITY.into(),
-                );
+                let image = FileImage::new(encoder, &path, DAffine2::IDENTITY.into());
                 Some(Self::File {
                     image,
                     path,
@@ -146,7 +141,7 @@ impl Object {
             Object::Gds { image, .. } => image.show_menu(ui),
             Object::File { image, .. } => image.show_menu(ui),
             Object::ScanImage { image, .. } => image.show_menu(ui, encoder),
-            Object::ScanArea { .. } => {}
+            Object::ScanArea { image, .. } => image.show_menu(ui, encoder),
         }
     }
     pub fn border_transform(&self) -> Option<DAffine2> {
@@ -331,10 +326,58 @@ impl Persistant for Object {
             }
             Object::ScanArea { image, hidden } => {
                 data_table.insert(uuid, (&[][..], *hidden))?;
-                image.db_update(txn)?;
+                image.db_insert(txn)?;
                 type_table.insert(uuid, "scanarea")?;
             }
         }
         Ok(())
+    }
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let data_table = txn.open_table(OBJECT_DATA_TABLE)?;
+        let type_table = txn.open_table(OBJECT_TYPE_TABLE)?;
+        let type_name = type_table.get(id)?.ok_or("id should exist")?;
+        let data = data_table.get(id)?.ok_or("id should exist")?;
+        match type_name.value() {
+            "gds" => {
+                let image = GDSImage::db_read(id, txn, encoder)?;
+                let (name, hidden) = data.value();
+                let os_str = OsStr::from_bytes(name);
+                Ok(Self::Gds {
+                    image,
+                    path: PathBuf::from(os_str),
+                    hidden,
+                })
+            }
+            "file" => {
+                let image = FileImage::db_read(id, txn, encoder)?;
+                let (name, hidden) = data.value();
+                let os_str = OsStr::from_bytes(name);
+                Ok(Self::File {
+                    image,
+                    path: PathBuf::from(os_str),
+                    hidden,
+                })
+            }
+            "scanimage" => {
+                let image = LiveImage::db_read(id, txn, encoder)?;
+                let (name, hidden) = data.value();
+                let name = unsafe { str::from_utf8_unchecked(name) }.to_string();
+                Ok(Self::ScanImage {
+                    image,
+                    name,
+                    hidden,
+                })
+            }
+            "scanarea" => {
+                let image = ScanArea::db_read(id, txn, encoder)?;
+                let (_, hidden) = data.value();
+                Ok(Self::ScanArea { image, hidden })
+            }
+            invalid => return Err(format!("invalid type name {invalid}").into()),
+        }
     }
 }

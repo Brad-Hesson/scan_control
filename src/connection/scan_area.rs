@@ -2,42 +2,41 @@ use std::collections::VecDeque;
 
 use egui::{epaint::PathStroke, Color32, Id, Ui};
 use glam::{DAffine2, DVec2};
+use redb::{ReadableTable as _, TableDefinition};
 use uuid::Uuid;
 
 use crate::{
-    connection::{LiveImage, nanonis::ScanStatus}, project::Persistant, scan_view::{BorderRectangle, ImageEncoder, ScanViewCtx, border::dashes_from_line}, utils::vec_interop::{IntoEgui, Projection}
+    connection::{nanonis::ScanStatus, LiveImage},
+    project::Persistant,
+    scan_view::{border::dashes_from_line, BorderRectangle, ImageEncoder, ScanViewCtx},
+    utils::vec_interop::{IntoEgui, Projection},
 };
 
 pub struct ScanArea {
     pub world_transform: DAffine2,
     pub area_size: DVec2,
-    pub image_transform: DAffine2,
+    pub image_transform: Option<DAffine2>,
     pub live_image: LiveImage,
     pub channel_opts: Vec<String>,
     pub channel_selected: Option<String>,
     pub scan_status: ScanStatus,
-    pub tip_pos: DVec2,
+    pub tip_pos: Option<DVec2>,
     pub stamp: VecDeque<LiveImage>,
     pub stamp_name_base: String,
     pub course_move_history: Vec<DVec2>,
 }
 impl ScanArea {
-    pub fn new(
-        encoder: &ImageEncoder,
-        area_size: DVec2,
-        image_transform: DAffine2,
-        tip_pos: DVec2,
-    ) -> Self {
-        let live_image = LiveImage::new(encoder, image_transform);
+    pub fn new(uuid: Uuid, encoder: &ImageEncoder, area_size: DVec2) -> Self {
+        let live_image = LiveImage::new(uuid, encoder, DAffine2::IDENTITY);
         Self {
             world_transform: DAffine2::IDENTITY,
             area_size,
-            image_transform,
+            image_transform: None,
             live_image,
             channel_opts: vec![],
             channel_selected: None,
             scan_status: ScanStatus::default(),
-            tip_pos,
+            tip_pos: None,
             stamp: VecDeque::new(),
             stamp_name_base: String::new(),
             course_move_history: Vec::new(),
@@ -54,10 +53,13 @@ impl ScanArea {
         self.show_tip(ui);
     }
     fn show_image_border(&self, ui: &mut Ui) {
+        let Some(image_tran) = self.image_transform else {
+            return;
+        };
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
-        let transform = self.world_transform * self.image_transform;
+        let transform = self.world_transform * image_tran;
         BorderRectangle {
             transform,
             color: Color32::RED,
@@ -70,7 +72,10 @@ impl ScanArea {
         ui.painter().circle_filled(bottom_left, 3., Color32::RED);
     }
     fn show_image(&mut self, ui: &mut Ui) {
-        self.live_image.transform = self.world_transform * self.image_transform;
+        let Some(image_tran) = self.image_transform else {
+            return;
+        };
+        self.live_image.transform = self.world_transform * image_tran;
         self.live_image.show_image(ui);
     }
     fn show_area_border(&self, ui: &mut Ui) {
@@ -82,36 +87,43 @@ impl ScanArea {
         .show(ui);
     }
     fn show_scan_line(&self, ui: &mut Ui) {
-        if let Some(y) = self
+        let Some(image_tran) = self.image_transform else {
+            return;
+        };
+        let Some(y) = self
             .scan_status
             .scan_line_position(self.live_image.size(), self.live_image.line_dir)
-        {
-            let ctx = ui
-                .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-                .unwrap();
-            let tf = ctx.world2egui() * self.world_transform * self.image_transform;
-            let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
-            let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
-
-            ui.painter().extend(dashes_from_line(
-                ctx.rect,
-                &[p0, p1],
-                PathStroke {
-                    width: 1.0,
-                    color: egui::epaint::ColorMode::Solid(Color32::BLUE),
-                    kind: egui::StrokeKind::Middle,
-                },
-                3. * 5.,
-                1. * 5.,
-            ));
+        else {
+            return;
         };
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let tf = ctx.world2egui() * self.world_transform * image_tran;
+        let p0 = tf.project_pos2(DVec2::new(-0.5, y)).to_egui_pos2();
+        let p1 = tf.project_pos2(DVec2::new(0.5, y)).to_egui_pos2();
+
+        ui.painter().extend(dashes_from_line(
+            ctx.rect,
+            &[p0, p1],
+            PathStroke {
+                width: 1.0,
+                color: egui::epaint::ColorMode::Solid(Color32::BLUE),
+                kind: egui::StrokeKind::Middle,
+            },
+            3. * 5.,
+            1. * 5.,
+        ));
     }
     fn show_tip(&self, ui: &mut Ui) {
+        let Some(tip_pos) = self.tip_pos else {
+            return;
+        };
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
             .unwrap();
         let tf = ctx.world2egui() * self.world_transform;
-        let center = tf.project_pos2(self.tip_pos).to_egui_pos2();
+        let center = tf.project_pos2(tip_pos).to_egui_pos2();
         ui.painter().circle_filled(center, 3., Color32::BLUE);
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
@@ -157,17 +169,96 @@ impl ScanArea {
     }
 }
 
+const TRANSFORM_TABLE: TableDefinition<Uuid, [f64; 6]> =
+    TableDefinition::new("scanarea_transform_table_v1");
+const AREA_SIZE_TABLE: TableDefinition<Uuid, [f64; 2]> =
+    TableDefinition::new("scanarea_area_size_table_v1");
+const HISTORY_TABLE: TableDefinition<Uuid, Vec<[f64; 2]>> =
+    TableDefinition::new("scanarea_history_table_v1");
 
-impl Persistant for ScanArea{
-    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+impl Persistant for ScanArea {
+    fn db_update<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let mut tran_data = tran_table.get_mut(id)?.expect("");
+        if tran_data.value() != self.world_transform.to_cols_array() {
+            tran_data.insert(self.world_transform.to_cols_array())?;
+        }
+        let mut area_table = txn.open_table(AREA_SIZE_TABLE)?;
+        let mut area_data = area_table.get_mut(id)?.expect("");
+        if area_data.value() != self.area_size.to_array() {
+            area_data.insert(self.area_size.to_array())?;
+        }
+        let mut history_table = txn.open_table(HISTORY_TABLE)?;
+        let mut history_data = history_table.get_mut(id)?.expect("");
+        if history_data.value().len() != self.course_move_history.len() {
+            history_data.insert(
+                &self
+                    .course_move_history
+                    .iter()
+                    .map(|v| v.to_array())
+                    .collect(),
+            )?;
+        }
+
         Ok(())
     }
 
-    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_remove<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.remove(id)?;
+        let mut area_table = txn.open_table(AREA_SIZE_TABLE)?;
+        area_table.remove(id)?;
+        let mut history_table = txn.open_table(HISTORY_TABLE)?;
+        history_table.remove(id)?;
         Ok(())
     }
 
-    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_insert<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.insert(id, self.world_transform.to_cols_array())?;
+        let mut area_table = txn.open_table(AREA_SIZE_TABLE)?;
+        area_table.insert(id, self.area_size.to_array())?;
+        let mut history_table = txn.open_table(HISTORY_TABLE)?;
+        history_table.insert(
+            id,
+            &self
+                .course_move_history
+                .iter()
+                .map(|v| v.to_array())
+                .collect(),
+        )?;
         Ok(())
+    }
+
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let tran_data = tran_table.get(id)?.expect("").value();
+        let area_table = txn.open_table(AREA_SIZE_TABLE)?;
+        let area_data = area_table.get(id)?.expect("").value();
+        let history_table = txn.open_table(HISTORY_TABLE)?;
+        let history_data = history_table.get(id)?.expect("").value();
+        let mut scan_area = Self::new(id, encoder, DVec2::from_array(area_data));
+        scan_area.world_transform = DAffine2::from_cols_array(&tran_data);
+        scan_area.course_move_history = history_data
+            .iter()
+            .map(|arr| DVec2::from_array(*arr))
+            .collect();
+        Ok(scan_area)
     }
 }

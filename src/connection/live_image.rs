@@ -1,18 +1,25 @@
 use core::f32;
-use std::sync::Arc;
+use std::{fmt::Debug, io::Write, sync::Arc};
 
 use egui::{Color32, DragValue, Id, Response, Ui, WidgetText};
 use glam::{DAffine2, DVec2};
 use image_compute::image_compute::{FitData, FitType};
+use itertools::Itertools;
 use nanonis_tcp::LineDir;
+use redb::{ReadableTable as _, TableDefinition};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
     components::{
-        EngFmt, combo_box::{ComboBoxType, combo_box}
-    }, project::Persistant, scan_view::{
-        BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage, static_image::NormType
-    }, utils::vec_interop::IntoEgui
+        combo_box::{combo_box, ComboBoxType},
+        EngFmt,
+    },
+    project::Persistant,
+    scan_view::{
+        static_image::NormType, BorderRectangle, ImageEncoder, ScanViewCtx, ScanViewImage,
+    },
+    utils::vec_interop::IntoEgui,
 };
 
 pub struct LiveImage {
@@ -25,15 +32,17 @@ pub struct LiveImage {
     pub forward_data: FrameData,
     pub backward_data: FrameData,
     pub unit: String,
+    uuid: Uuid,
 }
 
 impl LiveImage {
-    pub fn new(encoder: &ImageEncoder, transform: DAffine2) -> Self {
+    pub fn new(uuid: Uuid, encoder: &ImageEncoder, transform: DAffine2) -> Self {
         let norm_type = NormType::FullScale;
         let std_dev = 3.;
         let empty_data = FrameData::default();
         Self {
             image_view: ScanViewImage::new(
+                Uuid::new_v4(),
                 encoder,
                 empty_data.size,
                 transform,
@@ -47,6 +56,7 @@ impl LiveImage {
             backward_data: empty_data,
             transform,
             unit: "".into(),
+            uuid,
         }
     }
     pub fn show_image(&mut self, ui: &mut Ui) -> Response {
@@ -141,13 +151,14 @@ impl LiveImage {
         self.image_view.clear(encoder);
     }
     pub fn uuid(&self) -> Uuid {
-        self.image_view.uuid()
+        self.uuid
     }
     pub fn size(&self) -> [u32; 2] {
         self.image_view.size()
     }
     pub fn stamp(&mut self, encoder: &ImageEncoder) -> Self {
         let mut image_view = ScanViewImage::new(
+            Uuid::new_v4(),
             encoder,
             self.image_view.size(),
             self.transform,
@@ -165,6 +176,7 @@ impl LiveImage {
             forward_data: self.forward_data.clone(),
             backward_data: self.backward_data.clone(),
             unit: self.unit.clone(),
+            uuid: Uuid::new_v4(),
         }
     }
 }
@@ -198,16 +210,180 @@ impl Default for FrameData {
     }
 }
 
-impl Persistant for LiveImage{
-    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+const TRANSFORM_TABLE: TableDefinition<Uuid, [f64; 6]> =
+    TableDefinition::new("liveimage_transform_table_v1");
+const STD_DEV_TABLE: TableDefinition<Uuid, f32> = TableDefinition::new("liveimage_stddev_table_v1");
+const DIR_TABLE: TableDefinition<Uuid, u32> = TableDefinition::new("liveimage_dir_table_v1");
+const FIT_TABLE: TableDefinition<Uuid, u8> = TableDefinition::new("liveimage_fit_table_v1");
+const NORM_TABLE: TableDefinition<Uuid, u8> = TableDefinition::new("liveimage_norm_table_v1");
+const DATA_TABLE: TableDefinition<Uuid, [FrameData; 2]> =
+    TableDefinition::new("liveimage_data_table_v1");
+const UNIT_TABLE: TableDefinition<Uuid, &str> = TableDefinition::new("liveimage_unit_table_v1");
+
+impl Persistant for LiveImage {
+    fn db_update<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let mut tran_data = tran_table
+            .get_mut(id)?
+            .expect(&format!("{id} did not exist"));
+        if tran_data.value() != self.transform.to_cols_array() {
+            tran_data.insert(self.transform.to_cols_array())?;
+        }
+
+        let mut stddev_table = txn.open_table(STD_DEV_TABLE)?;
+        let mut stddev_data = stddev_table.get_mut(id)?.expect("");
+        if stddev_data.value() != self.std_dev {
+            stddev_data.insert(self.std_dev)?;
+        }
+
+        let mut dir_table = txn.open_table(DIR_TABLE)?;
+        let mut dir_data = dir_table.get_mut(id)?.expect("");
+        if dir_data.value() != self.line_dir.into() {
+            dir_data.insert(&self.line_dir.into())?;
+        }
+
+        let mut fit_table = txn.open_table(FIT_TABLE)?;
+        let mut fit_data = fit_table.get_mut(id)?.expect("");
+        if fit_data.value() != self.fit_type.into() {
+            fit_data.insert(&self.fit_type.into())?;
+        }
+
+        let mut norm_table = txn.open_table(NORM_TABLE)?;
+        let mut norm_data = norm_table.get_mut(id)?.expect("");
+        if norm_data.value() != self.norm_type.into() {
+            norm_data.insert(&self.norm_type.into())?;
+        }
+
         Ok(())
     }
 
-    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_remove<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.remove(id)?;
+        let mut stddev_table = txn.open_table(STD_DEV_TABLE)?;
+        stddev_table.remove(id)?;
+        let mut dir_table = txn.open_table(DIR_TABLE)?;
+        dir_table.remove(id)?;
+        let mut fit_table = txn.open_table(FIT_TABLE)?;
+        fit_table.remove(id)?;
+        let mut norm_table = txn.open_table(NORM_TABLE)?;
+        norm_table.remove(id)?;
+        let mut unit_table = txn.open_table(UNIT_TABLE)?;
+        unit_table.remove(id)?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        data_table.remove(id)?;
+
         Ok(())
     }
 
-    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_insert<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+        info!("Inserting LiveImage {id}");
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.insert(id, self.transform.to_cols_array())?;
+        let mut stddev_table = txn.open_table(STD_DEV_TABLE)?;
+        stddev_table.insert(id, self.std_dev)?;
+        let mut dir_table = txn.open_table(DIR_TABLE)?;
+        dir_table.insert(id, &self.line_dir.into())?;
+        let mut fit_table = txn.open_table(FIT_TABLE)?;
+        fit_table.insert(id, &self.fit_type.into())?;
+        let mut norm_table = txn.open_table(NORM_TABLE)?;
+        norm_table.insert(id, &self.norm_type.into())?;
+        let mut unit_table = txn.open_table(UNIT_TABLE)?;
+        unit_table.insert(id, self.unit.as_str())?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        data_table.insert(id, [self.forward_data.clone(), self.backward_data.clone()])?;
         Ok(())
+    }
+
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let tran_data = tran_table.get(id)?.unwrap().value();
+        let stddev_table = txn.open_table(STD_DEV_TABLE)?;
+        let stddev_data = stddev_table.get(id)?.unwrap().value();
+        let dir_table = txn.open_table(DIR_TABLE)?;
+        let dir_data = dir_table.get(id)?.unwrap().value();
+        let fit_table = txn.open_table(FIT_TABLE)?;
+        let fit_data = fit_table.get(id)?.unwrap().value();
+        let norm_table = txn.open_table(NORM_TABLE)?;
+        let norm_data = norm_table.get(id)?.unwrap().value();
+        let unit_table = txn.open_table(UNIT_TABLE)?;
+        let unit_data = unit_table.get(id)?.unwrap().value().to_string();
+        let data_table = txn.open_table(DATA_TABLE)?;
+        let frame_data = data_table.get(id)?.unwrap().value();
+        let mut image = Self::new(id, encoder, DAffine2::from_cols_array(&tran_data));
+        image.std_dev = stddev_data;
+        image.line_dir = LineDir::try_from(dir_data).unwrap();
+        image.fit_type = FitType::try_from(fit_data).unwrap();
+        image.norm_type = NormType::try_from(norm_data).unwrap();
+        image.unit = unit_data;
+        [image.forward_data, image.backward_data] = frame_data;
+        image.write_and_update_texture(encoder);
+        Ok(image)
+    }
+}
+
+impl redb::Value for FrameData {
+    type SelfType<'a> = FrameData;
+
+    type AsBytes<'a> = Vec<u8>;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        let s0 = u32::from_le_bytes(data[0..][..4].try_into().unwrap());
+        let s1 = u32::from_le_bytes(data[4..][..4].try_into().unwrap());
+        let mut buf = Vec::new();
+        for chunk in data[8..].iter().copied().chunks(4).into_iter() {
+            let data: [u8; 4] = chunk.collect_array().unwrap();
+            buf.push(f32::from_le_bytes(data));
+        }
+        FrameData {
+            size: [s0, s1],
+            data: Arc::new(buf.into_boxed_slice()),
+        }
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        let mut buf = Vec::new();
+        buf.extend(value.size[0].to_le_bytes());
+        buf.extend(value.size[1].to_le_bytes());
+        buf.extend(value.data.iter().map(|v| v.to_le_bytes()).flatten());
+        buf
+    }
+
+    fn type_name() -> redb::TypeName {
+        redb::TypeName::new("scan_control_frame_data")
+    }
+}
+
+impl Debug for FrameData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameData")
+            .field("size", &self.size)
+            .finish()
     }
 }

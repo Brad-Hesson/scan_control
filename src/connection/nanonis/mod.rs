@@ -56,31 +56,42 @@ impl Connection for NanonisConnection {
         object_list: &mut SelectableList<view_object::Object>,
         encoder: &ImageEncoder,
     ) -> bool {
-        if self.slow_status_init.load(Ordering::SeqCst)
-            && self.fast_status_init.load(Ordering::SeqCst)
+        if !self.slow_status_init.load(Ordering::SeqCst)
+            || !self.fast_status_init.load(Ordering::SeqCst)
         {
-            if object_list.iter().any(|obj| obj.as_scan_area().is_some()) {
-                return true;
-            }
-            let scan_area = ScanArea::new(
-                encoder,
-                *self.area_size.read(),
-                *self.image_transform.read(),
-                *self.tip_pos.read(),
-            );
-            object_list.push(SelectableEntry::new(
-                "area",
-                Object::ScanArea {
-                    image: scan_area,
-                    hidden: false,
-                },
-                |img| img.list_atoms(),
-                |obj| obj.hidden_mut(),
-            ));
-            true
-        } else {
-            false
+            return false;
         }
+        if let Some(scan_area) = object_list
+            .iter_mut()
+            .find_map(|obj| obj.as_scan_area_mut())
+        {
+            scan_area.channel_opts = self.channel_state.read().channel_opts_names().collect();
+            scan_area.area_size = *self.area_size.read();
+            scan_area.image_transform = Some(*self.image_transform.read());
+            scan_area.tip_pos = Some(*self.tip_pos.read());
+            scan_area.stamp_name_base = self.base_name.read().clone();
+            scan_area.channel_opts = self.channel_state.peek().channel_opts_names().collect();
+            scan_area.scan_status = *self.scan_status.read();
+            return true;
+        }
+        let mut scan_area = ScanArea::new(Uuid::new_v4(), encoder, *self.area_size.read());
+        scan_area.channel_opts = self.channel_state.read().channel_opts_names().collect();
+        scan_area.area_size = *self.area_size.read();
+        scan_area.image_transform = Some(*self.image_transform.read());
+        scan_area.tip_pos = Some(*self.tip_pos.read());
+        scan_area.stamp_name_base = self.base_name.read().clone();
+        scan_area.channel_opts = self.channel_state.peek().channel_opts_names().collect();
+        scan_area.scan_status = *self.scan_status.read();
+        object_list.push(SelectableEntry::new(
+            "area",
+            Object::ScanArea {
+                image: scan_area,
+                hidden: false,
+            },
+            |img| img.list_atoms(),
+            |obj| obj.hidden_mut(),
+        ));
+        true
     }
 
     fn update(
@@ -230,14 +241,14 @@ impl NanonisConnection {
             scan_status,
             tip_pos,
             slow_status_init,
-            fast_status_init,
             base_name,
             course_menu,
+            fast_status_init,
         }
     }
     fn update_tip_pos(&mut self, scan_area: &mut ScanArea) {
         if let Some(tip_pos) = self.tip_pos.read_new().as_deref().copied() {
-            scan_area.tip_pos = tip_pos;
+            scan_area.tip_pos = Some(tip_pos);
         }
     }
     fn update_scan_status(&mut self, scan_area: &mut ScanArea) {
@@ -261,12 +272,12 @@ impl NanonisConnection {
     }
     fn update_image_transform(&mut self, scan_area: &mut ScanArea) {
         if let Some(new_transform) = self.image_transform.read_new().as_deref().copied() {
-            scan_area.image_transform = new_transform;
+            scan_area.image_transform = Some(new_transform);
             return;
         }
         self.image_transform.modify_conditional(
-            |prev| *prev != scan_area.image_transform,
-            |old| *old = scan_area.image_transform,
+            |prev| scan_area.image_transform.is_some_and(|it| it != *prev),
+            |old| *old = scan_area.image_transform.unwrap(),
         );
     }
     fn update_area_size(&mut self, scan_area: &mut ScanArea) {

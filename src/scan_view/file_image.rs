@@ -3,12 +3,16 @@ use std::path::Path;
 use eframe::egui_wgpu;
 use egui::{Color32, Id, Response, Sense, Ui};
 use glam::{DAffine2, DMat3, DVec2};
+use image::{DynamicImage, EncodableLayout, GenericImageView, RgbaImage};
 use image_compute::file_image::FileImageBuffers;
 use itertools::Itertools;
+use redb::{ReadableTable, TableDefinition};
 use uuid::Uuid;
 
 use crate::{
-    project::Persistant, scan_view::{ImageEncoder, callbacks::FileImageCallback, view::ScanViewCtx}, utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection}
+    project::Persistant,
+    scan_view::{callbacks::FileImageCallback, view::ScanViewCtx, ImageEncoder},
+    utils::vec_interop::{IntoEgui as _, IntoGlam as _, Projection},
 };
 
 pub struct FileImage {
@@ -16,17 +20,37 @@ pub struct FileImage {
     buffers: FileImageBuffers,
     pub local_points: [glam::DVec2; 4],
     pub world_points: [glam::DVec2; 4],
-    id: egui::Id,
+    data: DynamicImage,
     editing: bool,
     uuid: Uuid,
 }
 impl FileImage {
-    pub fn new(
-        id_salt: impl std::hash::Hash,
+    pub fn new_from_data(
+        uuid: Uuid,
         image_encoder: &ImageEncoder,
-        path: impl AsRef<Path>,
+        size: [u32; 2],
+        data: Vec<u8>,
         transform: DMat3,
+        world_points: [glam::DVec2; 4],
+        local_points: [glam::DVec2; 4],
     ) -> Self {
+        let img = RgbaImage::from_vec(size[0], size[1], data).unwrap().into();
+        let buffers = FileImageBuffers::new(
+            &image_encoder.wgpu_state.device,
+            &image_encoder.wgpu_state.queue,
+            &img,
+        );
+        Self {
+            transform,
+            buffers,
+            local_points,
+            world_points,
+            editing: false,
+            uuid,
+            data: img,
+        }
+    }
+    pub fn new(image_encoder: &ImageEncoder, path: impl AsRef<Path>, transform: DMat3) -> Self {
         let img = image::open(&path).unwrap();
         let buffers = FileImageBuffers::new(
             &image_encoder.wgpu_state.device,
@@ -45,13 +69,13 @@ impl FileImage {
             .collect_array()
             .unwrap();
         Self {
-            id: egui::Id::new(id_salt),
             transform,
             buffers,
             local_points,
             world_points,
             editing: false,
             uuid: Uuid::new_v4(),
+            data: img,
         }
     }
     pub fn uuid(&self) -> Uuid {
@@ -73,7 +97,7 @@ impl FileImage {
             for (i, c) in POINT_COLORS.into_iter().enumerate() {
                 let p = &mut self.world_points[i];
                 let screen_pos = ctx.world2egui().project_pos2(*p).to_egui_pos2();
-                let resp = drag_point((self.id, i), ui, screen_pos, 8., c)
+                let resp = drag_point((self.uuid, i), ui, screen_pos, 8., c)
                     .on_hover_cursor(egui::CursorIcon::Move);
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     *p += ctx
@@ -201,17 +225,111 @@ fn drag_point(
     resp
 }
 
+const TRANSFORM_TABLE: TableDefinition<Uuid, [f64; 9]> =
+    TableDefinition::new("fileimage_transform_table_v1");
+const ANCHOR_TABLE: TableDefinition<Uuid, [[f64; 2]; 8]> =
+    TableDefinition::new("fileimage_anchor_table_v1");
+const SIZE_TABLE: TableDefinition<Uuid, [u32; 2]> = TableDefinition::new("fileimage_size_table_v1");
+const DATA_TABLE: TableDefinition<Uuid, &[u8]> = TableDefinition::new("fileimage_data_table_v1");
 
-impl Persistant for FileImage{
-    fn db_update<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+impl Persistant for FileImage {
+    fn db_update<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let mut tran_data = tran_table.get_mut(id)?.expect("");
+        if tran_data.value() != self.transform.to_cols_array() {
+            tran_data.insert(self.transform.to_cols_array())?;
+        }
+
+        let mut anchor_table = txn.open_table(ANCHOR_TABLE)?;
+        let mut anchor_data = anchor_table.get_mut(id)?.expect("");
+        let current: [[f64; 2]; 8] = self
+            .local_points
+            .iter()
+            .chain(self.world_points.iter())
+            .map(|p| p.to_array())
+            .collect_array()
+            .unwrap();
+        if anchor_data.value() != current {
+            anchor_data.insert(current)?;
+        }
         Ok(())
     }
 
-    fn db_remove<'t>(id: Uuid, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_remove<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.remove(id)?;
+        let mut anchor_table = txn.open_table(ANCHOR_TABLE)?;
+        anchor_table.remove(id)?;
+        let mut size_table = txn.open_table(SIZE_TABLE)?;
+        size_table.remove(id)?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        data_table.remove(id)?;
         Ok(())
     }
 
-    fn db_insert<'t>(&self, txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+    fn db_insert<'t>(
+        &self,
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let id = self.uuid();
+        let mut tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        tran_table.insert(id, self.transform.to_cols_array())?;
+        let mut anchor_table = txn.open_table(ANCHOR_TABLE)?;
+        let current: [[f64; 2]; 8] = self
+            .local_points
+            .iter()
+            .chain(self.world_points.iter())
+            .map(|p| p.to_array())
+            .collect_array()
+            .unwrap();
+        anchor_table.insert(id, current)?;
+        let mut size_table = txn.open_table(SIZE_TABLE)?;
+        let dims = self.data.dimensions();
+        size_table.insert(id, [dims.0, dims.1])?;
+        let mut data_table = txn.open_table(DATA_TABLE)?;
+        data_table.insert(id, self.data.to_rgba8().as_bytes())?;
         Ok(())
+    }
+
+    fn db_read<'t>(
+        id: Uuid,
+        txn: &'t redb::WriteTransaction,
+        encoder: &ImageEncoder,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let tran_table = txn.open_table(TRANSFORM_TABLE)?;
+        let tran = tran_table.get(id)?.unwrap().value();
+        let anchor_table = txn.open_table(ANCHOR_TABLE)?;
+        let anchors = anchor_table.get(id)?.unwrap().value();
+        let size_table = txn.open_table(SIZE_TABLE)?;
+        let size = size_table.get(id)?.unwrap().value();
+        let data_table = txn.open_table(DATA_TABLE)?;
+        let data = data_table.get(id)?.unwrap().value().to_vec();
+        let local_points = anchors[..4]
+            .iter()
+            .map(|v| DVec2::from_array(*v))
+            .collect_array()
+            .unwrap();
+        let world_points = anchors[4..]
+            .iter()
+            .map(|v| DVec2::from_array(*v))
+            .collect_array()
+            .unwrap();
+        Ok(Self::new_from_data(
+            id,
+            encoder,
+            size,
+            data,
+            DMat3::from_cols_array(&tran),
+            world_points,
+            local_points,
+        ))
     }
 }
