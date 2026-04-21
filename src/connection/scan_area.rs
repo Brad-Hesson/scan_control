@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 
-use egui::{epaint::PathStroke, Color32, Id, Ui};
-use glam::{DAffine2, DVec2};
-use redb::{ReadableTable as _, TableDefinition};
+use egui::{epaint::PathStroke, Color32, Id, Shape, Stroke, Ui};
+use glam::{DAffine2, DMat2, DVec2};
+use redb::{ReadableTable as _, ReadableTableMetadata, TableDefinition};
 use uuid::Uuid;
 
 use crate::{
@@ -24,6 +24,7 @@ pub struct ScanArea {
     pub stamp: VecDeque<LiveImage>,
     pub stamp_name_base: String,
     pub course_move_history: Vec<DVec2>,
+    pub show_history: bool,
 }
 impl ScanArea {
     pub fn new(uuid: Uuid, encoder: &ImageEncoder, area_size: DVec2) -> Self {
@@ -40,6 +41,7 @@ impl ScanArea {
             stamp: VecDeque::new(),
             stamp_name_base: String::new(),
             course_move_history: Vec::new(),
+            show_history: false,
         }
     }
     pub fn uuid(&self) -> Uuid {
@@ -51,6 +53,9 @@ impl ScanArea {
         self.show_image_border(ui);
         self.show_area_border(ui);
         self.show_tip(ui);
+        if self.show_history {
+            self.show_history(ui);
+        }
     }
     fn show_image_border(&self, ui: &mut Ui) {
         let Some(image_tran) = self.image_transform else {
@@ -127,9 +132,12 @@ impl ScanArea {
         ui.painter().circle_filled(center, 3., Color32::BLUE);
     }
     pub fn show_menu(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
+        ui.set_max_width(140.);
         self.show_channel_control(ui);
         self.live_image.show_menu(ui, encoder);
         self.show_stamp_button(ui, encoder);
+        ui.separator();
+        ui.checkbox(&mut self.show_history, "Show history");
     }
     fn show_stamp_button(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         let font_id = egui::TextStyle::Body.resolve(ui.style());
@@ -165,6 +173,47 @@ impl ScanArea {
             .is_some_and(|clicked| clicked)
         {
             self.channel_selected = selection.map(|s| s.to_string());
+        }
+    }
+    fn show_history(&self, ui: &mut Ui) {
+        let mut rel_pos = DVec2::ZERO;
+        for real_world_move in self.course_move_history.iter().rev().copied() {
+            rel_pos -= real_world_move;
+            let real_world_transform =
+                DAffine2::from_scale_angle_translation(self.area_size, 0., rel_pos);
+            BorderRectangle {
+                transform: self.world_transform * real_world_transform,
+                color: Color32::YELLOW,
+                dashed: false,
+            }
+            .show(ui);
+        }
+        let ctx = ui
+            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
+            .unwrap();
+        let real_to_screen = ctx.world2egui() * self.world_transform;
+        let mut rel_pos = DVec2::ZERO;
+        let mut last_rel_pos = DVec2::ZERO;
+        for real_world_move in self.course_move_history.iter().rev().copied() {
+            rel_pos -= real_world_move;
+            let p0 = real_to_screen.transform_point2(rel_pos);
+            let p1 = real_to_screen.transform_point2(last_rel_pos);
+            let v_move = p0 - p1;
+            let v_side = v_move.normalize() * f64::min(15., v_move.length() / 2.);
+            let p2 = DMat2::from_angle(0.5) * v_side + p1;
+            let p3 = DMat2::from_angle(-0.5) * v_side + p1;
+            let p0 = p0.to_egui_pos2();
+            let p1 = p1.to_egui_pos2();
+            let p2 = p2.to_egui_pos2();
+            let p3 = p3.to_egui_pos2();
+            ui.painter()
+                .line_segment([p0, p1], Stroke::new(2., Color32::ORANGE));
+            ui.painter().add(Shape::convex_polygon(
+                vec![p1, p2, p3],
+                Color32::ORANGE,
+                Stroke::NONE,
+            ));
+            last_rel_pos = rel_pos;
         }
     }
 }
@@ -260,5 +309,18 @@ impl Persistant for ScanArea {
             .map(|arr| DVec2::from_array(*arr))
             .collect();
         Ok(scan_area)
+    }
+
+    fn db_dump_stats<'t>(
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Scan Area:");
+        let transform_len = txn.open_table(TRANSFORM_TABLE)?.len()?;
+        let area_size_len = txn.open_table(AREA_SIZE_TABLE)?.len()?;
+        let history_len = txn.open_table(HISTORY_TABLE)?.len()?;
+        println!("  transform table: {transform_len} items");
+        println!("  area size table: {area_size_len} items");
+        println!("  history table: {history_len} items");
+        Ok(())
     }
 }

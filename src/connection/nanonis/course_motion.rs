@@ -34,7 +34,6 @@ pub struct CourseMotionState {
     group: u32,
     last_x_move: Option<(DVec2, IVec2)>,
     last_y_move: Option<(DVec2, IVec2)>,
-    show_history: bool,
     cfg_file: File,
 }
 impl CourseMotionState {
@@ -72,7 +71,6 @@ impl CourseMotionState {
             group: 1,
             last_x_move: None,
             last_y_move: None,
-            show_history: false,
             cfg_file,
         }
     }
@@ -114,7 +112,6 @@ impl CourseMotionState {
             self.menu_active = true;
             self.move_target = DVec2::ZERO;
         }
-        ui.checkbox(&mut self.show_history, "Show history");
         let mut menu_active = self.menu_active;
         egui::Window::new("Course Motion")
             .frame(
@@ -250,9 +247,6 @@ impl CourseMotionState {
         else {
             return;
         };
-        if self.show_history {
-            self.show_history(ui, scan_area);
-        }
         if self.menu_active {
             if ui.input(|i| i.modifiers.ctrl) {
                 let [_, _, translate] = world_delta_transform(ui);
@@ -264,47 +258,6 @@ impl CourseMotionState {
                 self.move_target += scan_world_translate;
             }
             self.show_current_move(ui, scan_area);
-        }
-    }
-    fn show_history(&self, ui: &mut Ui, scan_area: &ScanArea) {
-        let mut rel_pos = DVec2::ZERO;
-        for real_world_move in scan_area.course_move_history.iter().rev().copied() {
-            rel_pos -= real_world_move;
-            let real_world_transform =
-                DAffine2::from_scale_angle_translation(scan_area.area_size, 0., rel_pos);
-            BorderRectangle {
-                transform: scan_area.world_transform * real_world_transform,
-                color: Color32::YELLOW,
-                dashed: false,
-            }
-            .show(ui);
-        }
-        let ctx = ui
-            .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
-            .unwrap();
-        let real_to_screen = ctx.world2egui() * scan_area.world_transform;
-        let mut rel_pos = DVec2::ZERO;
-        let mut last_rel_pos = DVec2::ZERO;
-        for real_world_move in scan_area.course_move_history.iter().rev().copied() {
-            rel_pos -= real_world_move;
-            let p0 = real_to_screen.transform_point2(rel_pos);
-            let p1 = real_to_screen.transform_point2(last_rel_pos);
-            let v_move = p0 - p1;
-            let v_side = v_move.normalize() * f64::min(15., v_move.length() / 2.);
-            let p2 = DMat2::from_angle(0.5) * v_side + p1;
-            let p3 = DMat2::from_angle(-0.5) * v_side + p1;
-            let p0 = p0.to_egui_pos2();
-            let p1 = p1.to_egui_pos2();
-            let p2 = p2.to_egui_pos2();
-            let p3 = p3.to_egui_pos2();
-            ui.painter()
-                .line_segment([p0, p1], Stroke::new(2., Color32::ORANGE));
-            ui.painter().add(Shape::convex_polygon(
-                vec![p1, p2, p3],
-                Color32::ORANGE,
-                Stroke::NONE,
-            ));
-            last_rel_pos = rel_pos;
         }
     }
     fn show_current_move(&self, ui: &mut Ui, scan_area: &ScanArea) {

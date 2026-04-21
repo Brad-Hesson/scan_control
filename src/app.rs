@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     error::Error,
     sync::LazyLock,
 };
@@ -21,7 +21,7 @@ use egui::{
 };
 use glam::{DAffine2, DVec2};
 use itertools::{izip, Itertools};
-use redb::{ReadableTable, TableDefinition, WriteTransaction};
+use redb::{ReadableTable, ReadableTableMetadata, TableDefinition, WriteTransaction};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -56,7 +56,7 @@ impl MyApp {
         let project = ProjectDb::new_temp().unwrap();
         let wgpu = cc.wgpu_render_state.as_ref().unwrap();
         let image_encoder = ImageEncoder::new(wgpu);
-        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "icecube"));
+        let nanonis_connection = Box::new(NanonisConnection::new(cc.egui_ctx.clone(), "localhost"));
         let object_list = SelectableList::new();
         let import_file_dialog = ObjectImportDialog::new();
         let project_save_dialog = ProjectSaveDialog::new();
@@ -493,5 +493,13 @@ impl Persistant for SelectableList<Object> {
             object_list.push(entry);
         }
         Ok(object_list)
+    }
+
+    fn db_dump_stats<'t>(txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>> {
+        let table = txn.open_table(OBJECT_LIST_TABLE)?;
+        let len = table.len()?;
+        println!("---- Object List: {len} items ----");
+        Object::db_dump_stats(txn)?;
+        Ok(())
     }
 }

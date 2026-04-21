@@ -6,7 +6,7 @@ use glam::{DAffine2, DVec2};
 use image_compute::image_compute::{FitData, FitType};
 use itertools::Itertools;
 use nanonis_tcp::LineDir;
-use redb::{ReadableTable as _, TableDefinition};
+use redb::{ReadableTable as _, ReadableTableMetadata as _, TableDefinition};
 use tracing::info;
 use uuid::Uuid;
 
@@ -335,6 +335,26 @@ impl Persistant for LiveImage {
         [image.forward_data, image.backward_data] = frame_data;
         image.write_and_update_texture(encoder);
         Ok(image)
+    }
+    
+    fn db_dump_stats<'t>(txn: &'t redb::WriteTransaction) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Live Image:");
+        let transform_table_len = txn.open_table(TRANSFORM_TABLE)?.len()?;
+        let std_dev_table_len = txn.open_table(STD_DEV_TABLE)?.len()?;
+        let dir_table_len = txn.open_table(DIR_TABLE)?.len()?;
+        let fit_table_len = txn.open_table(FIT_TABLE)?.len()?;
+        let norm_table_len = txn.open_table(NORM_TABLE)?.len()?;
+        let data_table_len = txn.open_table(DATA_TABLE)?.len()?;
+        let unit_table_len = txn.open_table(UNIT_TABLE)?.len()?;
+        println!("  transform table: {transform_table_len} items");
+        println!("  std_dev table: {std_dev_table_len} items");
+        println!("  dir table: {dir_table_len} items");
+        println!("  fit table: {fit_table_len} items");
+        println!("  norm table: {norm_table_len} items");
+        println!("  data table: {data_table_len} items");
+        println!("  unit table: {unit_table_len} items");
+        Ok(())
+        
     }
 }
 

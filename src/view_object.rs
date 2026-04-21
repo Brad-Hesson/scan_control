@@ -2,7 +2,7 @@ use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use egui::{Atoms, Image, IntoAtoms, Ui};
 use glam::{DAffine2, DVec2};
-use redb::{ReadableTable, TableDefinition};
+use redb::{ReadableTable, ReadableTableMetadata, TableDefinition};
 use tracing::error;
 use uuid::Uuid;
 
@@ -379,5 +379,20 @@ impl Persistant for Object {
             }
             invalid => return Err(format!("invalid type name {invalid}").into()),
         }
+    }
+
+    fn db_dump_stats<'t>(
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Object:");
+        let type_len = txn.open_table(OBJECT_TYPE_TABLE)?.len()?;
+        let data_len = txn.open_table(OBJECT_DATA_TABLE)?.len()?;
+        println!("  type table: {type_len} items");
+        println!("  data table: {data_len} items");
+        GDSImage::db_dump_stats(txn)?;
+        FileImage::db_dump_stats(txn)?;
+        ScanArea::db_dump_stats(txn)?;
+        LiveImage::db_dump_stats(txn)?;
+        Ok(())
     }
 }

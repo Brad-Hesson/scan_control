@@ -24,7 +24,7 @@ use crate::connection::{
     shared_state::SharedState,
 };
 
-const DEBUG_COURSE: bool = true;
+const DEBUG_COURSE: bool = false;
 
 pub struct SlowStatusWorker {
     ctx: egui::Context,

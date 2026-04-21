@@ -5,7 +5,7 @@ use std::{
 };
 
 use glam::DAffine2;
-use redb::{backends::InMemoryBackend, Database, WriteTransaction};
+use redb::{Database, TableHandle, WriteTransaction, backends::InMemoryBackend};
 use uuid::Uuid;
 
 use crate::scan_view::ImageEncoder;
@@ -69,4 +69,5 @@ pub trait Persistant: Sized {
         txn: &'t WriteTransaction,
         encoder: &ImageEncoder,
     ) -> Result<Self, Box<dyn Error>>;
+    fn db_dump_stats<'t>(txn: &'t WriteTransaction) -> Result<(), Box<dyn Error>>;
 }

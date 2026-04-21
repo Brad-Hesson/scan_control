@@ -7,7 +7,7 @@ use gdsr::{Cell, Element, Library};
 use glam::{DAffine2, DVec2, Vec2};
 use image_compute::gds_image::GDSImageBuffers;
 use itertools::Itertools;
-use redb::{ReadableTable, TableDefinition};
+use redb::{ReadableTable, ReadableTableMetadata, TableDefinition};
 use uuid::Uuid;
 
 use crate::{
@@ -306,5 +306,18 @@ impl Persistant for GDSImage {
             polys,
             DAffine2::from_cols_array(&tran_data),
         ))
+    }
+
+    fn db_dump_stats<'t>(
+        txn: &'t redb::WriteTransaction,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("GDS Image:");
+        let transform_table_len = txn.open_table(TRANSFORM_TABLE)?.len()?;
+        let layer_table_len = txn.open_table(LAYER_TABLE)?.len()?;
+        let data_table_len = txn.open_table(DATA_TABLE)?.len()?;
+        println!("  transform table: {transform_table_len} items");
+        println!("  layer table: {layer_table_len} items");
+        println!("  data table: {data_table_len} items");
+        Ok(())
     }
 }
