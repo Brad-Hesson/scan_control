@@ -46,6 +46,7 @@ tempfile = "3.27.0"
 num_enum.workspace = true
 
 [build-dependencies]
+winresource = "0.1.31"
 wgsl_to_wgpu.workspace = true
 
 [dev-dependencies]
