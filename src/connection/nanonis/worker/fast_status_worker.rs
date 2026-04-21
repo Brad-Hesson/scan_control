@@ -48,8 +48,8 @@ impl FastStatusWorker {
         Ok(changed)
     }
     fn update_tip_pos(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<bool> {
-        let resp = conn.scan_xy_pos_get(false)?;
-        let new_pos = DVec2::new(resp.x_pos as f64 * 1e9, resp.y_pos as f64 * 1e9);
+        let resp = conn.fol_me_xy_pos_get(false)?;
+        let new_pos = DVec2::new(resp.x_pos * 1e9, resp.y_pos * 1e9);
         let changed = self
             .tip_pos
             .modify_conditional(|prev| *prev != new_pos, |prev| *prev = new_pos);
@@ -60,7 +60,7 @@ impl Worker for FastStatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
         let mut update = false;
         update |= self.update_image_transform(conn).context("failed update_image_transform")?;
-        // update |= self.update_tip_pos(conn).context("failed update_tip_pos")?;
+        update |= self.update_tip_pos(conn).context("failed update_tip_pos")?;
         if update {
             self.ctx.request_repaint();
         }
@@ -68,7 +68,7 @@ impl Worker for FastStatusWorker {
     }
     fn init(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
         self.update_image_transform(conn).context("failed update_image_transform")?;
-        // self.update_tip_pos(conn).context("failed update_tip_pos")?;
+        self.update_tip_pos(conn).context("failed update_tip_pos")?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
