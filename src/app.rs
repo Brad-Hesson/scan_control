@@ -81,6 +81,16 @@ impl MyApp {
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
         self.undo_queue.push(&mut self.app_state, modifier);
     }
+    
+    fn save_project(&mut self) {
+        let txn = self.project.db().begin_write().unwrap();
+        self.app_state.object_list.db_update(&txn).unwrap();
+        txn.commit().unwrap();
+    
+        if self.project.is_temp() {
+            self.project_save_dialog.select_path();
+        }
+    }
 }
 
 impl eframe::App for MyApp {
@@ -107,13 +117,7 @@ impl eframe::App for MyApp {
             self.app_state.object_list.push(entry);
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, egui::Key::S)) {
-            let txn = self.project.db().begin_write().unwrap();
-            self.app_state.object_list.db_update(&txn).unwrap();
-            txn.commit().unwrap();
-
-            if self.project.is_temp() {
-                self.project_save_dialog.select_path();
-            }
+            self.save_project();
         }
         if let Some(path) = self.project_save_dialog.try_recv_path() {
             self.project.save_as(path).unwrap();
@@ -363,6 +367,9 @@ fn file_menu_button(ui: &mut Ui, app: &mut MyApp) {
     ui.menu_button("File", |ui| {
         if ui.button("Open").clicked() {
             app.project_open_dialog.pick_file();
+        }
+        if ui.button("Save").clicked() {
+            app.save_project();
         }
         if ui.button("Save As").clicked() {
             app.project_save_dialog.select_path();
