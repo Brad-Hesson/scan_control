@@ -81,12 +81,12 @@ impl MyApp {
     pub fn mod_state<T: StateModify<AppState>>(&mut self, modifier: T) {
         self.undo_queue.push(&mut self.app_state, modifier);
     }
-    
+
     fn save_project(&mut self) {
         let txn = self.project.db().begin_write().unwrap();
         self.app_state.object_list.db_update(&txn).unwrap();
         txn.commit().unwrap();
-    
+
         if self.project.is_temp() {
             self.project_save_dialog.select_path();
         }
@@ -375,7 +375,18 @@ fn file_menu_button(ui: &mut Ui, app: &mut MyApp) {
             app.project_save_dialog.select_path();
         }
         if ui.add(Button::new("Import Files")).clicked() {
-            app.import_file_dialog.pick_files(app.image_encoder.clone());
+            let (scale, _, translation) = app
+                .app_state
+                .scan_view
+                .world_transform
+                .to_scale_angle_translation();
+            let tf = DAffine2::from_scale_angle_translation(
+                1e3 / (scale.abs()),
+                0.,
+                -translation / scale.abs() * DVec2::new(1., -1.),
+            );
+            app.import_file_dialog
+                .pick_files(app.image_encoder.clone(), tf);
         }
     });
 }

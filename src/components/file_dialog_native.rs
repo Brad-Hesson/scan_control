@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crossbeam::channel::TryRecvError;
+use glam::DAffine2;
 
 use crate::{project::ProjectDb, scan_view::ImageEncoder, view_object};
 
@@ -23,13 +24,13 @@ impl ObjectImportDialog {
             dialog,
         }
     }
-    pub fn pick_files(&mut self, encoder: ImageEncoder) {
+    pub fn pick_files(&mut self, encoder: ImageEncoder, transform: DAffine2) {
         let dialog = self.dialog.clone();
         let channel = self.channel_tx.clone();
         std::thread::spawn(move || {
             if let Some(paths) = dialog.pick_files() {
                 for path in paths {
-                    if let Some(object) = view_object::Object::import(path, &encoder) {
+                    if let Some(object) = view_object::Object::import(path, &encoder, transform) {
                         channel.send(object).unwrap();
                     }
                 }

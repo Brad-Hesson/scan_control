@@ -35,10 +35,14 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn import(path: PathBuf, encoder: &ImageEncoder) -> Option<Self> {
+    pub fn import(path: PathBuf, encoder: &ImageEncoder, transform: DAffine2) -> Option<Self> {
         match path.extension().and_then(|os| os.to_str()) {
             Some("gds") | Some("GDS") => {
-                let image = GDSImage::new_from_file(encoder, &path, DAffine2::IDENTITY);
+                let image = GDSImage::new_from_file(
+                    encoder,
+                    &path,
+                    DAffine2::from_angle_translation(0., transform.translation),
+                );
                 Some(Self::Gds {
                     image,
                     path,
@@ -46,7 +50,7 @@ impl Object {
                 })
             }
             Some("png") | Some("jpeg") | Some("PNG") | Some("JPEG") => {
-                let image = FileImage::new(encoder, &path, DAffine2::IDENTITY.into());
+                let image = FileImage::new(encoder, &path, transform.into());
                 Some(Self::File {
                     image,
                     path,
