@@ -18,7 +18,8 @@ pub struct ProjectDb {
 impl ProjectDb {
     pub fn new_temp() -> Result<ProjectDb, redb::DatabaseError> {
         let mut path = temp_dir();
-        path.push("temp_db.scp");
+        let name = format!("temp_db_{}.scp", Uuid::new_v4());
+        path.push(name);
         let db = Database::builder().create(&path)?;
         Ok(Self {
             db,
