@@ -45,14 +45,12 @@ impl LineWorker {
     }
     pub fn dumb_line_wait(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
         if self.scan_status.peek().scanning {
-            std::thread::sleep(Duration::from_millis(100));
-            trace!("Sending dumb line finished");
-            self.queue.send(LineDir::Forward);
-            self.queue.send(LineDir::Backward);
-            std::thread::sleep(Duration::from_millis(100));
-            trace!("Sending dumb line finished");
-            self.queue.send(LineDir::Forward);
-            self.queue.send(LineDir::Backward);
+            for _ in 0..5{
+                std::thread::sleep(Duration::from_millis(100));
+                trace!("Sending dumb line finished");
+                self.queue.send(LineDir::Forward);
+                self.queue.send(LineDir::Backward);
+            }
         }
         Ok(())
     }
