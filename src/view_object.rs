@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{ffi::OsStr, path::PathBuf};
 
 use egui::{Atoms, Image, IntoAtoms, Ui};
 use glam::{DAffine2, DVec2};
@@ -222,8 +222,8 @@ impl Persistant for Object {
                 hidden,
             } => {
                 let (db_name, db_hidden) = data.value();
-                if db_name != path.as_os_str().as_bytes() || db_hidden != *hidden {
-                    data.insert((path.as_os_str().as_bytes(), *hidden))?;
+                if db_name != path.as_os_str().as_encoded_bytes() || db_hidden != *hidden {
+                    data.insert((path.as_os_str().as_encoded_bytes(), *hidden))?;
                 }
                 image.db_update(txn)?;
             }
@@ -233,8 +233,8 @@ impl Persistant for Object {
                 hidden,
             } => {
                 let (db_name, db_hidden) = data.value();
-                if db_name != path.as_os_str().as_bytes() || db_hidden != *hidden {
-                    data.insert((path.as_os_str().as_bytes(), *hidden))?;
+                if db_name != path.as_os_str().as_encoded_bytes() || db_hidden != *hidden {
+                    data.insert((path.as_os_str().as_encoded_bytes(), *hidden))?;
                 }
                 image.db_update(txn)?;
             }
@@ -302,7 +302,7 @@ impl Persistant for Object {
                 path,
                 hidden,
             } => {
-                data_table.insert(uuid, (path.as_os_str().as_bytes(), *hidden))?;
+                data_table.insert(uuid, (path.as_os_str().as_encoded_bytes(), *hidden))?;
                 image.db_insert(txn)?;
                 type_table.insert(uuid, "gds")?;
             }
@@ -311,7 +311,7 @@ impl Persistant for Object {
                 path,
                 hidden,
             } => {
-                data_table.insert(uuid, (path.as_os_str().as_bytes(), *hidden))?;
+                data_table.insert(uuid, (path.as_os_str().as_encoded_bytes(), *hidden))?;
                 image.db_insert(txn)?;
                 type_table.insert(uuid, "file")?;
             }
@@ -345,7 +345,7 @@ impl Persistant for Object {
             "gds" => {
                 let image = GDSImage::db_read(id, txn, encoder)?;
                 let (name, hidden) = data.value();
-                let os_str = OsStr::from_bytes(name);
+                let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(name) };
                 Ok(Self::Gds {
                     image,
                     path: PathBuf::from(os_str),
@@ -355,7 +355,7 @@ impl Persistant for Object {
             "file" => {
                 let image = FileImage::db_read(id, txn, encoder)?;
                 let (name, hidden) = data.value();
-                let os_str = OsStr::from_bytes(name);
+                let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(name) };
                 Ok(Self::File {
                     image,
                     path: PathBuf::from(os_str),

@@ -480,7 +480,6 @@ impl Persistant for SelectableList<Object> {
             let (id, ind) = entry?;
             ids.insert(ind.value(), id.value());
         }
-        dbg!(&ids);
         let mut object_list = SelectableList::new();
         for id in ids.values().copied() {
             let object = Object::db_read(id, txn, encoder)?;
