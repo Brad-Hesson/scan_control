@@ -85,7 +85,6 @@ impl CourseMotionState {
                 .find_map(|entry| entry.as_scan_area_mut())
             {
                 let steps = self.get_steps();
-                let real_course_move = self.calib_matrix * steps.as_dvec2() * 1e9;
                 if steps.y == 0 {
                     let last_pos = scan_area.world_transform.translation;
                     self.last_x_move = Some((last_pos, steps));
@@ -101,7 +100,7 @@ impl CourseMotionState {
                 let real_world_move = self.steps2real_world() * steps.as_dvec2();
                 scan_area.course_move_history.push(real_world_move);
                 scan_area.world_transform =
-                    scan_area.world_transform * DAffine2::from_translation(real_course_move);
+                    scan_area.world_transform * DAffine2::from_translation(real_world_move);
             };
             self.move_target = DVec2::ZERO;
         }
@@ -268,7 +267,7 @@ impl CourseMotionState {
         let world2screen = ctx.world2egui();
         let course_world2screen = |p: DVec2| {
             (world2screen * scan_area.world_transform)
-                .transform_point2(self.calib_matrix * p * 1e9)
+                .transform_point2(self.steps2real_world() * p)
                 .to_egui_pos2()
         };
         let steps = self.get_steps();
