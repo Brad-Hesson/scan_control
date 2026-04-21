@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use eyre::Context;
 use nanonis_tcp::{
     blocking::NanonisTcp, commands::scan::FrameDataGrabResponse, error::NanonisTcpResult, LineDir,
 };
@@ -40,17 +41,17 @@ impl FrameWorker {
     }
 }
 impl Worker for FrameWorker {
-    fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn init(&mut self, _conn: &mut NanonisTcp) -> eyre::Result<()> {
         Ok(())
     }
 
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
         let dir = self.queue.recv();
         let Some(ch) = self.channel_state.read().selection else {
             return Ok(());
         };
         trace!("downloading frame {} {:?}", ch, dir);
-        let resp = conn.scan_frame_data_grab(ch as u32, dir)?;
+        let resp = conn.scan_frame_data_grab(ch as u32, dir).context("failed scan_frame_data_grab")?;
         self.scan_status.modify_conditional(
             |prev| prev.scan_dir != resp.scan_dir,
             |prev| prev.scan_dir = resp.scan_dir,

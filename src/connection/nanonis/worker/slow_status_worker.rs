@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use eyre::Context;
 use glam::{DVec2, IVec2};
 use itertools::Itertools as _;
 use nanonis_tcp::{
@@ -156,22 +157,23 @@ impl SlowStatusWorker {
     }
 }
 impl Worker for SlowStatusWorker {
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        self.update_area_transform(conn)?;
-        self.update_scan_status(conn)?;
-        self.update_channel_opts(conn)?;
-        self.update_base_name(conn)?;
-        self.update_course_voltages(conn)?;
-        self.execute_course_move(conn)?;
+    fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        self.update_area_transform(conn).context("failed update_area_transform")?;
+        self.update_scan_status(conn).context("failed update_scan_status")?;
+        self.update_channel_opts(conn).context("failed update_channel_opts")?;
+        // self.update_base_name(conn).context("failed update_base_name")?;
+        self.update_course_voltages(conn).context("failed update_course_voltages")?;
+        self.execute_course_move(conn).context("failed execute_course_move")?;
         Ok(())
     }
-    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        self.update_signal_names(conn)?;
-        self.update_area_transform(conn)?;
-        self.update_scan_status(conn)?;
-        self.update_channel_opts(conn)?;
-        self.update_base_name(conn)?;
-        self.update_course_voltages(conn)?;
+    fn init(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        self.update_signal_names(conn).context("failed update_signal_names")?;
+        self.update_area_transform(conn).context("failed update_area_transform")?;
+        self.update_scan_status(conn).context("failed update_scan_status")?;
+        self.update_channel_opts(conn).context("failed update_channel_opts")?;
+        // self.update_base_name(conn).context("failed update_base_name")?;
+        self.base_name.modify(|s| *s = "Scan Image".into());
+        self.update_course_voltages(conn).context("failed update_course_voltages")?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }

@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use eyre::Context;
 use nanonis_tcp::{blocking::NanonisTcp, error::NanonisTcpResult, LineDir, ScanMovementType};
 use tracing::trace;
 
@@ -20,13 +23,10 @@ impl LineWorker {
             scan_status: scan_status.clone(),
         }
     }
-}
-impl Worker for LineWorker {
-    fn init(&mut self, _conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        Ok(())
-    }
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        let resp = conn.scan_wait_end_of_line(None)?;
+    pub fn line_wait(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        let resp = conn
+            .scan_wait_end_of_line(None)
+            .context("failed scan_wait_end_of_line")?;
         let dir = match resp.movement_type {
             ScanMovementType::Scan(dir) => dir,
             _ => return Ok(()),
@@ -41,6 +41,29 @@ impl Worker for LineWorker {
             },
         );
         self.queue.send(dir);
+        Ok(())
+    }
+    pub fn dumb_line_wait(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        if self.scan_status.peek().scanning {
+            std::thread::sleep(Duration::from_millis(100));
+            trace!("Sending dumb line finished");
+            self.queue.send(LineDir::Forward);
+            self.queue.send(LineDir::Backward);
+            std::thread::sleep(Duration::from_millis(100));
+            trace!("Sending dumb line finished");
+            self.queue.send(LineDir::Forward);
+            self.queue.send(LineDir::Backward);
+        }
+        Ok(())
+    }
+}
+impl Worker for LineWorker {
+    fn init(&mut self, _conn: &mut NanonisTcp) -> eyre::Result<()> {
+        Ok(())
+    }
+    fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        // self.line_wait(conn)?;
+        self.dumb_line_wait(conn)?;
         Ok(())
     }
     fn name(&self) -> String {

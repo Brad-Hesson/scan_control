@@ -1,6 +1,7 @@
 use core::f64;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
+use eyre::Context;
 use glam::{DAffine2, DVec2};
 use nanonis_tcp::{
     blocking::NanonisTcp,
@@ -56,18 +57,18 @@ impl FastStatusWorker {
     }
 }
 impl Worker for FastStatusWorker {
-    fn work(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
+    fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
         let mut update = false;
-        update |= self.update_image_transform(conn)?;
-        update |= self.update_tip_pos(conn)?;
+        update |= self.update_image_transform(conn).context("failed update_image_transform")?;
+        // update |= self.update_tip_pos(conn).context("failed update_tip_pos")?;
         if update {
             self.ctx.request_repaint();
         }
         Ok(())
     }
-    fn init(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        self.update_image_transform(conn)?;
-        self.update_tip_pos(conn)?;
+    fn init(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
+        self.update_image_transform(conn).context("failed update_image_transform")?;
+        // self.update_tip_pos(conn).context("failed update_tip_pos")?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
