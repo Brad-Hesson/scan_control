@@ -141,7 +141,7 @@ impl SlowStatusWorker {
     }
     fn update_course_voltages(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
         let err_pred = |e: &NanonisTcpError| matches!(e, NanonisTcpError::Api(_));
-        let default = if DEBUG_COURSE { 1. } else { 0. };
+        let default = if DEBUG_COURSE { 5. } else { 0. };
         let x_data = conn
             .motor_freq_amp_get(MotorAxis::X)
             .map(|resp| resp.amplitude as f64)
@@ -161,7 +161,7 @@ impl Worker for SlowStatusWorker {
         self.update_area_transform(conn).context("failed update_area_transform")?;
         self.update_scan_status(conn).context("failed update_scan_status")?;
         self.update_channel_opts(conn).context("failed update_channel_opts")?;
-        // self.update_base_name(conn).context("failed update_base_name")?;
+        self.update_base_name(conn).context("failed update_base_name")?;
         self.update_course_voltages(conn).context("failed update_course_voltages")?;
         self.execute_course_move(conn).context("failed execute_course_move")?;
         Ok(())
@@ -171,8 +171,7 @@ impl Worker for SlowStatusWorker {
         self.update_area_transform(conn).context("failed update_area_transform")?;
         self.update_scan_status(conn).context("failed update_scan_status")?;
         self.update_channel_opts(conn).context("failed update_channel_opts")?;
-        // self.update_base_name(conn).context("failed update_base_name")?;
-        self.base_name.modify(|s| *s = "Scan Image".into());
+        self.update_base_name(conn).context("failed update_base_name")?;
         self.update_course_voltages(conn).context("failed update_course_voltages")?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
