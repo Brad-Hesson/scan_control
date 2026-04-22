@@ -49,7 +49,8 @@ impl ScanArea {
     }
     pub fn show(&mut self, ui: &mut Ui) {
         self.show_image(ui);
-        self.show_scan_line(ui);
+        // doesn't work on v5
+        // self.show_scan_line(ui);
         self.show_image_border(ui);
         self.show_area_border(ui);
         self.show_tip(ui);
