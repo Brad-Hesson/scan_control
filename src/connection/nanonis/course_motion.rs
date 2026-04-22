@@ -291,7 +291,7 @@ impl CourseMotionState {
             DAffine2::from_scale_angle_translation(scan_area.area_size, 0., real_course_move);
         BorderRectangle {
             transform: scan_area.world_transform * move_transform,
-            color: Color32::YELLOW,
+            color: Color32::from_rgb(0xe3, 0xb6, 0x2d),
             dashed: false,
         }
         .show(ui);

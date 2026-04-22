@@ -86,7 +86,7 @@ impl ScanArea {
     fn show_area_border(&self, ui: &mut Ui) {
         BorderRectangle {
             transform: self.world_transform * DAffine2::from_scale(self.area_size),
-            color: Color32::YELLOW,
+            color: Color32::from_rgb(0xe3, 0xb6, 0x2d),
             dashed: false,
         }
         .show(ui);
