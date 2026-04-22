@@ -21,6 +21,7 @@ mod view_object;
 mod project;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    attach_parent_console();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
@@ -116,3 +117,16 @@ fn adapter_to_str(adapter: &Adapter) -> String {
         info.driver_info
     )
 }
+
+
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console() {}

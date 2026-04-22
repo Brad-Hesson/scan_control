@@ -4075,6 +4075,7 @@ dependencies = [
  "uuid",
  "wgpu",
  "wgsl_to_wgpu",
+ "windows 0.62.2",
  "winresource",
 ]
 
