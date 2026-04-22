@@ -2836,7 +2836,7 @@ dependencies = [
 [[package]]
 name = "nanonis-tcp"
 version = "0.1.0"
-source = "git+https://github.com/Brad-Hesson/nanonis-tcp#2f36cca406ba708cd49afa66c35159a8ec2b1172"
+source = "git+https://github.com/Brad-Hesson/nanonis-tcp#0154604f33a128860c7eb0ececc0f53f2faf3793"
 dependencies = [
  "macro_rules_attribute",
  "num_enum",
