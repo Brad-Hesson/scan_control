@@ -25,6 +25,7 @@ pub struct ScanArea {
     pub stamp_name_base: String,
     pub course_move_history: Vec<DVec2>,
     pub show_history: bool,
+    pub show_history_boxes: bool,
 }
 impl ScanArea {
     pub fn new(uuid: Uuid, encoder: &ImageEncoder, area_size: DVec2) -> Self {
@@ -42,6 +43,7 @@ impl ScanArea {
             stamp_name_base: String::new(),
             course_move_history: Vec::new(),
             show_history: false,
+            show_history_boxes: false,
         }
     }
     pub fn uuid(&self) -> Uuid {
@@ -139,6 +141,11 @@ impl ScanArea {
         self.show_stamp_button(ui, encoder);
         ui.separator();
         ui.checkbox(&mut self.show_history, "Show history");
+        if self.show_history {
+            ui.indent("history_boxes_check", |ui|{
+                ui.checkbox(&mut self.show_history_boxes, "Show boxes");
+            });
+        }
     }
     fn show_stamp_button(&mut self, ui: &mut Ui, encoder: &ImageEncoder) {
         let font_id = egui::TextStyle::Body.resolve(ui.style());
@@ -177,17 +184,19 @@ impl ScanArea {
         }
     }
     fn show_history(&self, ui: &mut Ui) {
-        let mut rel_pos = DVec2::ZERO;
-        for real_world_move in self.course_move_history.iter().rev().copied() {
-            rel_pos -= real_world_move;
-            let real_world_transform =
-                DAffine2::from_scale_angle_translation(self.area_size, 0., rel_pos);
-            BorderRectangle {
-                transform: self.world_transform * real_world_transform,
-                color: Color32::YELLOW,
-                dashed: false,
+        if self.show_history_boxes{
+            let mut rel_pos = DVec2::ZERO;
+            for real_world_move in self.course_move_history.iter().rev().copied() {
+                rel_pos -= real_world_move;
+                let real_world_transform =
+                    DAffine2::from_scale_angle_translation(self.area_size, 0., rel_pos);
+                BorderRectangle {
+                    transform: self.world_transform * real_world_transform,
+                    color: Color32::YELLOW,
+                    dashed: false,
+                }
+                .show(ui);
             }
-            .show(ui);
         }
         let ctx = ui
             .data(|map| map.get_temp::<ScanViewCtx>(Id::new(())))
