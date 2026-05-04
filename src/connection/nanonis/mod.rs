@@ -284,8 +284,11 @@ impl NanonisConnection {
         }
     }
     fn update_base_name(&mut self, scan_area: &mut ScanArea) {
-        if let Some(new_name) = self.base_name.read_new().as_deref().cloned() {
-            scan_area.stamp_name_base = new_name;
+        if let Some(new_name) = self.base_name.read_new().as_deref() {
+            let time = time::UtcDateTime::now();
+            let time = time::PrimitiveDateTime::new(time.date(), time.time());
+            let formatted = time_fmt::format::format_date_time(&new_name, time).unwrap();
+            scan_area.stamp_name_base = formatted;
         }
     }
     fn request_full_frame(tx: &OverwriteQueueSender<LineDir>) {
