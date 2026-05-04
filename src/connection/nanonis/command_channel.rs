@@ -13,7 +13,6 @@ pub fn command_channel<T, R>() -> (CommandChannelSender<T, R>, CommandChannelRec
     )
 }
 
-#[derive(Clone)]
 pub struct CommandChannelSender<T, R> {
     tx: crossbeam::channel::Sender<T>,
     rx: crossbeam::channel::Receiver<R>,
@@ -26,8 +25,12 @@ impl<T, R> CommandChannelSender<T, R> {
         self.rx.try_recv().ok()
     }
 }
+impl<T, R> Clone for CommandChannelSender<T, R>{
+    fn clone(&self) -> Self {
+        Self { tx: self.tx.clone(), rx: self.rx.clone() }
+    }
+}
 
-#[derive(Clone)]
 pub struct CommandChannelReciever<T, R> {
     tx: crossbeam::channel::Sender<R>,
     rx: crossbeam::channel::Receiver<T>,
@@ -38,5 +41,11 @@ impl<T, R> CommandChannelReciever<T, R> {
     }
     pub fn send_response(&self, resp: R) {
         self.tx.send(resp).unwrap()
+    }
+}
+
+impl<T, R> Clone for CommandChannelReciever<T, R>{
+    fn clone(&self) -> Self {
+        Self { tx: self.tx.clone(), rx: self.rx.clone() }
     }
 }

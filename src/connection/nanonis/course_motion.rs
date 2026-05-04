@@ -24,22 +24,32 @@ use crate::{
     view_object::Object,
 };
 
+// #[derive(Clone)]
+pub struct CourseMoveCommand {
+    pub steps: IVec2,
+    pub group: u32,
+    pub auto_withdraw: bool,
+    pub auto_approach: bool
+}
+
 pub struct CourseMotionState {
     menu_active: bool,
     move_target: DVec2,
     calib_matrix: DMat2,
     voltages: SharedState<DVec2>,
-    move_sender: CommandChannelSender<(IVec2, u32), ()>,
+    move_sender: CommandChannelSender<CourseMoveCommand, ()>,
     currently_moving: bool,
     group: u32,
     last_x_move: Option<(DVec2, IVec2)>,
     last_y_move: Option<(DVec2, IVec2)>,
     cfg_file: File,
+    auto_withdraw: bool,
+    auto_approach: bool
 }
 impl CourseMotionState {
     pub fn new(
         voltages: &SharedState<DVec2>,
-        move_sender: &CommandChannelSender<(IVec2, u32), ()>,
+        move_sender: &CommandChannelSender<CourseMoveCommand, ()>,
     ) -> Self {
         let mut cfg_path = CONFIG_DIR.config_local_dir().to_path_buf();
         cfg_path.push("course_matrix.bin");
@@ -72,6 +82,8 @@ impl CourseMotionState {
             last_x_move: None,
             last_y_move: None,
             cfg_file,
+            auto_withdraw: true,
+            auto_approach: true
         }
     }
     pub fn show_menu(&mut self, ui: &mut Ui, object_list: &mut SelectableList<Object>) {
@@ -134,6 +146,9 @@ impl CourseMotionState {
                 ui.shrink_width_to_current();
                 self.write_steps(steps);
                 ui.add_space(12.);
+                ui.checkbox(&mut self.auto_withdraw, "Auto withdraw");
+                ui.checkbox(&mut self.auto_approach, "Auto approach");
+                ui.add_space(12.);
                 let mut button_rect = ui.cursor();
                 button_rect.set_height(32.);
                 button_rect = button_rect.scale_from_center2(Vec2::new(0.5, 1.));
@@ -148,7 +163,12 @@ impl CourseMotionState {
                     {
                         info!("Executing course move {steps:?} on group {}", self.group);
                         self.currently_moving = true;
-                        self.move_sender.send((steps, self.group - 1));
+                        self.move_sender.send(CourseMoveCommand {
+                            steps,
+                            group: self.group - 1,
+                            auto_withdraw: self.auto_withdraw,
+                            auto_approach: self.auto_approach
+                        });
                     }
                     if self.currently_moving {
                         ui.spinner();

@@ -19,8 +19,8 @@ use tracing::debug;
 
 use crate::connection::{
     nanonis::{
-        channel_state::ChannelState, command_channel::CommandChannelReciever, worker::Worker,
-        ScanStatus,
+        channel_state::ChannelState, command_channel::CommandChannelReciever,
+        course_motion::CourseMoveCommand, worker::Worker, ScanStatus,
     },
     shared_state::SharedState,
 };
@@ -34,7 +34,7 @@ pub struct SlowStatusWorker {
     scan_status: SharedState<ScanStatus>,
     base_name: SharedState<String>,
     course_voltages: SharedState<DVec2>,
-    course_reciever: CommandChannelReciever<(IVec2, u32), ()>,
+    course_reciever: CommandChannelReciever<CourseMoveCommand, ()>,
     init: Arc<AtomicBool>,
 }
 impl SlowStatusWorker {
@@ -45,7 +45,7 @@ impl SlowStatusWorker {
         scan_status: &SharedState<ScanStatus>,
         base_name: &SharedState<String>,
         course_voltages: &SharedState<DVec2>,
-        course_reciever: &CommandChannelReciever<(IVec2, u32), ()>,
+        course_reciever: &CommandChannelReciever<CourseMoveCommand, ()>,
         init: &Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -60,7 +60,13 @@ impl SlowStatusWorker {
         }
     }
     fn execute_course_move(&mut self, conn: &mut NanonisTcp) -> NanonisTcpResult<()> {
-        if let Some((steps, group)) = self.course_reciever.try_recv() {
+        if let Some(CourseMoveCommand {
+            steps,
+            group,
+            auto_withdraw,
+            auto_approach
+        }) = self.course_reciever.try_recv()
+        {
             let args = move_args_from_steps(steps);
             debug!("Executing {args:?} on group index {group}");
             let result = if DEBUG_COURSE {
@@ -68,11 +74,17 @@ impl SlowStatusWorker {
                 Ok(())
             } else {
                 || -> NanonisTcpResult<()> {
+                    if auto_withdraw {
+                        conn.zctrl_withdraw(true, None)?;
+                    }
                     if let Some((dir, steps)) = args[0] {
                         conn.motor_start_move(dir, steps, group, true)?;
                     }
                     if let Some((dir, steps)) = args[1] {
                         conn.motor_start_move(dir, steps, group, true)?;
+                    }
+                    if auto_approach {
+                        conn.zctrl_onoffset(true)?;
                     }
                     Ok(())
                 }()
@@ -158,21 +170,33 @@ impl SlowStatusWorker {
 }
 impl Worker for SlowStatusWorker {
     fn work(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
-        self.update_area_transform(conn).context("failed update_area_transform")?;
-        self.update_scan_status(conn).context("failed update_scan_status")?;
-        self.update_channel_opts(conn).context("failed update_channel_opts")?;
-        self.update_base_name(conn).context("failed update_base_name")?;
-        self.update_course_voltages(conn).context("failed update_course_voltages")?;
-        self.execute_course_move(conn).context("failed execute_course_move")?;
+        self.update_area_transform(conn)
+            .context("failed update_area_transform")?;
+        self.update_scan_status(conn)
+            .context("failed update_scan_status")?;
+        self.update_channel_opts(conn)
+            .context("failed update_channel_opts")?;
+        self.update_base_name(conn)
+            .context("failed update_base_name")?;
+        self.update_course_voltages(conn)
+            .context("failed update_course_voltages")?;
+        self.execute_course_move(conn)
+            .context("failed execute_course_move")?;
         Ok(())
     }
     fn init(&mut self, conn: &mut NanonisTcp) -> eyre::Result<()> {
-        self.update_signal_names(conn).context("failed update_signal_names")?;
-        self.update_area_transform(conn).context("failed update_area_transform")?;
-        self.update_scan_status(conn).context("failed update_scan_status")?;
-        self.update_channel_opts(conn).context("failed update_channel_opts")?;
-        self.update_base_name(conn).context("failed update_base_name")?;
-        self.update_course_voltages(conn).context("failed update_course_voltages")?;
+        self.update_signal_names(conn)
+            .context("failed update_signal_names")?;
+        self.update_area_transform(conn)
+            .context("failed update_area_transform")?;
+        self.update_scan_status(conn)
+            .context("failed update_scan_status")?;
+        self.update_channel_opts(conn)
+            .context("failed update_channel_opts")?;
+        self.update_base_name(conn)
+            .context("failed update_base_name")?;
+        self.update_course_voltages(conn)
+            .context("failed update_course_voltages")?;
         self.init.store(true, Ordering::SeqCst);
         Ok(())
     }
