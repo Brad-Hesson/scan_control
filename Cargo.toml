@@ -7,6 +7,9 @@ edition = "2021"
 incremental = true  # default, but set explicitly
 codegen-units = 256 # faster recompile, slower runtime
 
+[features]
+v5e = ["nanonis-tcp/v5e"]
+
 [dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 env_logger = "0.11"
