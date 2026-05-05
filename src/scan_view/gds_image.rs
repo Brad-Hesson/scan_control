@@ -1,8 +1,8 @@
 use core::f64;
-use std::{collections::BTreeMap, fmt::Debug, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 use eframe::egui_wgpu;
-use egui::{Color32, Id, Ui};
+use egui::{Color32, DragValue, Id, Ui};
 use gdsr::{Cell, Element, Library};
 use glam::{DAffine2, DVec2, Vec2};
 use image_compute::gds_image::GDSImageBuffers;
@@ -125,7 +125,21 @@ impl GDSImage {
             ui.painter().add(callback);
         }
     }
-    pub fn show_menu(&mut self, ui: &mut Ui) {}
+    pub fn show_menu(&mut self, ui: &mut Ui) {
+        let (scale, angle, tran) = self.transform.to_scale_angle_translation();
+        let mut scalar = scale.x;
+        ui.horizontal(|ui| {
+            ui.label("Scale multiplier: ");
+            ui.add(
+                DragValue::new(&mut scalar)
+                    .range(0.5..=2.0)
+                    .speed(0.001)
+                    .min_decimals(3),
+            )
+        });
+        self.transform =
+            DAffine2::from_scale_angle_translation(DVec2::new(scalar, scalar), angle, tran);
+    }
 }
 
 fn draw_cell(

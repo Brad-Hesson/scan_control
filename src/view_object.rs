@@ -176,7 +176,7 @@ impl Object {
     pub fn goto_transform(&self) -> DAffine2 {
         match self {
             Object::Gds { image, .. } => DAffine2::from_scale_angle_translation(
-                DVec2::splat(image.scale),
+                DVec2::splat(image.scale) * image.transform.to_scale_angle_translation().0.x,
                 0.,
                 image.transform.translation,
             ),
