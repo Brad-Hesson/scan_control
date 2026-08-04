@@ -1,8 +1,9 @@
-use std::{env, fmt::Write};
+use std::{env, fmt::Write, path::PathBuf, process::Command};
 
-use wgsl_to_wgpu::{MatrixVectorTypes, WriteOptions, create_shader_module};
+use wgsl_to_wgpu::{create_shader_module, MatrixVectorTypes, WriteOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    compile_rust_shaders()?;
     generate_wgsl_bindings("plane_fit", "plane_fit", |_| {})?;
     // generate_wgsl_bindings("plane_fit", "plane_fit_32", |src| {
     //     *src = src
@@ -13,6 +14,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
     generate_wgsl_bindings("file_image", "file_image", |_| {})?;
     generate_wgsl_bindings("border_line", "border_line", |_| {})?;
+    Ok(())
+}
+
+fn compile_rust_shaders() -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let builder_dir = manifest_dir.join("shader-builder");
+    let shader_dir = manifest_dir.join("shader");
+    let output =
+        PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is not set")?).join("hello_world.spv");
+    let helper_target = output.parent().unwrap().join("rust-gpu-builder-target");
+
+    println!("cargo:rerun-if-changed={}", shader_dir.display());
+    println!("cargo:rerun-if-changed={}", builder_dir.display());
+    println!("cargo:rerun-if-env-changed=RUST_GPU_TOOLCHAIN_BIN");
+
+    // On regular Linux and Windows installations, rustup's Cargo proxy reads
+    // the builder crate's rust-toolchain.toml and selects the required nightly.
+    // Nix instead supplies a real Cargo binary from the same pinned toolchain.
+    let nix_toolchain = env::var_os("RUST_GPU_TOOLCHAIN_BIN");
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(&builder_dir)
+        .args(["run", "--quiet", "--release", "--locked", "--target-dir"])
+        .arg(helper_target)
+        .arg("--")
+        .arg(&shader_dir)
+        .arg(&output);
+
+    // Nix supplies the pinned toolchain directly. On rustup-based Linux and
+    // Windows setups, the builder's local rust-toolchain.toml selects it.
+    if let Some(bin_dir) = nix_toolchain {
+        let mut paths = vec![PathBuf::from(bin_dir)];
+        paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
+        command.env("PATH", env::join_paths(paths)?);
+        command.arg("--nix-toolchain");
+    }
+
+    let status = command.status()?;
+    if !status.success() {
+        return Err(format!("rust-gpu shader build failed with {status}").into());
+    }
     Ok(())
 }
 

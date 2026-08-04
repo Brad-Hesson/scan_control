@@ -23,11 +23,14 @@
       };
       brad-utils = flakes.brad-utils.mkLib pkgs;
       fenix = flakes.fenix.packages.${system};
+      imageComputeNix = import ./crates/image-compute/rust-gpu.nix {
+        inherit fenix pkgs;
+      };
       crane = (flakes.crane.mkLib pkgs).overrideToolchain (fenix.combine [
         fenix.stable.defaultToolchain
         fenix.stable.rust-src
       ]);
-      runtimeDeps = with pkgs; [
+      runtimeDeps = imageComputeNix.runtimeDeps ++ (with pkgs; [
         udev
         alsa-lib
         vulkan-loader
@@ -39,8 +42,8 @@
         libXi
         libGL
         libGLU
-      ];
-      crateArgs = {
+      ]);
+      crateArgs = imageComputeNix.buildEnv // {
         src = ./.;
         strictDeps = true;
       };
@@ -61,15 +64,14 @@
       apps.default = (flakes.flake-utils.lib.mkApp { drv = crate; }) // {
         meta.description = "Control software for atomic stm lithography";
       };
-      devShell = crane.devShell {
+      devShell = crane.devShell (imageComputeNix.buildEnv // {
         inputsFrom = [ crate ];
         packages = [ pkgs.renderdoc ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
         shellHook = ''
           ${brad-utils.vscodeSettingsHook {"wgsl-analyzer.server.path" =  "${wgsl-analyzer}/bin/wgsl-analyzer";}}
         '';
-      };
+      });
     }
   );
 }
-
