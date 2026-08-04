@@ -1,3 +1,10 @@
+pub(crate) use image_compute_shader::HelloWorldOutput;
+
+const _: () = assert!(
+    std::mem::size_of::<HelloWorldOutput>() == std::mem::size_of::<u32>(),
+    "hello_world output must remain one u32"
+);
+
 pub mod plane_fit {
     #![allow(dead_code, non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/plane_fit.rs"));
@@ -17,6 +24,7 @@ pub mod border_line {
 }
 /// A minimal rust-gpu compute shader, compiled to SPIR-V by `build.rs`.
 ///
-/// The entry point is `hello_world`. It writes the one-based invocation index
-/// into binding 0. Dispatch no more invocations than the buffer has elements.
+/// The entry point is `hello_world`. It writes one [`HelloWorldOutput`] per
+/// invocation into binding 0. Dispatch no more invocations than the buffer has
+/// elements.
 pub const HELLO_WORLD_SPIRV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/hello_world.spv"));

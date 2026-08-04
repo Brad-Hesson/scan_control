@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-# Keep this crate on its own lockfile and toolchain despite being nested inside
-# the repository's Cargo workspace.
-[workspace]
+# Direct commands run from this directory use the pinned rust-toolchain.toml.
+# The nightly-only shader builder remains in its own nested workspace.
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_arch, values("spirv"))'] }
 
 [dependencies]
 spirv-std = "=0.10.0-alpha.1"
@@ -17,4 +19,5 @@ spirv-std = "=0.10.0-alpha.1"
 glam = { version = "=0.32.1", default-features = false, features = ["libm"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
+bytemuck = { version = "1.20", features = ["derive"] }
 glam = "=0.32.1"

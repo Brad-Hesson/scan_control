@@ -65,6 +65,7 @@ pollster = "0.4.0"
 members = [
     "crates/sxmfile",
     "crates/image-compute",
+    "crates/image-compute/shader",
     "crates/notify-typed",
     "crates/filetree",
 ]

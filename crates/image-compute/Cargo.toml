@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+image-compute-shader = { path = "shader" }
 glam = {workspace = true, features = ["encase", "bytemuck"]}
 bytemuck.workspace = true
 itertools.workspace = true
