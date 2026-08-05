@@ -1,0 +1,11 @@
+[package]
+name = "spirv-to-wgpu"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rspirv-reflect = "0.9.0"
+prettyplease = "0.2"
+syn = { version = "2", features = ["full"] }
+thiserror = "2.0"

@@ -2,5 +2,3 @@
 /target
 /.envrc
 /.vscode
-/shader/target
-/shader-builder/target

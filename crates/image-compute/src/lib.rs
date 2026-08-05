@@ -77,6 +77,20 @@ mod tests {
         println!("{normalize:?}");
         Ok(())
     }
+
+    #[test]
+    fn generated_rust_gpu_bindings() -> Result<()> {
+        let (_instance, _adapter, device, queue) = init().context("Init failed")?;
+
+        let _scan_modules = crate::shaders::rust_gpu::scan_image::create_shader_modules(&device);
+        let _scan_layout = crate::shaders::rust_gpu::scan_image::create_pipeline_layout(&device);
+        let _hello_world =
+            crate::shaders::rust_gpu::hello_world::create_hello_world_pipeline(&device);
+        let _hello_world2 =
+            crate::shaders::rust_gpu::hello_world::create_hello_world2_pipeline(&device);
+        device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
+        Ok(())
+    }
     #[test]
     fn mean_timing() -> Result<()> {
         test_timing(|plane_fitter, device, pass, original| {

@@ -68,6 +68,8 @@ members = [
     "crates/image-compute/shader",
     "crates/notify-typed",
     "crates/filetree",
+    "crates/spirv-to-wgpu",
+    "crates/rust-gpu-compiler",
 ]
 
 [workspace.dependencies]

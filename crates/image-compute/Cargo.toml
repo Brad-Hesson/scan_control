@@ -20,6 +20,8 @@ num_enum.workspace = true
 
 [build-dependencies]
 wgsl_to_wgpu.workspace = true
+spirv-to-wgpu = { path = "../spirv-to-wgpu" }
+rust-gpu-compiler = { path = "../rust-gpu-compiler" }
 
 [dev-dependencies]
 wgpu = { workspace = true, features = ["wgsl", "dx12", "metal", "vulkan"] }

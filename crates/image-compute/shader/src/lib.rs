@@ -2,6 +2,8 @@
 
 use spirv_std::{glam::UVec3, spirv};
 
+pub mod scan_image;
+
 /// Output written by one invocation of [`hello_world`].
 ///
 /// This type is shared with the host crate, so its layout must remain compatible
@@ -24,8 +26,16 @@ impl HelloWorldOutput {
 /// Bind a writable [`HelloWorldOutput`] storage buffer at set 0, binding 0.
 /// Each invocation writes a recognizable value into its corresponding output
 /// element.
-#[spirv(compute(threads(64)))]
+#[spirv(compute(threads(32)))]
 pub fn hello_world(
+    #[spirv(global_invocation_id)] id: UVec3,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] output: &mut [HelloWorldOutput],
+) {
+    output[id.x as usize] = HelloWorldOutput::from_index(id.x);
+}
+
+#[spirv(compute(threads(32)))]
+pub fn hello_world2(
     #[spirv(global_invocation_id)] id: UVec3,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] output: &mut [HelloWorldOutput],
 ) {

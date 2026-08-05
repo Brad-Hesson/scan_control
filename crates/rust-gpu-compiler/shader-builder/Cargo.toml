@@ -1,0 +1,10 @@
+[package]
+name = "rust-gpu-compiler-driver"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+spirv-builder = "=0.10.0-alpha.1"
