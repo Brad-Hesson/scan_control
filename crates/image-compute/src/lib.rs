@@ -82,12 +82,11 @@ mod tests {
     fn generated_rust_gpu_bindings() -> Result<()> {
         let (_instance, _adapter, device, queue) = init().context("Init failed")?;
 
-        let _scan_modules = crate::shaders::rust_gpu::scan_image::create_shader_modules(&device);
-        let _scan_layout = crate::shaders::rust_gpu::scan_image::create_pipeline_layout(&device);
-        let _hello_world =
-            crate::shaders::rust_gpu::hello_world::create_hello_world_pipeline(&device);
-        let _hello_world2 =
-            crate::shaders::rust_gpu::hello_world::create_hello_world2_pipeline(&device);
+        let _scan_modules = crate::shaders::scan_image::create_shader_modules(&device);
+        let _scan_layout = crate::shaders::scan_image::create_pipeline_layout(&device);
+        let _file_layout = crate::shaders::file_image::create_pipeline_layout(&device);
+        let _border_layout = crate::shaders::border_line::create_pipeline_layout(&device);
+        let _compute = crate::shaders::plane_fit::create_copy_image_pipeline(&device);
         device.poll(PollType::WaitForSubmissionIndex(queue.submit([])))?;
         Ok(())
     }
@@ -200,7 +199,8 @@ mod tests {
             required_features: wgpu::Features {
                 features_wgpu: FeaturesWGPU::TIMESTAMP_QUERY_INSIDE_PASSES
                     | FeaturesWGPU::SHADER_F64
-                    | FeaturesWGPU::SHADER_INT64,
+                    | FeaturesWGPU::SHADER_INT64
+                    | FeaturesWGPU::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                 features_webgpu: FeaturesWebGPU::FLOAT32_FILTERABLE
                     | FeaturesWebGPU::TIMESTAMP_QUERY,
             },

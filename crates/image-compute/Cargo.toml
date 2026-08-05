@@ -10,7 +10,7 @@ bytemuck.workspace = true
 itertools.workspace = true
 thiserror = "2.0"
 tracing.workspace = true
-wgpu = { workspace = true, features = ["wgsl", "spirv"] }
+wgpu = { workspace = true, features = ["spirv"] }
 egui.workspace = true
 eframe = { workspace = true, features = ["wgpu"] }
 parking_lot = "0.12.5"
@@ -19,12 +19,11 @@ encase = "0.12"
 num_enum.workspace = true
 
 [build-dependencies]
-wgsl_to_wgpu.workspace = true
 spirv-to-wgpu = { path = "../spirv-to-wgpu" }
 rust-gpu-compiler = { path = "../rust-gpu-compiler" }
 
 [dev-dependencies]
-wgpu = { workspace = true, features = ["wgsl", "dx12", "metal", "vulkan"] }
+wgpu = { workspace = true, features = ["spirv", "dx12", "metal", "vulkan"] }
 eframe = { workspace = true, features = ["wgpu"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 eyre.workspace = true

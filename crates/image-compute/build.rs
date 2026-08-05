@@ -1,27 +1,16 @@
-use std::{env, fmt::Write, path::PathBuf};
+use std::{env, path::PathBuf};
 
 use rust_gpu_compiler::Artifacts;
 use spirv_to_wgpu::{Builder, EntryPointConfig, PipelineLayoutConfig};
-use wgsl_to_wgpu::{MatrixVectorTypes, WriteOptions, create_shader_module};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rust_gpu_modules = rust_gpu_compiler::Build::new("shader")
         .target("spirv-unknown-vulkan1.2")
         .capability("Float64")
         .capability("Sampled1D")
-        .multimodule(false)
+        .multimodule(true)
         .compile("image_compute")?;
     generate_rust_gpu_bindings(&rust_gpu_modules)?;
-    generate_wgsl_bindings("plane_fit", "plane_fit", |_| {})?;
-    // generate_wgsl_bindings("plane_fit", "plane_fit_32", |src| {
-    //     *src = src
-    //         .lines()
-    //         .map(|s| s.replace("f64", "f32"))
-    //         .fold(String::new(), |a, b| a + &b + "\n");
-    // })?;
-    generate_wgsl_bindings("scan_image", "scan_image", |_| {})?;
-    generate_wgsl_bindings("file_image", "file_image", |_| {})?;
-    generate_wgsl_bindings("border_line", "border_line", |_| {})?;
     Ok(())
 }
 
@@ -45,72 +34,84 @@ fn generate_rust_gpu_bindings(artifacts: &Artifacts) -> Result<(), Box<dyn std::
         binding_overrides: &[],
     };
 
-    let hello_world = artifacts.entry_point("hello_world")?;
-    let hello_world2 = artifacts.entry_point("hello_world2")?;
-    let compute = PipelineLayoutConfig {
-        rust_module_name: "hello_world",
+    let file_vs = artifacts.entry_point("file_image::vs_main")?;
+    let file_fs = artifacts.entry_point("file_image::fs_main")?;
+    let file = PipelineLayoutConfig {
+        rust_module_name: "file_image",
         entry_points: &[
             EntryPointConfig {
-                spirv_name: hello_world.entry_point,
-                spirv_path: hello_world.path,
-                rust_name: "hello_world",
+                spirv_name: file_vs.entry_point,
+                spirv_path: file_vs.path,
+                rust_name: "vs_main",
             },
             EntryPointConfig {
-                spirv_name: hello_world2.entry_point,
-                spirv_path: hello_world2.path,
-                rust_name: "hello_world2",
+                spirv_name: file_fs.entry_point,
+                spirv_path: file_fs.path,
+                rust_name: "fs_main",
+            },
+        ],
+        binding_overrides: &[],
+    };
+    let border_vs = artifacts.entry_point("border_line::vs_main")?;
+    let border_fs = artifacts.entry_point("border_line::fs_main")?;
+    let border = PipelineLayoutConfig {
+        rust_module_name: "border_line",
+        entry_points: &[
+            EntryPointConfig {
+                spirv_name: border_vs.entry_point,
+                spirv_path: border_vs.path,
+                rust_name: "vs_main",
+            },
+            EntryPointConfig {
+                spirv_name: border_fs.entry_point,
+                spirv_path: border_fs.path,
+                rust_name: "fs_main",
             },
         ],
         binding_overrides: &[],
     };
 
+    let plane_names = [
+        "copy_image",
+        "copy_image_transpose",
+        "reduce_image",
+        "reduce_image_lines",
+        "generate_sums_plane",
+        "generate_sums_lines",
+        "reduce_sums_plane",
+        "reduce_sums_lines",
+        "generate_normalization__mean_subtract",
+        "generate_normalization__plane_fit",
+        "generate_normalization__line_fit",
+        "generate_normalization__line_mean",
+        "reduce_normalizations",
+        "clear_texture",
+    ];
+    let plane_artifacts = plane_names
+        .iter()
+        .map(|name| artifacts.entry_point(&format!("plane_fit::{name}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let plane_entries = plane_names
+        .iter()
+        .zip(&plane_artifacts)
+        .map(|(name, artifact)| EntryPointConfig {
+            spirv_name: artifact.entry_point,
+            spirv_path: artifact.path,
+            rust_name: name,
+        })
+        .collect::<Vec<_>>();
+    let plane = PipelineLayoutConfig {
+        rust_module_name: "plane_fit",
+        entry_points: &plane_entries,
+        binding_overrides: &[],
+    };
+
     Builder::new()
         .pipeline_layout(scan)
-        .pipeline_layout(compute)
+        .pipeline_layout(file)
+        .pipeline_layout(border)
+        .pipeline_layout(plane)
         .generate()?
         .write_to_file(PathBuf::from(env::var("OUT_DIR")?).join("rust_gpu.rs"))?;
-    Ok(())
-}
-
-fn generate_wgsl_bindings(
-    src: &str,
-    output: &str,
-    preprocess: impl FnOnce(&mut String),
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=shaders/{src}.wgsl");
-    let wgsl_file = format!("shaders/{src}.wgsl");
-    let mut wgsl_source = std::fs::read_to_string(&wgsl_file)?;
-    preprocess(&mut wgsl_source);
-
-    std::fs::write(
-        format!("{}/{output}.wgsl", env::var("OUT_DIR")?),
-        wgsl_source.as_bytes(),
-    )?;
-
-    // Generate the Rust bindings and write to a file.
-    let mut text = String::new();
-    writeln!(&mut text, "// File automatically generated by build.rs.")?;
-    writeln!(&mut text, "// Changes made to this file will not be saved.")?;
-
-    text += &create_shader_module(
-        &wgsl_source,
-        &format!("{}/{output}.wgsl", env::var("OUT_DIR")?),
-        WriteOptions {
-            derive_bytemuck_vertex: true,
-            derive_encase_host_shareable: false,
-            matrix_vector_types: MatrixVectorTypes::Glam,
-            rustfmt: true,
-            validate: Some(Default::default()),
-            derive_bytemuck_host_shareable: true,
-            ..Default::default()
-        },
-    )
-    .inspect_err(|error| error.emit_to_stderr_with_path(&wgsl_source, &wgsl_file))
-    .map_err(|_| "Failed to validate shader")?;
-
-    std::fs::write(
-        format!("{}/{output}.rs", env::var("OUT_DIR")?),
-        text.as_bytes(),
-    )?;
     Ok(())
 }

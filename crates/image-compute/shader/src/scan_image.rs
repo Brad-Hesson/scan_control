@@ -27,7 +27,7 @@ pub struct Mat3x3F64 {
 
 impl Mat3x3F64 {
     #[inline]
-    fn mul_vec3(&self, rhs: DVec3) -> DVec3 {
+    pub(crate) fn mul_vec3(&self, rhs: DVec3) -> DVec3 {
         self.x_axis.truncate() * rhs.x
             + self.y_axis.truncate() * rhs.y
             + self.z_axis.truncate() * rhs.z

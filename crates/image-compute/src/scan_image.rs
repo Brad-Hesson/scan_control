@@ -16,6 +16,8 @@ pub struct ScanImageBuffers<const COLOR_MAP_SIZE: usize> {
     screen_transform_buffer: TransformBuffer,
     color_map_texture: ColorMapTexture<COLOR_MAP_SIZE>,
     pub bg: shaders::scan_image::bind_groups::BindGroup0,
+    pub(crate) file_bg: shaders::file_image::bind_groups::BindGroup0,
+    pub(crate) border_bg: shaders::border_line::bind_groups::BindGroup0,
 }
 
 impl<const COLOR_MAP_SIZE: usize> ScanImageBuffers<COLOR_MAP_SIZE> {
@@ -35,10 +37,25 @@ impl<const COLOR_MAP_SIZE: usize> ScanImageBuffers<COLOR_MAP_SIZE> {
                 color_map: &color_map_texture.create_view(),
             },
         );
+        let file_bg = shaders::file_image::bind_groups::BindGroup0::from_bindings(
+            device,
+            shaders::file_image::bind_groups::BindGroupLayout0 {
+                world2screen: screen_transform_buffer.as_entire_buffer_binding(),
+                tex_sampler: &sampler,
+            },
+        );
+        let border_bg = shaders::border_line::bind_groups::BindGroup0::from_bindings(
+            device,
+            shaders::border_line::bind_groups::BindGroupLayout0 {
+                world2screen: screen_transform_buffer.as_entire_buffer_binding(),
+            },
+        );
         Self {
             screen_transform_buffer,
             color_map_texture,
             bg,
+            file_bg,
+            border_bg,
         }
     }
     pub fn write_screen_transform(&self, queue: &Queue, transform: DAffine2) {
@@ -54,21 +71,18 @@ pub struct ScanImagePipeline {
 }
 impl ScanImagePipeline {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
-        let shader_module = shaders::scan_image::create_shader_module(device);
+        let modules = shaders::scan_image::create_shader_modules(device);
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             layout: Some(&shaders::scan_image::create_pipeline_layout(device)),
-            vertex: shaders::scan_image::vertex_state(
-                &shader_module,
-                &shaders::scan_image::vs_main_entry(),
-            ),
-            fragment: Some(shaders::scan_image::fragment_state(
-                &shader_module,
-                &shaders::scan_image::fs_main_entry([Some(ColorTargetState {
+            vertex: shaders::scan_image::vs_main_state(&modules.vs_main, &[]),
+            fragment: Some(shaders::scan_image::fs_main_state(
+                &modules.fs_main,
+                &[Some(ColorTargetState {
                     format: target_format,
                     blend: Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
-                })]),
+                })],
             )),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleStrip,

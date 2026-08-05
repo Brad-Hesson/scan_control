@@ -98,7 +98,8 @@ fn init_wgpu() -> eyre::Result<(Instance, Adapter, Device, Queue)> {
         required_features: wgpu::Features {
             features_wgpu: FeaturesWGPU::TIMESTAMP_QUERY_INSIDE_PASSES
                 | FeaturesWGPU::SHADER_INT64
-                | FeaturesWGPU::SHADER_F64,
+                | FeaturesWGPU::SHADER_F64
+                | FeaturesWGPU::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
             features_webgpu: FeaturesWebGPU::FLOAT32_FILTERABLE | FeaturesWebGPU::TIMESTAMP_QUERY,
         },
         ..Default::default()

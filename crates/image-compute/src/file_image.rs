@@ -63,21 +63,18 @@ pub struct FileImagePipeline {
 }
 impl FileImagePipeline {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
-        let shader_module = shaders::file_image::create_shader_module(device);
+        let modules = shaders::file_image::create_shader_modules(device);
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             layout: Some(&shaders::file_image::create_pipeline_layout(device)),
-            vertex: shaders::file_image::vertex_state(
-                &shader_module,
-                &shaders::file_image::vs_main_entry(),
-            ),
-            fragment: Some(shaders::file_image::fragment_state(
-                &shader_module,
-                &shaders::file_image::fs_main_entry([Some(ColorTargetState {
+            vertex: shaders::file_image::vs_main_state(&modules.vs_main, &[]),
+            fragment: Some(shaders::file_image::fs_main_state(
+                &modules.fs_main,
+                &[Some(ColorTargetState {
                     format: target_format,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
-                })]),
+                })],
             )),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleStrip,
@@ -101,7 +98,7 @@ impl FileImagePipeline {
         scan_image_buffers: &ScanImageBuffers<COLOR_MAP_SIZE>,
     ) {
         pass.set_pipeline(&self.pipeline);
-        scan_image_buffers.bg.set(pass);
+        scan_image_buffers.file_bg.set(pass);
         image_buffers.bg.set(pass);
         pass.draw(0..4, 0..1);
     }

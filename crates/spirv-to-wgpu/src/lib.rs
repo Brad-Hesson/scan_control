@@ -10,7 +10,7 @@ use rspirv_reflect::{
     BindingCount, DescriptorInfo, DescriptorType, Reflection,
     rspirv::{
         dr::{Instruction, Module, Operand},
-        spirv::{Decoration, Dim, ExecutionModel, Op},
+        spirv::{Decoration, Dim, ExecutionModel, ImageFormat, Op},
     },
 };
 use thiserror::Error;
@@ -59,6 +59,23 @@ enum BindingKind {
         dimension: TextureDimension,
         multisampled: bool,
     },
+    StorageTexture {
+        access: StorageTextureAccess,
+        dimension: TextureDimension,
+        format: StorageTextureFormat,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StorageTextureFormat {
+    R32Float,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StorageTextureAccess {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
 }
 
 /// Optional host-side choices that cannot always be recovered from SPIR-V.
@@ -68,7 +85,6 @@ pub struct BindingOverride {
     pub binding: u32,
     pub sampler_kind: Option<SamplerKind>,
     pub float_filterable: Option<bool>,
-    pub storage_read_only: Option<bool>,
     pub dynamic_offset: Option<bool>,
     pub min_binding_size: Option<u64>,
 }
@@ -251,8 +267,7 @@ fn generate_pipeline_layout(config: &PipelineLayoutConfig<'_>) -> Result<String,
                     infer_binding(&reflection.0, group, binding, &reflected, binding_override)?;
                 match bindings.get_mut(&(group, binding)) {
                     Some(existing) => {
-                        if existing.name != inferred.name
-                            || existing.kind != inferred.kind
+                        if existing.kind != inferred.kind
                             || existing.dynamic_offset != inferred.dynamic_offset
                             || existing.min_binding_size != inferred.min_binding_size
                             || existing.reflected.ty != reflected.ty
@@ -471,12 +486,11 @@ fn infer_binding(
     let kind = if reflected.ty == DescriptorType::UNIFORM_BUFFER {
         BindingKind::UniformBuffer
     } else if reflected.ty == DescriptorType::STORAGE_BUFFER {
-        let variable = find_resource_variable(module, group, binding)?;
+        let variable = find_resource_variable(module, group, binding, &reflected.name)?;
         let pointee = pointee_type(module, variable)?;
-        let read_only = binding_override.storage_read_only.unwrap_or_else(|| {
+        let read_only =
             has_decoration(module, variable.result_id.unwrap(), Decoration::NonWritable)
-                || has_decoration(module, pointee.result_id.unwrap(), Decoration::NonWritable)
-        });
+                || has_decoration(module, pointee.result_id.unwrap(), Decoration::NonWritable);
         BindingKind::StorageBuffer { read_only }
     } else if reflected.ty == DescriptorType::SAMPLER {
         BindingKind::Sampler(
@@ -485,7 +499,15 @@ fn infer_binding(
                 .unwrap_or(SamplerKind::Filtering),
         )
     } else if reflected.ty == DescriptorType::SAMPLED_IMAGE {
-        infer_sampled_image(module, group, binding, binding_override.float_filterable)?
+        infer_sampled_image(
+            module,
+            group,
+            binding,
+            &reflected.name,
+            binding_override.float_filterable,
+        )?
+    } else if reflected.ty == DescriptorType::STORAGE_IMAGE {
+        infer_storage_image(module, group, binding, &reflected.name)?
     } else {
         return Err(binding_inference(
             group,
@@ -500,8 +522,7 @@ fn infer_binding(
     );
     if !is_buffer
         && (binding_override.dynamic_offset.is_some()
-            || binding_override.min_binding_size.is_some()
-            || binding_override.storage_read_only.is_some())
+            || binding_override.min_binding_size.is_some())
     {
         return Err(binding_inference(
             group,
@@ -534,13 +555,85 @@ fn infer_binding(
     })
 }
 
+fn infer_storage_image(
+    module: &Module,
+    group: u32,
+    binding: u32,
+    name: &str,
+) -> Result<BindingKind, GenerateError> {
+    let variable = find_resource_variable(module, group, binding, name)?;
+    let image = pointee_type(module, variable)?;
+    let [
+        _,
+        Operand::Dim(dim),
+        _,
+        Operand::LiteralBit32(arrayed),
+        _,
+        _,
+        Operand::ImageFormat(format),
+        ..,
+    ] = image.operands.as_slice()
+    else {
+        return Err(binding_inference(
+            group,
+            binding,
+            format!("malformed storage OpTypeImage: {:?}", image.operands),
+        ));
+    };
+    let dimension = match (*dim, *arrayed != 0) {
+        (Dim::Dim1D, false) => TextureDimension::D1,
+        (Dim::Dim2D, false) => TextureDimension::D2,
+        (Dim::Dim2D, true) => TextureDimension::D2Array,
+        (Dim::Dim3D, false) => TextureDimension::D3,
+        _ => {
+            return Err(binding_inference(
+                group,
+                binding,
+                "unsupported storage texture dimension",
+            ));
+        }
+    };
+    let format = match format {
+        ImageFormat::R32f => StorageTextureFormat::R32Float,
+        other => {
+            return Err(binding_inference(
+                group,
+                binding,
+                format!("unsupported storage texture format {other:?}"),
+            ));
+        }
+    };
+    let id = variable.result_id.unwrap();
+    let access = match (
+        has_decoration(module, id, Decoration::NonReadable),
+        has_decoration(module, id, Decoration::NonWritable),
+    ) {
+        (true, false) => StorageTextureAccess::WriteOnly,
+        (false, true) => StorageTextureAccess::ReadOnly,
+        (false, false) => StorageTextureAccess::ReadWrite,
+        (true, true) => {
+            return Err(binding_inference(
+                group,
+                binding,
+                "storage texture is neither readable nor writable",
+            ));
+        }
+    };
+    Ok(BindingKind::StorageTexture {
+        access,
+        dimension,
+        format,
+    })
+}
+
 fn infer_sampled_image(
     module: &Module,
     group: u32,
     binding: u32,
+    name: &str,
     float_filterable: Option<bool>,
 ) -> Result<BindingKind, GenerateError> {
-    let variable = find_resource_variable(module, group, binding)?;
+    let variable = find_resource_variable(module, group, binding, name)?;
     let image = pointee_type(module, variable)?;
     if image.class.opcode != Op::TypeImage {
         return Err(binding_inference(
@@ -606,11 +699,12 @@ fn infer_sampled_image(
     })
 }
 
-fn find_resource_variable(
-    module: &Module,
+fn find_resource_variable<'a>(
+    module: &'a Module,
     group: u32,
     binding: u32,
-) -> Result<&Instruction, GenerateError> {
+    name: &str,
+) -> Result<&'a Instruction, GenerateError> {
     module
         .types_global_values
         .iter()
@@ -619,6 +713,8 @@ fn find_resource_variable(
             let id = instruction.result_id.unwrap();
             decoration_literal(module, id, Decoration::DescriptorSet) == Some(group)
                 && decoration_literal(module, id, Decoration::Binding) == Some(binding)
+                && module.debug_names.iter().any(|debug| matches!(debug.operands.as_slice(),
+                    [Operand::IdRef(named), Operand::LiteralString(found)] if *named == id && found == name))
         })
         .ok_or_else(|| binding_inference(group, binding, "descriptor variable is missing"))
 }
@@ -804,7 +900,7 @@ fn emit_entries(output: &mut String, entries: &[ReflectedEntry<'_>]) {
         .unwrap();
         match entry.stage {
             ShaderStage::Vertex => {
-                writeln!(output, "pub fn {}_state(module: &wgpu::ShaderModule) -> wgpu::VertexState<'_> {{ wgpu::VertexState {{ module, entry_point: Some(ENTRY_{upper}), buffers: &[], compilation_options: Default::default() }} }}", entry.rust_name).unwrap();
+                writeln!(output, "pub fn {}_state<'a>(module: &'a wgpu::ShaderModule, buffers: &'a [wgpu::VertexBufferLayout<'a>]) -> wgpu::VertexState<'a> {{ wgpu::VertexState {{ module, entry_point: Some(ENTRY_{upper}), buffers, compilation_options: Default::default() }} }}", entry.rust_name).unwrap();
             }
             ShaderStage::Fragment => {
                 let n = entry.color_targets;
@@ -837,7 +933,7 @@ fn resource_field_type(kind: BindingKind) -> &'static str {
     match kind {
         BindingKind::UniformBuffer | BindingKind::StorageBuffer { .. } => "wgpu::BufferBinding<'a>",
         BindingKind::Sampler(_) => "&'a wgpu::Sampler",
-        BindingKind::Texture { .. } => "&'a wgpu::TextureView",
+        BindingKind::Texture { .. } | BindingKind::StorageTexture { .. } => "&'a wgpu::TextureView",
     }
 }
 
@@ -847,7 +943,7 @@ fn resource_code(name: &str, kind: BindingKind) -> String {
             format!("wgpu::BindingResource::Buffer(bindings.{name})")
         }
         BindingKind::Sampler(_) => format!("wgpu::BindingResource::Sampler(bindings.{name})"),
-        BindingKind::Texture { .. } => {
+        BindingKind::Texture { .. } | BindingKind::StorageTexture { .. } => {
             format!("wgpu::BindingResource::TextureView(bindings.{name})")
         }
     }
@@ -883,6 +979,22 @@ fn binding_type_code(binding: &ReflectedBinding) -> String {
             "wgpu::BindingType::Texture {{ sample_type: {}, view_dimension: wgpu::TextureViewDimension::{}, multisampled: {multisampled} }}",
             sample_type_code(sample_type),
             dimension_code(dimension)
+        ),
+        BindingKind::StorageTexture {
+            access,
+            dimension,
+            format,
+        } => format!(
+            "wgpu::BindingType::StorageTexture {{ access: wgpu::StorageTextureAccess::{}, format: wgpu::TextureFormat::{}, view_dimension: wgpu::TextureViewDimension::{} }}",
+            match access {
+                StorageTextureAccess::ReadOnly => "ReadOnly",
+                StorageTextureAccess::WriteOnly => "WriteOnly",
+                StorageTextureAccess::ReadWrite => "ReadWrite",
+            },
+            match format {
+                StorageTextureFormat::R32Float => "R32Float",
+            },
+            dimension_code(dimension),
         ),
     }
 }

@@ -11,7 +11,7 @@ use wgpu::{
 use crate::{
     buffers::{StorageBuffer, TransformBuffer},
     scan_image::ScanImageBuffers,
-    shaders::{self, border_line::VertexEntry},
+    shaders,
 };
 
 #[derive(Clone)]
@@ -57,7 +57,7 @@ impl GDSImageBuffers {
             device,
             Some("border_color_buffer"),
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            3,
+            4,
         );
         let transform_buffer = TransformBuffer::new(device);
         let bg = Arc::new(
@@ -97,7 +97,7 @@ pub struct GDSImagePipeline {
 }
 impl GDSImagePipeline {
     pub fn new(device: &Device, target_format: TextureFormat) -> Self {
-        let shader_module = shaders::border_line::create_shader_module(device);
+        let modules = shaders::border_line::create_shader_modules(device);
         let buffer_layout = VertexBufferLayout {
             array_stride: size_of::<glam::Vec2>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -110,21 +110,14 @@ impl GDSImagePipeline {
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             layout: Some(&shaders::border_line::create_pipeline_layout(device)),
-            vertex: shaders::border_line::vertex_state(
-                &shader_module,
-                &VertexEntry {
-                    entry_point: shaders::border_line::ENTRY_VS_MAIN,
-                    buffers: [buffer_layout],
-                    constants: vec![],
-                },
-            ),
-            fragment: Some(shaders::border_line::fragment_state(
-                &shader_module,
-                &shaders::border_line::fs_main_entry([Some(ColorTargetState {
+            vertex: shaders::border_line::vs_main_state(&modules.vs_main, &[buffer_layout]),
+            fragment: Some(shaders::border_line::fs_main_state(
+                &modules.fs_main,
+                &[Some(ColorTargetState {
                     format: target_format,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
-                })]),
+                })],
             )),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::LineStrip,
@@ -149,7 +142,7 @@ impl GDSImagePipeline {
         scan_image_buffers: &ScanImageBuffers<COLOR_MAP_SIZE>,
     ) {
         pass.set_pipeline(&self.pipeline);
-        scan_image_buffers.bg.set(pass);
+        scan_image_buffers.border_bg.set(pass);
         gds_buffers.bg.set(pass);
         pass.set_vertex_buffer(0, gds_buffers.vertex_buffer.buffer_ref().slice(..));
         pass.set_index_buffer(

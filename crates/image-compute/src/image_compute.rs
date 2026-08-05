@@ -4,8 +4,8 @@ use std::{
 };
 
 use glam::DAffine2;
+pub use image_compute_shader::scan_image::NormalizeData;
 use itertools::{Itertools, izip};
-pub use shaders::plane_fit::NormalizeData;
 use tracing::info;
 use wgpu::{
     BufferUsages, CommandEncoder, ComputePass, ComputePipeline, Device, Extent3d, QuerySet,
@@ -17,8 +17,9 @@ use wgpu::{
 
 use crate::{
     buffers::{BufferOpError, StorageBuffer, TransformBuffer, Unalign},
-    shaders::{self, scan_image::NormalizeControl},
+    shaders,
 };
+use image_compute_shader::scan_image::NormalizeControl;
 
 #[derive(Debug, Clone, Copy)]
 pub enum NormalizationType {
@@ -53,8 +54,8 @@ pub struct ImageComputeBuffers {
     image_size_buffer: StorageBuffer<u32>,
     image_data_buffer: StorageBuffer<f32>,
     planarize_buffer: StorageBuffer<f32>,
-    normalize_buffer: StorageBuffer<shaders::plane_fit::NormalizeData>,
-    normalize_control_buffer: StorageBuffer<shaders::scan_image::NormalizeControl>,
+    normalize_buffer: StorageBuffer<NormalizeData>,
+    normalize_control_buffer: StorageBuffer<NormalizeControl>,
     image_src_bg: Arc<shaders::plane_fit::bind_groups::BindGroup0>,
     normalize_bg: Arc<shaders::plane_fit::bind_groups::BindGroup1>,
     pub(crate) scan_image_bg: Arc<shaders::scan_image::bind_groups::BindGroup1>,
@@ -101,7 +102,7 @@ impl ImageComputeBuffers {
             BufferUsages::UNIFORM | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
             &[NormalizationType::StdDev(3.).into()],
         );
-        let normalize_buffer = StorageBuffer::<shaders::plane_fit::NormalizeData>::new_uninit(
+        let normalize_buffer = StorageBuffer::<NormalizeData>::new_uninit(
             device,
             Some("normalize_out"),
             BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::UNIFORM,
@@ -132,9 +133,9 @@ impl ImageComputeBuffers {
         let normalize_bg = Arc::new(shaders::plane_fit::bind_groups::BindGroup1::from_bindings(
             device,
             shaders::plane_fit::bind_groups::BindGroupLayout1 {
-                texture_out: &image_texture.create_view(&TextureViewDescriptor::default()),
+                texture: &image_texture.create_view(&TextureViewDescriptor::default()),
                 planarize_out: planarize_buffer.as_entire_buffer_binding(),
-                normalize_out: normalize_buffer.as_entire_buffer_binding(),
+                normalize: normalize_buffer.as_entire_buffer_binding(),
             },
         ));
         Self {
@@ -366,7 +367,7 @@ impl ScratchBuffers {
                     count: count_buf.as_entire_buffer_binding(),
                     mins: mins.as_entire_buffer_binding(),
                     maxs: maxs.as_entire_buffer_binding(),
-                    std_devs: std_devs.as_entire_buffer_binding(),
+                    devs: std_devs.as_entire_buffer_binding(),
                 },
             )),
             bg_3: Arc::new(shaders::plane_fit::bind_groups::BindGroup3::from_bindings(
@@ -417,45 +418,26 @@ impl ImageComputePipeline {
     pub fn new(device: &Device) -> Self {
         let n_timings = 8;
         Self {
-            copy_image: shaders::plane_fit::compute::create_copy_image_pipeline(device),
-            copy_image_transpose: shaders::plane_fit::compute::create_copy_image_transpose_pipeline(
+            copy_image: shaders::plane_fit::create_copy_image_pipeline(device),
+            copy_image_transpose: shaders::plane_fit::create_copy_image_transpose_pipeline(device),
+            generate_sums_plane: shaders::plane_fit::create_generate_sums_plane_pipeline(device),
+            generate_sums_lines: shaders::plane_fit::create_generate_sums_lines_pipeline(device),
+            reduce_image: shaders::plane_fit::create_reduce_image_pipeline(device),
+            reduce_image_lines: shaders::plane_fit::create_reduce_image_lines_pipeline(device),
+            reduce_sums_plane: shaders::plane_fit::create_reduce_sums_plane_pipeline(device),
+            reduce_sums_lines: shaders::plane_fit::create_reduce_sums_lines_pipeline(device),
+            reduce_normalizations: shaders::plane_fit::create_reduce_normalizations_pipeline(
                 device,
             ),
-            generate_sums_plane: shaders::plane_fit::compute::create_generate_sums_plane_pipeline(
-                device,
-            ),
-            generate_sums_lines: shaders::plane_fit::compute::create_generate_sums_lines_pipeline(
-                device,
-            ),
-            reduce_image: shaders::plane_fit::compute::create_reduce_image_pipeline(device),
-            reduce_image_lines: shaders::plane_fit::compute::create_reduce_image_lines_pipeline(
-                device,
-            ),
-            reduce_sums_plane: shaders::plane_fit::compute::create_reduce_sums_plane_pipeline(
-                device,
-            ),
-            reduce_sums_lines: shaders::plane_fit::compute::create_reduce_sums_lines_pipeline(
-                device,
-            ),
-            reduce_normalizations:
-                shaders::plane_fit::compute::create_reduce_normalizations_pipeline(device),
             generate_normalization__mean_subtract:
-                shaders::plane_fit::compute::create_generate_normalization__mean_subtract_pipeline(
-                    device,
-                ),
+                shaders::plane_fit::create_generate_normalization__mean_subtract_pipeline(device),
             generate_normalization__plane_fit:
-                shaders::plane_fit::compute::create_generate_normalization__plane_fit_pipeline(
-                    device,
-                ),
+                shaders::plane_fit::create_generate_normalization__plane_fit_pipeline(device),
             generate_normalization__line_fit:
-                shaders::plane_fit::compute::create_generate_normalization__line_fit_pipeline(
-                    device,
-                ),
+                shaders::plane_fit::create_generate_normalization__line_fit_pipeline(device),
             generate_normalization__line_mean:
-                shaders::plane_fit::compute::create_generate_normalization__line_mean_pipeline(
-                    device,
-                ),
-            clear_texture: shaders::plane_fit::compute::create_clear_texture_pipeline(device),
+                shaders::plane_fit::create_generate_normalization__line_mean_pipeline(device),
+            clear_texture: shaders::plane_fit::create_clear_texture_pipeline(device),
             qs: device.create_query_set(&QuerySetDescriptor {
                 label: Some("plane_fitter_qs"),
                 ty: QueryType::Timestamp,
@@ -766,7 +748,7 @@ impl ImageComputePipeline {
 
 fn dispatch_linear(pass: &mut ComputePass, size: [u32; 2]) {
     pass.dispatch_workgroups(
-        num_workgroups(size[0] * size[1], shaders::plane_fit::WGS),
+        num_workgroups(size[0] * size[1], image_compute_shader::plane_fit::WGS),
         1,
         1,
     );
@@ -775,7 +757,7 @@ fn dispatch_linear(pass: &mut ComputePass, size: [u32; 2]) {
 fn dispatch_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0] * size[1];
     while remaining_data > 1 {
-        let num_wgs = num_workgroups(remaining_data, shaders::plane_fit::WGS);
+        let num_wgs = num_workgroups(remaining_data, image_compute_shader::plane_fit::WGS);
         pass.dispatch_workgroups(num_wgs, 1, 1);
         remaining_data = num_wgs;
     }
@@ -783,9 +765,10 @@ fn dispatch_reduction(pass: &mut ComputePass, size: [u32; 2]) {
 
 fn dispatch_y_reduction(pass: &mut ComputePass, size: [u32; 2]) {
     let mut remaining_data = size[0];
-    let num_wgs_cols = num_workgroups(size[1], shaders::plane_fit::WGS_SQUARE);
+    let num_wgs_cols = num_workgroups(size[1], image_compute_shader::plane_fit::WGS_SQUARE);
     while remaining_data > 1 {
-        let num_wgs_rows = num_workgroups(remaining_data, shaders::plane_fit::WGS_SQUARE);
+        let num_wgs_rows =
+            num_workgroups(remaining_data, image_compute_shader::plane_fit::WGS_SQUARE);
         pass.dispatch_workgroups(num_wgs_cols, num_wgs_rows, 1);
         remaining_data = num_wgs_rows;
     }
